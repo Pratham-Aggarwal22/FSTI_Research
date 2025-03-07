@@ -33,7 +33,7 @@ async function connectToMongoDB() {
 
 // Middleware
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'Public')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'Views'));
 
