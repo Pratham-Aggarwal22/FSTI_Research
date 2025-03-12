@@ -96,8 +96,7 @@ function initApp() {
   updateDataPanel();
 }
 
-
-
+// Create the US map (state view). We later update fill colors based on percent access.
 // ... (keep existing variables and statesData)
 
 function createUSMap() {
@@ -127,7 +126,7 @@ function createUSMap() {
           .append('path')
           .attr('d', path)
           .attr('fill', (_, i) => d3.interpolateBlues(0.2 + (i / states.length) * 0.5))
-          .attr('stroke', '#6b7280') // Gray stroke for clarity
+          .attr('stroke', '#fff')
           .attr('stroke-width', 1)
           .attr('class', 'state')
           .attr('data-state-id', d => d.id)
@@ -135,7 +134,7 @@ function createUSMap() {
           .on('mouseover', function() {
             d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#f59e0b');
           })
-          .on('mouseout', function(d, i) {
+          .on('mouseout', function() {
             d3.select(this).transition().attr('fill', (_, i) => d3.interpolateBlues(0.2 + (i / states.length) * 0.5));
           });
 
@@ -146,9 +145,8 @@ function createUSMap() {
           .append('text')
           .attr('transform', d => `translate(${path.centroid(d)})`)
           .attr('text-anchor', 'middle')
-          .attr('font-size', '12px')
-          .attr('font-weight', '500')
-          .attr('fill', '#1f2937') // Dark text
+          .attr('font-size', '10px')
+          .attr('fill', '#fff')
           .text(d => statesData[d.id]?.name || '');
 
         mapContainer.appendChild(svg.node());
@@ -185,7 +183,7 @@ function createCountyMap(stateId) {
           .datum(stateFeature)
           .attr('d', path)
           .attr('fill', 'none')
-          .attr('stroke', '#6b7280')
+          .attr('stroke', '#fff')
           .attr('stroke-width', 2);
 
         const countiesGroup = svg.append('g')
@@ -195,7 +193,7 @@ function createCountyMap(stateId) {
           .append('path')
           .attr('d', path)
           .attr('fill', (_, i) => d3.interpolateGreens(0.2 + (i / counties.length) * 0.6))
-          .attr('stroke', '#6b7280')
+          .attr('stroke', '#fff')
           .attr('stroke-width', 0.5)
           .on('click', (event, d) => {
             openCountyDataModal(d.properties.name);
@@ -216,8 +214,8 @@ function createCountyMap(stateId) {
           .append('text')
           .attr('transform', d => `translate(${path.centroid(d)})`)
           .attr('text-anchor', 'middle')
-          .attr('font-size', '10px')
-          .attr('fill', '#1f2937')
+          .attr('font-size', '8px')
+          .attr('fill', '#fff')
           .text(d => d.properties.name);
 
         mapContainer.appendChild(svg.node());
@@ -229,76 +227,6 @@ function createCountyMap(stateId) {
   }, 300);
 }
 
-function updateDataPanel() {
-  const dataPanelContent = document.getElementById('dataPanelContent');
-  if (!selectedState) {
-    dataPanelContent.innerHTML = `
-      <h2>US Geographic Explorer</h2>
-      <p>Select a state to view detailed metrics and county data.</p>
-    `;
-    return;
-  }
-
-  const stateName = statesData[selectedState].name;
-  dataPanelContent.innerHTML = `
-    <h2>${stateName} Data</h2>
-    <div id="stateMetricsContainer"></div>
-    <div id="frequencyDistributionsContainer"></div>
-  `;
-  fetchStateData(selectedState);
-}
-
-// Ensure charts are visible
-function displayFrequencyDistributions(data) {
-  const container = document.getElementById('frequencyDistributionsContainer');
-  if (!container) return;
-  container.innerHTML = '<h3>Frequency Distributions</h3>';
-  stateCharts.forEach(chart => chart.destroy());
-  stateCharts = [];
-
-  Object.entries(data).forEach(([collectionName, stateData]) => {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'chart-wrapper';
-    wrapper.innerHTML = `<h4>${collectionName}</h4>`;
-    const canvas = document.createElement('canvas');
-    wrapper.appendChild(canvas);
-    container.appendChild(wrapper);
-
-    const chartData = Object.entries(stateData)
-      .filter(([key]) => key !== 'title' && key !== '_id')
-      .map(([key, value]) => ({
-        range: key,
-        count: typeof value === 'number' ? value : parseInt(value, 10) || 0
-      }))
-      .sort((a, b) => parseInt(a.range.match(/\d+/)?.[0] || '0') - parseInt(b.range.match(/\d+/)?.[0] || '0'));
-
-    const ctx = canvas.getContext('2d');
-    const chart = new Chart(canvas, {
-      type: 'bar',
-      data: {
-        labels: chartData.map(d => d.range),
-        datasets: [{
-          label: collectionName,
-          data: chartData.map(d => d.count),
-          backgroundColor: '#60a5fa',
-          borderColor: '#2563eb',
-          borderWidth: 1
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          y: { beginAtZero: true, title: { display: true, text: 'Frequency' } },
-          x: { title: { display: true, text: 'Range' } }
-        }
-      }
-    });
-    stateCharts.push(chart);
-  });
-}
-
-// ... (keep other functions)
 
 // Handle state click: update maps and fetch state data
 function handleStateClick(stateId) {
