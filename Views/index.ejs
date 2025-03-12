@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>US Geographic Explorer</title>
   <link rel="stylesheet" href="/css/styles.css">
-  <!-- D3, TopoJSON, and Chart.js libraries -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://d3js.org/topojson.v3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -21,7 +20,6 @@
         <h1 class="glow-text">US Geographic Explorer</h1>
         <div class="control-panel">
           <button id="homeButton" class="cosmic-btn">Home</button>
-          <button id="databaseInfoButton" class="cosmic-btn">Database</button>
           <button id="toggleSidebar" class="cosmic-btn">Toggle Data</button>
         </div>
       </div>
@@ -32,6 +30,7 @@
       <div class="map-section">
         <div id="mapTitle" class="map-title glow-text">United States</div>
         <div id="mapView" class="map-view"></div>
+        <div id="legend" class="map-legend"></div>
       </div>
 
       <!-- Collapsible Sidebar -->
@@ -39,67 +38,14 @@
         <div id="dataPanelContent" class="sidebar-content"></div>
       </aside>
     </main>
-
-    <!-- Database Info Modal -->
-    <div id="databaseInfoModal" class="cosmic-modal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2 class="glow-text">Database Connection</h2>
-          <span class="close-button">&times;</span>
-        </div>
-        <div class="modal-body">
-          <div class="info-card">
-            <h3 class="neon-text">MongoDB Connection</h3>
-            <p>Connected to MongoDB Atlas cluster:</p>
-            <div class="code-block">
-              <pre><code>const dbConfig = {
-  uri: "<%= process.env.MONGODB_URI.replace(/(.{10}).*(.{10})/, '$1********$2') %>",
-  dbName: "StateWiseComputation"
-};</code></pre>
-            </div>
-          </div>
-          <div class="info-card">
-            <h3 class="neon-text">Data Structure</h3>
-            <p>State-specific databases contain:</p>
-            <ul>
-              <li><strong>Averages</strong>: County metrics</li>
-              <li><strong>Frequency-*</strong>: Frequency distributions</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- County Data Modal -->
-    <div id="countyDataModal" class="cosmic-modal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2 class="glow-text">County Data</h2>
-          <span class="close-county-modal close-button">&times;</span>
-        </div>
-        <div class="modal-body" id="countyDataModalContent"></div>
-      </div>
-    </div>
   </div>
 
   <!-- Templates -->
   <template id="stateDataTemplate">
     <div class="state-data">
+      <button id="backButton" class="back-btn">← Back</button>
       <h2 id="stateName" class="neon-text"></h2>
-      <div class="metric-grid">
-        <div class="metric-card">
-          <span class="metric-label">Population</span>
-          <span id="statePopulation" class="metric-value"></span>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">Capital</span>
-          <span id="stateCapital" class="metric-value"></span>
-        </div>
-      </div>
-      <div id="stateMetricsContainer">
-        <h3 class="neon-text">State Metrics</h3>
-        <div id="stateMetricsGrid" class="metric-grid"></div>
-      </div>
+      <div class="metric-grid" id="stateMetricsGrid"></div>
       <div id="frequencyDistributionsContainer">
         <h3 class="neon-text">Frequency Distributions</h3>
         <div id="chartsContainer"></div>
@@ -109,16 +55,12 @@
 
   <template id="countyDataTemplate">
     <div class="county-data">
+      <button id="backToStateButton" class="back-btn">← Back to State</button>
       <h2 id="countyName" class="neon-text"></h2>
-      <div class="metric-grid">
-        <div class="metric-card">
-          <span class="metric-label">Population</span>
-          <span id="countyPopulation" class="metric-value"></span>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">Area</span>
-          <span id="countyArea" class="metric-value"></span>
-        </div>
+      <div class="metric-grid" id="countyMetricsGrid"></div>
+      <div id="countyFrequencyContainer">
+        <h3 class="neon-text">Frequency Distributions</h3>
+        <div id="countyChartsContainer"></div>
       </div>
     </div>
   </template>
@@ -127,7 +69,6 @@
   <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
   <script src="/js/app.js"></script>
   <script>
-    // Particle Background
     particlesJS('particles-js', {
       particles: {
         number: { value: 80, density: { enable: true, value_area: 800 } },
@@ -142,11 +83,7 @@
       retina_detect: true
     });
 
-    // County Modal Close
     document.addEventListener('DOMContentLoaded', () => {
-      document.querySelector('.close-county-modal').addEventListener('click', () => {
-        document.getElementById('countyDataModal').style.display = 'none';
-      });
       document.getElementById('toggleSidebar').addEventListener('click', () => {
         document.getElementById('dataSidebar').classList.toggle('collapsed');
       });
