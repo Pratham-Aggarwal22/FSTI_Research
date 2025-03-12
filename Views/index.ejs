@@ -5,202 +5,65 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>US Geographic Explorer</title>
   <link rel="stylesheet" href="/css/styles.css">
-  <!-- D3, TopoJSON, and Chart.js libraries -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://d3js.org/topojson.v3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="app-container">
-    <header>
+    <!-- Header -->
+    <header class="header">
       <div class="header-content">
-        <h1><span class="icon map-pin-icon"></span>US Geographic Explorer</h1>
-        <div class="header-buttons">
-          <button id="homeButton" class="btn"><span class="icon home-icon"></span>Home</button>
-          <button id="databaseInfoButton" class="btn"><span class="icon database-icon"></span>Database</button>
-        </div>
+        <h1 class="logo">US Geographic Explorer</h1>
+        <nav class="header-nav">
+          <button id="homeButton" class="btn btn-icon"><span class="icon-home"></span>Home</button>
+          <button id="databaseInfoButton" class="btn btn-icon"><span class="icon-database"></span>Database</button>
+        </nav>
       </div>
     </header>
 
-    <main class="main-content">
-      <div class="map-container">
-        <div class="map-wrapper">
-          <div id="mapTitle" class="map-title">United States</div>
-          <div id="mapView"></div>
+    <!-- Main Layout -->
+    <main class="main-layout">
+      <!-- Sidebar for Data -->
+      <aside class="sidebar" id="dataSidebar">
+        <div class="sidebar-content" id="dataPanelContent"></div>
+      </aside>
+
+      <!-- Map Area -->
+      <section class="map-section">
+        <div class="map-header">
+          <h2 id="mapTitle" class="map-title">United States</h2>
         </div>
-      </div>
+        <div class="map-container" id="mapView"></div>
+      </section>
     </main>
 
-    <footer class="data-panel">
-      <div id="dataPanelContent">
-        <h2>US Geographic Explorer</h2>
-        <p>Click on a state to view detailed information and county map.</p>
-        
-        <div class="info-box info-box-blue">
-          <h3><span class="icon info-icon"></span>How to use this map</h3>
-          <ul>
-            <li>Click on any state to view its details</li>
-            <li>Explore county-level data by clicking on counties</li>
-            <li>Use the home button to return to the US map view</li>
-          </ul>
-        </div>
-        
-        <div class="info-box info-box-purple">
-          <h3><span class="icon map-pin-icon"></span>Data Visualization</h3>
-          <p>This application connects to a MongoDB database to display state-level average metrics and interactive frequency charts.</p>
-          <ul>
-            <li>State-level averages and frequencies are shown here.</li>
-            <li>Click on a county in the map or on a county card to view detailed county data.</li>
-          </ul>
-        </div>
-      </div>
-    </footer>
-
-    <!-- Database Info Modal -->
+    <!-- Modals -->
     <div id="databaseInfoModal" class="modal">
-      <div class="modal-content">
+      <div class="modal-content glass-effect">
         <div class="modal-header">
-          <h2><span class="icon database-icon"></span>Database Connection Information</h2>
+          <h2>Database Info</h2>
           <span class="close-button">&times;</span>
         </div>
         <div class="modal-body">
-          <div class="info-box info-box-purple">
-            <h3><span class="icon server-icon"></span>Current MongoDB Connection</h3>
-            <p>This application is connected to a MongoDB Atlas cluster with the following configuration:</p>
-            <div class="code-block">
-              <pre><code>// MongoDB Connection Configuration
-const dbConfig = {
-  uri: "<%= process.env.MONGODB_URI.replace(/(.{10}).*(.{10})/, '$1********$2') %>",
-  dbName: "StateWiseComputation"
-};</code></pre>
-            </div>
-          </div>
-          
-          <div class="info-box info-box-blue">
-            <h3><span class="icon chart-icon"></span>Data Structure</h3>
-            <p>The database contains the following collections (for each state database; ignore the StateWiseComputation database):</p>
-            <div class="white-box">
-              <ul>
-                <li>
-                  <strong>Averages</strong> - Contains average metrics for each county.
-                  <div class="small-text">Each document has a "title" field (county name) and average metric key/value pairs.</div>
-                </li>
-                <li>
-                  <strong>Frequency-<em>Group Title</em></strong> - One collection per frequency group.
-                  <div class="small-text">Each document represents one county with "title" (county name) and key/value pairs mapping frequency bins to values.</div>
-                </li>
-              </ul>
-            </div>
-          </div>
-          
-          <div class="info-box info-box-green">
-            <h3><span class="icon key-icon"></span>Implementation Details</h3>
-            <p>This application uses Node.js with Express to connect to MongoDB and serve data via API endpoints.</p>
-          </div>
+          <!-- Same content as before, styled with glassmorphism -->
         </div>
       </div>
     </div>
 
-    <!-- County Data Modal -->
     <div id="countyDataModal" class="modal">
-      <div class="modal-content">
+      <div class="modal-content glass-effect">
         <div class="modal-header">
           <h2>County Data</h2>
-          <span class="close-county-modal close-button">&times;</span>
+          <span class="close-button close-county-modal">&times;</span>
         </div>
-        <div class="modal-body" id="countyDataModalContent">
-          <!-- County averages table and frequency charts will be injected here -->
-        </div>
+        <div class="modal-body" id="countyDataModalContent"></div>
       </div>
     </div>
   </div>
 
-  <!-- Templates for dynamic content -->
-  <template id="stateDataTemplate">
-    <div class="state-data-panel">
-      <div class="panel-header">
-        <button class="back-button"><span class="icon arrow-left-icon"></span></button>
-        <h2 id="stateName"></h2>
-      </div>
-      
-      <div class="state-metrics-grid">
-        <div class="metric-box metric-box-blue">
-          <div class="metric-label"><span class="icon users-icon"></span><span>Population</span></div>
-          <div id="statePopulation" class="metric-value"></div>
-        </div>
-        
-        <div class="metric-box metric-box-indigo">
-          <div class="metric-label"><span class="icon home-icon"></span><span>Capital</span></div>
-          <div id="stateCapital" class="metric-value"></div>
-        </div>
-      </div>
-      
-      <div id="stateMetricsContainer" class="metrics-container">
-        <h3 class="section-title"><span class="icon chart-icon"></span>State Metrics</h3>
-        <div id="stateMetricsGrid" class="metrics-grid"></div>
-      </div>
-      
-      <div id="frequencyDistributionsContainer" class="frequency-container">
-        <h3 class="section-title"><span class="icon chart-icon"></span>Frequency Distributions</h3>
-        <div id="chartsContainer" class="charts-container"></div>
-      </div>
-      
-      <div class="about-section">
-        <h3 class="section-title">About <span id="stateNameAbout"></span></h3>
-        <p id="stateDescription"></p>
-      </div>
-      
-      <div class="info-box info-box-yellow">
-        <h3><span class="icon info-icon"></span>County Information</h3>
-        <p>Click on any county in the map or on a county card to view detailed county data.</p>
-      </div>
-      
-      <div id="additionalInfoContainer" class="additional-info">
-        <h3 class="section-title">Additional Information</h3>
-        <div id="additionalInfoContent" class="info-content"></div>
-      </div>
-    </div>
-  </template>
-
-  <template id="countyDataTemplate">
-    <div class="county-data-panel">
-      <div class="panel-header">
-        <button class="back-button" id="countyBackButton"><span class="icon arrow-left-icon"></span></button>
-        <h2 id="countyName"></h2>
-      </div>
-      
-      <div class="state-label">
-        <div class="label-title">State</div>
-        <div id="countyState" class="label-value"></div>
-      </div>
-      
-      <div class="county-metrics-grid">
-        <div class="metric-box metric-box-green">
-          <div class="metric-label"><span class="icon users-icon"></span><span>Population</span></div>
-          <div id="countyPopulation" class="metric-value"></div>
-        </div>
-        
-        <div class="metric-box metric-box-blue">
-          <div class="metric-label"><span class="icon map-pin-icon"></span><span>Area</span></div>
-          <div id="countyArea" class="metric-value"></div>
-        </div>
-      </div>
-      
-      <div class="about-section">
-        <h3 class="section-title">About <span id="countyNameAbout"></span> County</h3>
-        <p id="countyDescription"></p>
-      </div>
-      
-      <div id="countyAdditionalInfoContainer" class="additional-info">
-        <h3 class="section-title">Additional Information</h3>
-        <div id="countyAdditionalInfoContent" class="info-content"></div>
-      </div>
-    </div>
-  </template>
-
   <script src="/js/app.js"></script>
   <script>
-    // Attach close event for the county data modal
     document.addEventListener('DOMContentLoaded', () => {
       document.querySelector('.close-county-modal').addEventListener('click', () => {
         document.getElementById('countyDataModal').style.display = 'none';

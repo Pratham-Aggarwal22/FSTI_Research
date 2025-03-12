@@ -96,171 +96,134 @@ function initApp() {
   updateDataPanel();
 }
 
-// Create the US map (state view). We later update fill colors based on percent access.
+
+
 function createUSMap() {
   const mapContainer = document.getElementById('mapView');
-  mapContainer.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-  const width = mapContainer.clientWidth;
-  const height = mapContainer.clientHeight || 500;
-  
-  const svg = d3.create('svg')
-    .attr('width', width)
-    .attr('height', height)
-    .attr('viewBox', [0, 0, width, height])
-    .attr('style', 'width: 100%; height: 100%;');
-  
-  d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json')
-    .then(us => {
-      mapContainer.innerHTML = '';
-      const projection = d3.geoAlbersUsa().fitSize([width, height], topojson.feature(us, us.objects.states));
-      const path = d3.geoPath().projection(projection);
-      const states = topojson.feature(us, us.objects.states).features;
-      const statesGroup = svg.append('g');
-      
-      statesGroup.selectAll('path')
-        .data(states)
-        .enter()
-        .append('path')
-        .attr('d', path)
-        // Default fill; will be updated after state data is fetched
-        .attr('fill', (_, i) => d3.interpolateBlues(0.2 + (i / states.length) * 0.5))
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 0.5)
-        .attr('class', 'state')
-        .attr('data-state-id', d => d.id)
-        .on('click', (event, d) => {
-          handleStateClick(d.id);
-        })
-        .on('mouseover', function() {
-          d3.select(this).attr('cursor', 'pointer');
-        });
-      
-      statesGroup.selectAll('text')
-        .data(states)
-        .enter()
-        .append('text')
-        .attr('transform', d => {
-          const centroid = path.centroid(d);
-          return `translate(${centroid[0]},${centroid[1]})`;
-        })
-        .attr('text-anchor', 'middle')
-        .attr('font-size', '8px')
-        .attr('font-weight', 'bold')
-        .attr('fill', '#333')
-        .text(d => statesData[d.id] ? statesData[d.id].name : '')
-        .attr('pointer-events', 'none');
-      
-      mapContainer.appendChild(svg.node());
-      usMap = { svg, path, projection, states };
-      
-      // If state percent access data is already available, update colors.
-      if (Object.keys(statePercentAccess).length > 0) {
-        updateStateColors();
-      }
-    })
-    .catch(error => {
-      console.error('Error loading US map:', error);
-      mapContainer.innerHTML = `<div class="error">Error loading map data. Please try again later.</div>`;
-    });
-}
+  mapContainer.classList.add('fade-out');
+  setTimeout(() => {
+    mapContainer.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    const width = mapContainer.clientWidth;
+    const height = mapContainer.clientHeight || 600;
 
-// Update state map fill colors based on percent access
-function updateStateColors() {
-  const values = Object.values(statePercentAccess);
-  const min = d3.min(values);
-  const max = d3.max(values);
-  // Define a color scale from light green to dark green.
-  const colorScale = d3.scaleLinear()
-                       .domain([min, max])
-                       .range(["#edf8e9", "#238b45"]);
-  d3.selectAll(".state")
-    .transition()
-    .duration(500)
-    .attr("fill", function(d) {
-      const stateName = statesData[d.id].name;
-      const val = statePercentAccess[stateName];
-      return val !== undefined ? colorScale(val) : d3.interpolateBlues(0.2 + (Math.random()*0.3));
-    });
+    const svg = d3.create('svg')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('style', 'width: 100%; height: 100%;');
+
+    d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json')
+      .then(us => {
+        mapContainer.innerHTML = '';
+        const projection = d3.geoAlbersUsa().fitSize([width, height], topojson.feature(us, us.objects.states));
+        const path = d3.geoPath().projection(projection);
+        const states = topojson.feature(us, us.objects.states).features;
+
+        const statesGroup = svg.append('g')
+          .selectAll('path')
+          .data(states)
+          .enter()
+          .append('path')
+          .attr('d', path)
+          .attr('fill', (_, i) => d3.interpolateBlues(0.2 + (i / states.length) * 0.5))
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 1)
+          .attr('class', 'state')
+          .attr('data-state-id', d => d.id)
+          .on('click', (event, d) => handleStateClick(d.id))
+          .on('mouseover', function() {
+            d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#f59e0b');
+          })
+          .on('mouseout', function() {
+            d3.select(this).transition().attr('fill', (_, i) => d3.interpolateBlues(0.2 + (i / states.length) * 0.5));
+          });
+
+        svg.append('g')
+          .selectAll('text')
+          .data(states)
+          .enter()
+          .append('text')
+          .attr('transform', d => `translate(${path.centroid(d)})`)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '10px')
+          .attr('fill', '#fff')
+          .text(d => statesData[d.id]?.name || '');
+
+        mapContainer.appendChild(svg.node());
+        mapContainer.classList.remove('fade-out');
+        mapContainer.classList.add('fade-in');
+        usMap = { svg, path, projection, states };
+        if (Object.keys(statePercentAccess).length > 0) updateStateColors();
+      });
+  }, 300);
 }
 
 function createCountyMap(stateId) {
   const mapContainer = document.getElementById('mapView');
-  mapContainer.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-  const width = mapContainer.clientWidth;
-  const height = mapContainer.clientHeight || 500;
-  
-  const svg = d3.create('svg')
-    .attr('width', width)
-    .attr('height', height)
-    .attr('viewBox', [0, 0, width, height])
-    .attr('style', 'width: 100%; height: 100%;');
-  
-  d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json')
-    .then(us => {
-      mapContainer.innerHTML = '';
-      const counties = topojson.feature(us, us.objects.counties).features;
-      const states = topojson.feature(us, us.objects.states).features;
-      const stateCounties = counties.filter(county => county.id.toString().startsWith(stateId));
-      const selectedStateFeature = states.find(state => state.id === stateId);
-      
-      if (!selectedStateFeature || stateCounties.length === 0) {
-        mapContainer.innerHTML = `<div class="error">No county data available for this state.</div>`;
-        return;
-      }
-      
-      const projection = d3.geoAlbersUsa().fitSize([width, height], selectedStateFeature);
-      const path = d3.geoPath().projection(projection);
-      
-      svg.append('path')
-        .datum(selectedStateFeature)
-        .attr('d', path)
-        .attr('fill', 'none')
-        .attr('stroke', '#333')
-        .attr('stroke-width', 1.5);
-      
-      const countiesGroup = svg.append('g');
-      countiesGroup.selectAll('path')
-        .data(stateCounties)
-        .enter()
-        .append('path')
-        .attr('d', path)
-        .attr('fill', (_, i) => d3.interpolateGreens(0.2 + (i / stateCounties.length) * 0.6))
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 0.3)
-        .attr('class', 'county')
-        .attr('data-county-id', d => d.id)
-        .on('click', (event, d) => {
-          // Use the county name from properties (should be uppercase)
-          openCountyDataModal(d.properties.name);
-          countiesGroup.selectAll('path').attr('stroke-width', 0.3);
-          d3.select(event.currentTarget).attr('stroke-width', 2).attr('stroke', '#2C7A7B');
-        })
-        .on('mouseover', function() {
-          d3.select(this).attr('cursor', 'pointer');
-        });
-      
-      countiesGroup.selectAll('text')
-        .data(stateCounties)
-        .enter()
-        .append('text')
-        .attr('transform', d => {
-          const centroid = path.centroid(d);
-          return `translate(${centroid[0]},${centroid[1]})`;
-        })
-        .attr('text-anchor', 'middle')
-        .attr('font-size', '6px')
-        .attr('fill', '#333')
-        .text(d => d.properties.name)
-        .attr('pointer-events', 'none');
-      
-      mapContainer.appendChild(svg.node());
-      document.getElementById('mapTitle').textContent = `${statesData[stateId] ? statesData[stateId].name : 'Selected State'} Counties`;
-      countyMap = { svg, path, projection, counties: stateCounties };
-    })
-    .catch(error => {
-      console.error('Error loading county map:', error);
-      mapContainer.innerHTML = `<div class="error">Error loading county map data. Please try again later.</div>`;
-    });
+  mapContainer.classList.add('fade-out');
+  setTimeout(() => {
+    mapContainer.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    const width = mapContainer.clientWidth;
+    const height = mapContainer.clientHeight || 600;
+
+    const svg = d3.create('svg')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('style', 'width: 100%; height: 100%;');
+
+    d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json')
+      .then(us => {
+        mapContainer.innerHTML = '';
+        const counties = topojson.feature(us, us.objects.counties).features.filter(c => c.id.toString().startsWith(stateId));
+        const stateFeature = topojson.feature(us, us.objects.states).features.find(s => s.id === stateId);
+        const projection = d3.geoAlbersUsa().fitSize([width, height], stateFeature);
+        const path = d3.geoPath().projection(projection);
+
+        svg.append('path')
+          .datum(stateFeature)
+          .attr('d', path)
+          .attr('fill', 'none')
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 2);
+
+        const countiesGroup = svg.append('g')
+          .selectAll('path')
+          .data(counties)
+          .enter()
+          .append('path')
+          .attr('d', path)
+          .attr('fill', (_, i) => d3.interpolateGreens(0.2 + (i / counties.length) * 0.6))
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 0.5)
+          .on('click', (event, d) => {
+            openCountyDataModal(d.properties.name);
+            countiesGroup.selectAll('path').attr('stroke-width', 0.5);
+            d3.select(event.currentTarget).attr('stroke-width', 2).attr('stroke', '#f59e0b');
+          })
+          .on('mouseover', function() {
+            d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#f59e0b');
+          })
+          .on('mouseout', function() {
+            d3.select(this).transition().attr('fill', (_, i) => d3.interpolateGreens(0.2 + (i / counties.length) * 0.6));
+          });
+
+        svg.append('g')
+          .selectAll('text')
+          .data(counties)
+          .enter()
+          .append('text')
+          .attr('transform', d => `translate(${path.centroid(d)})`)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '8px')
+          .attr('fill', '#fff')
+          .text(d => d.properties.name);
+
+        mapContainer.appendChild(svg.node());
+        mapContainer.classList.remove('fade-out');
+        mapContainer.classList.add('fade-in');
+        document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
+        countyMap = { svg, path, projection, counties };
+      });
+  }, 300);
 }
 
 // Handle state click: update maps and fetch state data
