@@ -1,13 +1,13 @@
 /* public/css/styles.css */
 
 :root {
-  --cosmic-dark: #0a0f2b;
-  --cosmic-light: #1e2a5e;
-  --neon-blue: #00ddeb;
-  --neon-purple: #9b5de5;
-  --neon-yellow: #f5e050;
-  --glow-white: rgba(255, 255, 255, 0.8);
-  --shadow-glow: 0 0 15px rgba(0, 221, 235, 0.5);
+  --transit-dark: #1a2a44; /* Deep urban night */
+  --transit-accent: #f5e050; /* Neon yellow (traffic lights) */
+  --transit-green: #34c759; /* Go signal */
+  --transit-orange: #ff9500; /* Caution/road signs */
+  --transit-purple: #9b5de5; /* Creative transit routes */
+  --glow-white: rgba(255, 255, 255, 0.9);
+  --shadow-glow: 0 0 15px rgba(245, 224, 80, 0.5);
   --transition: all 0.4s ease;
   --border-radius: 12px;
 }
@@ -20,14 +20,13 @@
 
 body {
   font-family: 'Orbitron', sans-serif;
-  background: var(--cosmic-dark);
+  background: var(--transit-dark);
   color: var(--glow-white);
-  overflow: auto;
-  position: relative;
+  overflow: hidden; /* Prevent whole page scroll */
 }
 
-.cosmic-container {
-  min-height: 100vh;
+.transit-container {
+  height: 100vh;
   width: 100vw;
   display: flex;
   flex-direction: column;
@@ -42,8 +41,8 @@ body {
 }
 
 /* Header */
-.cosmic-header {
-  background: linear-gradient(90deg, var(--cosmic-light), var(--cosmic-dark));
+.transit-header {
+  background: linear-gradient(90deg, var(--transit-dark), #2a4066);
   padding: 1rem 2rem;
   box-shadow: var(--shadow-glow);
   z-index: 10;
@@ -63,7 +62,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 2px;
-  text-shadow: 0 0 10px var(--neon-blue);
+  text-shadow: 0 0 10px var(--transit-accent);
   animation: glowPulse 2s infinite;
 }
 
@@ -73,27 +72,27 @@ body {
 }
 
 /* Buttons */
-.cosmic-btn {
-  background: linear-gradient(45deg, var(--neon-blue), var(--neon-purple));
+.transit-btn {
+  background: linear-gradient(45deg, var(--transit-green), var(--transit-orange));
   border: none;
   padding: 0.75rem 1.5rem;
   border-radius: var(--border-radius);
-  color: white;
+  color: var(--transit-dark);
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition);
   box-shadow: var(--shadow-glow);
 }
 
-.cosmic-btn:hover {
+.transit-btn:hover {
   transform: scale(1.1) rotate(2deg);
-  box-shadow: 0 0 20px var(--neon-blue);
+  box-shadow: 0 0 20px var(--transit-accent);
 }
 
 .back-btn {
   background: none;
   border: none;
-  color: var(--neon-yellow);
+  color: var(--transit-accent);
   font-size: 1.2rem;
   cursor: pointer;
   margin-bottom: 1rem;
@@ -101,31 +100,29 @@ body {
 }
 
 .back-btn:hover {
-  color: var(--neon-blue);
+  color: var(--transit-green);
   transform: translateX(-5px);
 }
 
 /* Main Content */
-.cosmic-main {
+.transit-main {
   flex: 1;
   display: flex;
-  overflow: auto;
-  position: relative;
-  z-index: 5;
+  overflow: hidden; /* Contain scrolling to children */
 }
 
 .map-section {
   flex: 1;
   padding: 2rem;
   position: relative;
-  overflow: auto;
+  overflow: auto; /* Allow map scrolling if needed */
 }
 
 .map-title {
   font-size: 2rem;
   text-align: center;
   margin-bottom: 1rem;
-  color: var(--neon-yellow);
+  color: var(--transit-accent);
   animation: fadeIn 1s ease-in;
 }
 
@@ -134,31 +131,38 @@ body {
   width: 100%;
   background: rgba(255, 255, 255, 0.05);
   border-radius: var(--border-radius);
-  box-shadow: inset 0 0 20px rgba(0, 221, 235, 0.2);
-  overflow: visible;
+  box-shadow: inset 0 0 20px rgba(245, 224, 80, 0.2);
+  transition: transform 0.8s ease-out; /* For road zoom */
+}
+
+/* Road Zoom Transition */
+.map-view.zoom-to-county {
+  transform: scale(1.2) translateX(-10%);
+  opacity: 0;
 }
 
 /* Legend */
 .map-legend {
   margin-top: 1rem;
   padding: 1rem;
-  background: rgba(30, 42, 94, 0.9);
+  background: rgba(42, 64, 102, 0.9);
   border-radius: var(--border-radius);
-  color: var(--neon-yellow);
+  color: var(--transit-accent);
   font-size: 0.9rem;
 }
 
 /* Sidebar */
-.cosmic-sidebar {
+.transit-sidebar {
   width: 400px;
-  background: rgba(30, 42, 94, 0.9);
+  background: rgba(42, 64, 102, 0.9);
   padding: 2rem;
-  overflow-y: auto;
+  overflow-y: auto; /* Scroll only sidebar */
+  overflow-x: hidden;
   transition: var(--transition);
   box-shadow: -5px 0 15px rgba(0, 0, 0, 0.5);
 }
 
-.cosmic-sidebar.collapsed {
+.transit-sidebar.collapsed {
   width: 0;
   padding: 0;
   overflow: hidden;
@@ -169,7 +173,7 @@ body {
   transition: opacity 0.3s ease;
 }
 
-.cosmic-sidebar.collapsed .sidebar-content {
+.transit-sidebar.collapsed .sidebar-content {
   opacity: 0;
 }
 
@@ -181,8 +185,8 @@ body {
 .neon-text {
   font-size: 2rem;
   font-weight: 700;
-  color: var(--neon-yellow);
-  text-shadow: 0 0 8px var(--neon-yellow);
+  color: var(--transit-orange);
+  text-shadow: 0 0 8px var(--transit-orange);
   margin-bottom: 1.5rem;
 }
 
@@ -194,7 +198,7 @@ body {
 }
 
 .metric-card {
-  background: linear-gradient(135deg, rgba(0, 221, 235, 0.3), rgba(155, 93, 229, 0.3));
+  background: linear-gradient(135deg, rgba(52, 199, 89, 0.3), rgba(255, 149, 0, 0.3));
   padding: 1.5rem;
   border-radius: var(--border-radius);
   text-align: center;
@@ -208,14 +212,14 @@ body {
 
 .metric-label {
   font-size: 1.1rem;
-  color: var(--neon-blue);
+  color: var(--transit-purple);
   font-weight: 600;
 }
 
 .metric-value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--neon-yellow);
+  color: var(--transit-accent);
 }
 
 /* Charts */
@@ -238,8 +242,8 @@ body {
 
 /* Animations */
 @keyframes glowPulse {
-  0%, 100% { text-shadow: 0 0 10px var(--neon-blue); }
-  50% { text-shadow: 0 0 20px var(--neon-blue), 0 0 30px var(--neon-purple); }
+  0%, 100% { text-shadow: 0 0 10px var(--transit-accent); }
+  50% { text-shadow: 0 0 20px var(--transit-accent), 0 0 30px var(--transit-green); }
 }
 
 @keyframes fadeIn {
@@ -259,18 +263,18 @@ body {
 
 /* Responsive Design */
 @media (max-width: 1024px) {
-  .cosmic-sidebar { width: 300px; }
+  .transit-sidebar { width: 300px; }
   .glow-text { font-size: 2rem; }
 }
 
 @media (max-width: 768px) {
-  .cosmic-main { flex-direction: column; }
-  .cosmic-sidebar {
+  .transit-main { flex-direction: column; }
+  .transit-sidebar {
     width: 100%;
     height: 50vh;
     position: relative;
   }
-  .cosmic-sidebar.collapsed { height: 0; }
+  .transit-sidebar.collapsed { height: 0; }
   .map-section { padding: 1rem; }
   .map-view { height: 60vh; }
 }

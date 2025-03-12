@@ -3,30 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>US Geographic Explorer</title>
+  <title>Transit Accessibility Explorer</title>
   <link rel="stylesheet" href="/css/styles.css">
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://d3js.org/topojson.v3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <div class="cosmic-container">
+  <div class="transit-container">
     <!-- Particle Background -->
     <div id="particles-js"></div>
 
     <!-- Header -->
-    <header class="cosmic-header">
+    <header class="transit-header">
       <div class="header-content">
-        <h1 class="glow-text">US Geographic Explorer</h1>
+        <h1 class="glow-text">Transit Accessibility Explorer</h1>
         <div class="control-panel">
-          <button id="homeButton" class="cosmic-btn">Home</button>
-          <button id="toggleSidebar" class="cosmic-btn">Toggle Data</button>
+          <button id="homeButton" class="transit-btn">Home</button>
+          <button id="toggleSidebar" class="transit-btn">Toggle Data</button>
         </div>
       </div>
     </header>
 
     <!-- Main Content -->
-    <main class="cosmic-main">
+    <main class="transit-main">
       <div class="map-section">
         <div id="mapTitle" class="map-title glow-text">United States</div>
         <div id="mapView" class="map-view"></div>
@@ -34,7 +34,7 @@
       </div>
 
       <!-- Collapsible Sidebar -->
-      <aside id="dataSidebar" class="cosmic-sidebar">
+      <aside id="dataSidebar" class="transit-sidebar">
         <div id="dataPanelContent" class="sidebar-content"></div>
       </aside>
     </main>
@@ -72,12 +72,12 @@
     particlesJS('particles-js', {
       particles: {
         number: { value: 80, density: { enable: true, value_area: 800 } },
-        color: { value: '#ffffff' },
+        color: { value: '#f5e050' }, // Neon yellow for transit theme
         shape: { type: 'circle' },
         opacity: { value: 0.5, random: true },
         size: { value: 3, random: true },
         line_linked: { enable: false },
-        move: { enable: true, speed: 1, direction: 'none', random: true }
+        move: { enable: true, speed: 2, direction: 'none', random: true }
       },
       interactivity: { detect_on: 'canvas', events: { onhover: { enable: true, mode: 'repulse' } } },
       retina_detect: true
