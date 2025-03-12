@@ -1,7 +1,5 @@
 // public/js/app.js
 
-// Define statesData mapping (FIPS codes to state names)
-// Note: State names are in "Title Case" (first letter uppercase, rest lower)
 const statesData = {
   "01": { name: "Alabama" },
   "02": { name: "Alaska" },
@@ -56,20 +54,15 @@ const statesData = {
   "56": { name: "Wyoming" }
 };
 
-// Global variables
 let usMap = null;
 let countyMap = null;
 let selectedState = null;
 let selectedCounty = null;
 let activeView = 'state';
 let stateCharts = [];
-// Holds the state-level "Percent Access" values from the average metrics
 let statePercentAccess = {};
-// This global variable will hold the fetched county documents (from the Averages collection) for the current state.
 let currentStateAverages = null;
 
-// Helper function to format the state name for the database connection.
-// It converts spaces to underscores. For example, "New York" becomes "New_York".
 function formatStateNameForDb(name) {
   return name.replace(/\s+/g, '_');
 }
@@ -81,23 +74,17 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('.close-button').addEventListener('click', hideDatabaseInfo);
   window.addEventListener('click', (event) => {
     const modal = document.getElementById('databaseInfoModal');
-    if (event.target === modal) {
-      hideDatabaseInfo();
-    }
+    if (event.target === modal) hideDatabaseInfo();
   });
 });
 
 function initApp() {
-  // Start with the full US map view
   selectedState = null;
   selectedCounty = null;
   activeView = 'state';
   createUSMap();
   updateDataPanel();
 }
-
-// Create the US map (state view). We later update fill colors based on percent access.
-// ... (keep existing variables and statesData)
 
 function createUSMap() {
   const mapContainer = document.getElementById('mapView');
@@ -227,8 +214,6 @@ function createCountyMap(stateId) {
   }, 300);
 }
 
-
-// Handle state click: update maps and fetch state data
 function handleStateClick(stateId) {
   selectedState = stateId;
   selectedCounty = null;
@@ -238,15 +223,6 @@ function handleStateClick(stateId) {
   fetchStateData(stateId);
 }
 
-// In state view, clicking a county card or a county on the map opens the county modal.
-function handleCountyClick(countyName) {
-  openCountyDataModal(countyName);
-}
-
-// --- New Function: openCountyDataModal ---
-// This function calls a new API endpoint to fetch full county data (averages and frequencies)
-// from the state-specific database. It formats the state name (by replacing spaces with underscores)
-// and ensures the county name is uppercase.
 function openCountyDataModal(countyName) {
   const stateRaw = statesData[selectedState]?.name;
   if (!stateRaw) {
@@ -258,16 +234,14 @@ function openCountyDataModal(countyName) {
   
   fetch(`/api/countyFullData/${encodeURIComponent(stateNameForDb)}/${encodeURIComponent(countyNameForDb)}`)
     .then(response => {
-      if (!response.ok) {
-        throw new Error("HTTP error " + response.status);
-      }
+      if (!response.ok) throw new Error("HTTP error " + response.status);
       return response.json();
     })
     .then(data => {
       const modalContent = document.getElementById('countyDataModalContent');
       let html = '';
       if (data.averages && data.averages.title) {
-        html += `<h2>${data.averages.title} County Data</h2>`;
+        html += `<h2 class="neon-text">${data.averages.title} County Data</h2>`;
         html += `<h3>Averages</h3>`;
         html += `<table class="data-table">`;
         for (const key in data.averages) {
@@ -276,14 +250,12 @@ function openCountyDataModal(countyName) {
         }
         html += `</table>`;
       } else {
-        html += `<h2>${countyName} County Data</h2><p>No average data found.</p>`;
+        html += `<h2 class="neon-text">${countyName} County Data</h2><p>No average data found.</p>`;
       }
-      // Add a container for frequency charts
-      html += `<h3>Frequency Distributions</h3>`;
+      html += `<h3 class="neon-text">Frequency Distributions</h3>`;
       html += `<div id="countyChartsContainer"></div>`;
       modalContent.innerHTML = html;
       
-      // If frequency data exists, render charts
       if (data.frequencies && Object.keys(data.frequencies).length > 0) {
         displayCountyFrequencyCharts(data.frequencies);
       }
@@ -291,12 +263,11 @@ function openCountyDataModal(countyName) {
     })
     .catch(err => {
       console.error("Error in openCountyDataModal:", err);
-      document.getElementById('countyDataModalContent').innerHTML = `<h2>${countyName} County Data</h2><p>Error loading data.</p>`;
+      document.getElementById('countyDataModalContent').innerHTML = `<h2 class="neon-text">${countyName} County Data</h2><p>Error loading data.</p>`;
       document.getElementById('countyDataModal').style.display = 'block';
     });
 }
 
-// New function to render county frequency charts using Chart.js with gradient fills.
 function displayCountyFrequencyCharts(frequencies) {
   const container = document.getElementById('countyChartsContainer');
   if (!container) return;
@@ -333,7 +304,6 @@ function displayCountyFrequencyCharts(frequencies) {
     else if (collectionName.includes('Economic')) barColor = '#805AD5';
     
     const ctx = canvas.getContext("2d");
-    // Create a vertical gradient from the top (barColor) to bottom (white)
     let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, barColor);
     gradient.addColorStop(1, "#ffffff");
@@ -375,7 +345,6 @@ function displayCountyFrequencyCharts(frequencies) {
   }
 }
 
-// Handle back to state view (using Home button)
 function handleBackToStates() {
   selectedState = null;
   selectedCounty = null;
@@ -386,29 +355,23 @@ function handleBackToStates() {
   stateCharts = [];
 }
 
-// Update the data panel (footer) for state view only (state display remains unchanged)
 function updateDataPanel() {
   const dataPanelContent = document.getElementById('dataPanelContent');
   if (!selectedState) {
     dataPanelContent.innerHTML = `
-      <h2>US Geographic Explorer</h2>
-      <p>Click on a state to view detailed information and county map.</p>
-      <div class="info-box info-box-blue">
-        <h3><span class="icon info-icon"></span>How to use this map</h3>
+      <h2 class="neon-text">US Geographic Explorer</h2>
+      <p>Explore the cosmos of U.S. geographic data.</p>
+      <div class="info-card">
+        <h3 class="neon-text">How to Navigate</h3>
         <ul>
-          <li>Click on any state to view its details</li>
-          <li>Explore county-level data by clicking on counties</li>
-          <li>Use the home button to return to the US map view</li>
+          <li>Click a state to dive into its data</li>
+          <li>Explore counties within states</li>
+          <li>Return to the galaxy view with "Home"</li>
         </ul>
-      </div>
-      <div class="info-box info-box-purple">
-        <h3><span class="icon map-pin-icon"></span>Data Visualization</h3>
-        <p>This application connects to a MongoDB database to display state-level average metrics and interactive frequency charts.</p>
       </div>
     `;
     return;
   }
-  // For state view, use the existing state template (unchanged)
   const template = document.getElementById('stateDataTemplate');
   const statePanel = template.content.cloneNode(true);
   dataPanelContent.innerHTML = '';
@@ -421,26 +384,21 @@ function fetchStateData(stateId) {
   fetch(`/api/averageValues`)
     .then(response => response.json())
     .then(data => {
-      // Save statePercentAccess if the metric is found
       data.forEach(metric => {
         if (metric.title === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)") {
-          // Remove extra keys and store only state names and values.
           Object.keys(metric).forEach(key => {
-            if (key !== '_id' && key !== 'title') {
-              statePercentAccess[key] = metric[key];
-            }
+            if (key !== '_id' && key !== 'title') statePercentAccess[key] = metric[key];
           });
           updateStateColors();
         }
       });
-      // Store the fetched county documents (averages) for the current state
       currentStateAverages = data;
       displayStateMetrics(data, stateName);
     })
     .catch(error => {
       console.error('Error fetching average values:', error);
       const container = document.getElementById('stateMetricsContainer');
-      if (container) container.innerHTML = `<div class="error">Error loading state metrics. Please try again later.</div>`;
+      if (container) container.innerHTML = `<div class="error">Error loading state metrics.</div>`;
     });
   fetch(`/api/frequencyDistributions/${encodeURIComponent(stateName)}`)
     .then(response => response.json())
@@ -450,7 +408,7 @@ function fetchStateData(stateId) {
     .catch(error => {
       console.error('Error fetching frequency distributions:', error);
       const container = document.getElementById('frequencyDistributionsContainer');
-      if (container) container.innerHTML = `<div class="error">Error loading frequency distributions. Please try again later.</div>`;
+      if (container) container.innerHTML = `<div class="error">Error loading frequency distributions.</div>`;
     });
 }
 
@@ -462,26 +420,18 @@ function displayStateMetrics(data, stateName) {
   const metrics = [];
   data.forEach(metric => {
     if (metric[stateName] !== undefined) {
-      metrics.push({
-        title: metric.title,
-        value: metric[stateName]
-      });
+      metrics.push({ title: metric.title, value: metric[stateName] });
     }
   });
   if (metrics.length === 0) {
-    container.innerHTML = '<div class="info-message">No metrics available for this state.</div>';
+    container.innerHTML = '<div class="info-message">No metrics available.</div>';
     return;
   }
   metrics.forEach(metric => {
     const card = document.createElement('div');
     card.className = 'metric-card';
     const value = typeof metric.value === 'number' ? metric.value.toFixed(1) : metric.value;
-    card.innerHTML = `<h4>${metric.title}</h4><p>${value}</p>`;
-    // Make the card clickable to open the county data modal
-    card.style.cursor = 'pointer';
-    card.addEventListener('click', () => {
-      openCountyDataModal(metric.title);
-    });
+    card.innerHTML = `<span class="metric-label">${metric.title}</span><span class="metric-value">${value}</span>`;
     grid.appendChild(card);
   });
   container.style.display = 'block';
@@ -495,7 +445,7 @@ function displayFrequencyDistributions(data) {
   stateCharts.forEach(chart => chart.destroy());
   stateCharts = [];
   if (Object.keys(data).length === 0) {
-    container.innerHTML = '<div class="info-message">No frequency distributions available for this state.</div>';
+    container.innerHTML = '<div class="info-message">No frequency distributions available.</div>';
     return;
   }
   Object.entries(data).forEach(([collectionName, stateData]) => {
@@ -574,15 +524,14 @@ function displayFrequencyDistributions(data) {
   container.style.display = 'block';
 }
 
-// Show and hide the database info modal
 function showDatabaseInfo() {
   document.getElementById('databaseInfoModal').style.display = 'block';
 }
+
 function hideDatabaseInfo() {
   document.getElementById('databaseInfoModal').style.display = 'none';
 }
 
-// Handle window resize to re-render maps
 window.addEventListener('resize', () => {
   if (activeView === 'state' && usMap) {
     createUSMap();
@@ -590,3 +539,13 @@ window.addEventListener('resize', () => {
     createCountyMap(selectedState);
   }
 });
+
+function updateStateColors() {
+  if (!usMap) return;
+  usMap.svg.selectAll('.state')
+    .attr('fill', d => {
+      const stateName = statesData[d.id]?.name;
+      const value = statePercentAccess[stateName];
+      return value !== undefined ? d3.interpolateBlues(value / 100) : '#666';
+    });
+}
