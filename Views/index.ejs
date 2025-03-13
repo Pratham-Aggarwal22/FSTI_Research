@@ -4,52 +4,154 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Transit Accessibility Explorer</title>
-  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet">
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://d3js.org/topojson.v3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-box-and-violin-plot@3.8.0/dist/chart.boxplot.min.js"></script>
 </head>
-<body>
-  <div class="transit-container">
-    <!-- Header -->
-    <header class="transit-header">
-      <div class="header-content">
-        <h1>Transit Accessibility Explorer</h1>
-        <div class="control-panel">
-          <button id="homeButton" class="transit-btn">Home</button>
-          <button id="toggleSidebar" class="transit-btn">Toggle Data</button>
+<body class="bg-gray-50 font-roboto">
+  <nav class="bg-[#1A2B3C] text-white">
+    <div class="max-w-7xl mx-auto px-4 py-4">
+      <div class="flex justify-between items-center">
+        <span class="text-2xl font-bold flex items-center">
+          <i class="ri-train-line mr-2"></i>
+          Transit Accessibility Explorer
+        </span>
+        <div class="flex space-x-4">
+          <button id="homeButton" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-[#FF6B1A] transition-colors duration-200">Home</button>
+          <button id="toggleSidebar" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-[#FF6B1A] transition-colors duration-200">Toggle Data</button>
         </div>
       </div>
-    </header>
+    </div>
+  </nav>
 
-    <!-- Main Content -->
-    <main class="transit-main">
-      <div class="map-section">
-        <div id="mapTitle" class="map-title">United States</div>
-        <div id="mapView" class="map-view"></div>
-        <div id="legend" class="map-legend"></div>
-        <svg id="busAnimation" class="bus-animation" width="100" height="50" style="position: absolute; top: 50%; left: -100px; z-index: 10;">
-          <path d="M10 40 H90 V20 H30 L20 10 H10 Z" fill="#f1c40f" stroke="#2c3e50" stroke-width="2"/>
-          <circle cx="30" cy="40" r="5" fill="#2c3e50"/>
-          <circle cx="70" cy="40" r="5" fill="#2c3e50"/>
-        </svg>
+  <div class="flex h-[calc(100vh-4rem)]">
+    <!-- Left Panel: Filters and Visualizations -->
+    <div class="w-64 bg-white shadow-lg p-4 overflow-y-auto">
+      <div class="mb-6">
+        <h3 class="text-lg font-semibold mb-3">Filters</h3>
+        <div class="space-y-4">
+          <!-- Metric Filter for Map -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Metric</label>
+            <select id="metricFilter" class="w-full px-3 py-2 bg-white border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B1A]">
+              <option value="percentAccess">Percent Access</option>
+              <option value="travelDuration">Average Travel Duration</option>
+              <option value="waitTime">Average Wait Time</option>
+              <option value="transfers">Average Transfers</option>
+            </select>
+          </div>
+
+          <!-- Year Filter -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Year</label>
+            <select id="yearFilter" class="w-full px-3 py-2 bg-white border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B1A]">
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+              <option value="2023">2023</option>
+            </select>
+          </div>
+
+          <!-- Transit Type Filter -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Transit Type</label>
+            <div class="space-y-2">
+              <label class="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" class="form-checkbox text-[#FF6B1A]" name="transitType" value="bus" checked>
+                <span class="text-sm">Bus</span>
+              </label>
+              <label class="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" class="form-checkbox text-[#FF6B1A]" name="transitType" value="rail" checked>
+                <span class="text-sm">Rail</span>
+              </label>
+              <label class="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" class="form-checkbox text-[#FF6B1A]" name="transitType" value="combined" checked>
+                <span class="text-sm">Combined</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Accessibility Score Range -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Accessibility Score Range</label>
+            <div class="px-2">
+              <input type="range" id="scoreRange" min="0" max="100" value="50" class="w-full">
+              <div class="flex justify-between text-xs text-gray-500">
+                <span>0</span>
+                <span>50</span>
+                <span>100</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Collapsible Sidebar -->
-      <aside id="dataSidebar" class="transit-sidebar">
+      <!-- Visualizations -->
+      <div class="mt-6">
+        <h3 class="text-lg font-semibold mb-3">Visualizations</h3>
+        <div class="space-y-4">
+          <!-- Radar Chart -->
+          <div class="bg-gray-50 p-4 rounded-lg">
+            <h4 class="text-md font-medium mb-2">Metric Overview</h4>
+            <canvas id="radarChart" class="h-64"></canvas>
+          </div>
+
+          <!-- Scatter Plot Matrix -->
+          <div class="bg-gray-50 p-4 rounded-lg">
+            <h4 class="text-md font-medium mb-2">Metric Correlations</h4>
+            <canvas id="scatterMatrix" class="h-64"></canvas>
+          </div>
+
+          <!-- Box Plot -->
+          <div class="bg-gray-50 p-4 rounded-lg">
+            <h4 class="text-md font-medium mb-2">Frequency Distribution</h4>
+            <canvas id="boxPlot" class="h-64"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Panel: Map and Data -->
+    <div class="flex-1 flex">
+      <div class="flex-1 relative">
+        <div id="mapView" class="absolute inset-0 bg-[#f8fafc]"></div>
+        <div id="legend" class="absolute bottom-4 right-4 bg-white p-4 rounded-lg shadow-lg border border-gray-300">
+          <div class="text-sm font-medium mb-2">Legend</div>
+          <div class="space-y-2">
+            <div class="flex items-center">
+              <div class="w-4 h-4 bg-[#22c55e] rounded mr-2"></div>
+              <span class="text-sm">High Accessibility (80-100)</span>
+            </div>
+            <div class="flex items-center">
+              <div class="w-4 h-4 bg-[#eab308] rounded mr-2"></div>
+              <span class="text-sm">Medium Accessibility (40-79)</span>
+            </div>
+            <div class="flex items-center">
+              <div class="w-4 h-4 bg-[#ef4444] rounded mr-2"></div>
+              <span class="text-sm">Low Accessibility (0-39)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Sidebar -->
+      <aside id="dataSidebar" class="w-96 bg-white shadow-lg p-4 overflow-y-auto border-l border-gray-300 transition-all duration-300">
         <div id="dataPanelContent" class="sidebar-content"></div>
       </aside>
-    </main>
+    </div>
   </div>
 
   <!-- Templates -->
   <template id="stateDataTemplate">
     <div class="state-data">
-      <button id="backButton" class="back-btn">← Back</button>
-      <h2 id="stateName" class="section-title"></h2>
+      <button id="backButton" class="back-btn mb-4">← Back</button>
+      <h2 id="stateName" class="text-xl font-semibold text-[#1A2B3C] mb-4"></h2>
       <div class="metric-grid" id="stateMetricsGrid"></div>
       <div id="frequencyDistributionsContainer">
-        <h3 class="section-title">Frequency Distributions</h3>
+        <h3 class="text-lg font-semibold text-[#1A2B3C] mb-3">Frequency Distributions</h3>
         <div id="chartsContainer"></div>
       </div>
     </div>
@@ -57,11 +159,11 @@
 
   <template id="countyDataTemplate">
     <div class="county-data">
-      <button id="backToStateButton" class="back-btn">← Back to State</button>
-      <h2 id="countyName" class="section-title"></h2>
+      <button id="backToStateButton" class="back-btn mb-4">← Back to State</button>
+      <h2 id="countyName" class="text-xl font-semibold text-[#1A2B3C] mb-4"></h2>
       <div class="metric-grid" id="countyMetricsGrid"></div>
       <div id="countyFrequencyContainer">
-        <h3 class="section-title">Frequency Distributions</h3>
+        <h3 class="text-lg font-semibold text-[#1A2B3C] mb-3">Frequency Distributions</h3>
         <div id="countyChartsContainer"></div>
       </div>
     </div>
@@ -69,12 +171,5 @@
 
   <!-- Scripts -->
   <script src="/js/app.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('toggleSidebar').addEventListener('click', () => {
-        document.getElementById('dataSidebar').classList.toggle('collapsed');
-      });
-    });
-  </script>
 </body>
 </html>
