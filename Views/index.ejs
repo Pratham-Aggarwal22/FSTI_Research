@@ -11,9 +11,6 @@
 </head>
 <body>
   <div class="transit-container">
-    <!-- Particle Background -->
-    <div id="particles-js"></div>
-
     <!-- Header -->
     <header class="transit-header">
       <div class="header-content">
@@ -66,23 +63,8 @@
   </template>
 
   <!-- Scripts -->
-  <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
   <script src="/js/app.js"></script>
   <script>
-    particlesJS('particles-js', {
-      particles: {
-        number: { value: 80, density: { enable: true, value_area: 800 } },
-        color: { value: '#f5e050' },
-        shape: { type: 'circle' },
-        opacity: { value: 0.5, random: true },
-        size: { value: 3, random: true },
-        line_linked: { enable: false },
-        move: { enable: true, speed: 2, direction: 'none', random: true }
-      },
-      interactivity: { detect_on: 'canvas', events: { onhover: { enable: true, mode: 'repulse' } } },
-      retina_detect: true
-    });
-
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('toggleSidebar').addEventListener('click', () => {
         document.getElementById('dataSidebar').classList.toggle('collapsed');

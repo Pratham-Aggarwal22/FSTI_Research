@@ -1,13 +1,14 @@
 /* public/css/styles.css */
 
 :root {
-  --transit-dark: #1a2a44;
-  --transit-accent: #f5e050; /* Neon yellow */
-  --transit-green: #34c759; /* Go signal */
-  --transit-orange: #ff9500; /* Caution */
-  --transit-purple: #9b5de5; /* Routes */
+  --transit-bg: #e0e6ed; /* Light road gray */
+  --transit-yellow: #f5c518; /* Bus yellow */
+  --transit-green: #2ecc71; /* Go signal */
+  --transit-blue: #3498db; /* Sky/rail */
+  --transit-orange: #e67e22; /* Traffic cone */
+  --transit-dark: #2c3e50; /* Dark accent */
   --glow-white: rgba(255, 255, 255, 0.9);
-  --shadow-glow: 0 0 15px rgba(245, 224, 80, 0.5);
+  --shadow-glow: 0 0 15px rgba(245, 197, 24, 0.5);
   --transition: all 0.4s ease;
   --border-radius: 12px;
 }
@@ -20,8 +21,8 @@
 
 body {
   font-family: 'Orbitron', sans-serif;
-  background: var(--transit-dark);
-  color: var(--glow-white);
+  background: var(--transit-bg) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><path d="M0 50 H100 M50 0 V100" stroke="rgba(44, 62, 80, 0.2)" stroke-width="2" stroke-dasharray="5, 5"/></svg>') repeat;
+  color: var(--transit-dark);
   overflow: hidden;
 }
 
@@ -33,16 +34,9 @@ body {
   position: relative;
 }
 
-#particles-js {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-}
-
 /* Header */
 .transit-header {
-  background: linear-gradient(90deg, var(--transit-dark), #2a4066);
+  background: linear-gradient(90deg, var(--transit-blue), var(--transit-green));
   padding: 1rem 2rem;
   box-shadow: var(--shadow-glow);
   z-index: 10;
@@ -62,7 +56,8 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 2px;
-  text-shadow: 0 0 10px var(--transit-accent);
+  color: var(--transit-yellow);
+  text-shadow: 0 0 10px var(--transit-yellow);
   animation: glowPulse 2s infinite;
 }
 
@@ -73,7 +68,7 @@ body {
 
 /* Buttons */
 .transit-btn {
-  background: linear-gradient(45deg, var(--transit-green), var(--transit-orange));
+  background: linear-gradient(45deg, var(--transit-yellow), var(--transit-orange));
   border: none;
   padding: 0.75rem 1.5rem;
   border-radius: var(--border-radius);
@@ -86,13 +81,13 @@ body {
 
 .transit-btn:hover {
   transform: scale(1.1) rotate(2deg);
-  box-shadow: 0 0 20px var(--transit-accent);
+  box-shadow: 0 0 20px var(--transit-yellow);
 }
 
 .back-btn {
   background: none;
   border: none;
-  color: var(--transit-accent);
+  color: var(--transit-orange);
   font-size: 1.2rem;
   cursor: pointer;
   margin-bottom: 1rem;
@@ -123,16 +118,16 @@ body {
   font-size: 2rem;
   text-align: center;
   margin-bottom: 1rem;
-  color: var(--transit-accent);
+  color: var(--transit-blue);
   animation: fadeIn 1s ease-in;
 }
 
 .map-view {
   height: 80vh;
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.8);
   border-radius: var(--border-radius);
-  box-shadow: inset 0 0 20px rgba(245, 224, 80, 0.2);
+  box-shadow: inset 0 0 20px rgba(245, 197, 24, 0.2);
   position: relative;
   z-index: 5;
 }
@@ -154,21 +149,22 @@ body {
 .map-legend {
   margin-top: 1rem;
   padding: 1rem;
-  background: rgba(42, 64, 102, 0.9);
+  background: rgba(255, 255, 255, 0.9);
   border-radius: var(--border-radius);
-  color: var(--transit-accent);
+  color: var(--transit-dark);
   font-size: 0.9rem;
+  box-shadow: var(--shadow-glow);
 }
 
 /* Sidebar */
 .transit-sidebar {
   width: 400px;
-  background: rgba(42, 64, 102, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   padding: 2rem;
   overflow-y: auto;
   overflow-x: hidden;
   transition: var(--transition);
-  box-shadow: -5px 0 15px rgba(0, 0, 0, 0.5);
+  box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1);
   position: relative;
   z-index: 10;
 }
@@ -209,11 +205,12 @@ body {
 }
 
 .metric-card {
-  background: linear-gradient(135deg, rgba(52, 199, 89, 0.3), rgba(255, 149, 0, 0.3));
+  background: linear-gradient(135deg, var(--transit-yellow), var(--transit-green));
   padding: 1.5rem;
   border-radius: var(--border-radius);
   text-align: center;
   transition: var(--transition);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .metric-card:hover {
@@ -223,7 +220,7 @@ body {
 
 .metric-label {
   font-size: 1.2rem;
-  color: var(--transit-purple);
+  color: var(--transit-dark);
   font-weight: 600;
   display: block;
   margin-bottom: 0.5rem;
@@ -232,16 +229,17 @@ body {
 .metric-value {
   font-size: 1rem;
   font-weight: 400;
-  color: var(--transit-accent);
+  color: var(--transit-blue);
 }
 
 /* Charts */
 .chart-wrapper {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.9);
   padding: 1rem;
   border-radius: var(--border-radius);
   margin-bottom: 1.5rem;
   transition: var(--transition);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .chart-wrapper:hover {
@@ -255,8 +253,8 @@ body {
 
 /* Animations */
 @keyframes glowPulse {
-  0%, 100% { text-shadow: 0 0 10px var(--transit-accent); }
-  50% { text-shadow: 0 0 20px var(--transit-accent), 0 0 30px var(--transit-green); }
+  0%, 100% { text-shadow: 0 0 10px var(--transit-yellow); }
+  50% { text-shadow: 0 0 20px var(--transit-yellow), 0 0 30px var(--transit-green); }
 }
 
 @keyframes fadeIn {
