@@ -1,11 +1,11 @@
 /* public/css/styles.css */
 
 :root {
-  --transit-dark: #1a2a44; /* Deep urban night */
-  --transit-accent: #f5e050; /* Neon yellow (traffic lights) */
+  --transit-dark: #1a2a44;
+  --transit-accent: #f5e050; /* Neon yellow */
   --transit-green: #34c759; /* Go signal */
-  --transit-orange: #ff9500; /* Caution/road signs */
-  --transit-purple: #9b5de5; /* Creative transit routes */
+  --transit-orange: #ff9500; /* Caution */
+  --transit-purple: #9b5de5; /* Routes */
   --glow-white: rgba(255, 255, 255, 0.9);
   --shadow-glow: 0 0 15px rgba(245, 224, 80, 0.5);
   --transition: all 0.4s ease;
@@ -22,7 +22,7 @@ body {
   font-family: 'Orbitron', sans-serif;
   background: var(--transit-dark);
   color: var(--glow-white);
-  overflow: hidden; /* Prevent whole page scroll */
+  overflow: hidden; /* Prevent body scroll */
 }
 
 .transit-container {
@@ -108,14 +108,15 @@ body {
 .transit-main {
   flex: 1;
   display: flex;
-  overflow: hidden; /* Contain scrolling to children */
+  overflow: hidden;
 }
 
 .map-section {
   flex: 1;
   padding: 2rem;
   position: relative;
-  overflow: auto; /* Allow map scrolling if needed */
+  overflow-y: auto; /* Allow map scrolling */
+  z-index: 5; /* Ensure map is clickable */
 }
 
 .map-title {
@@ -132,10 +133,11 @@ body {
   background: rgba(255, 255, 255, 0.05);
   border-radius: var(--border-radius);
   box-shadow: inset 0 0 20px rgba(245, 224, 80, 0.2);
-  transition: transform 0.8s ease-out; /* For road zoom */
+  transition: transform 0.8s ease-out;
+  position: relative;
+  z-index: 5; /* Ensure SVG is clickable */
 }
 
-/* Road Zoom Transition */
 .map-view.zoom-to-county {
   transform: scale(1.2) translateX(-10%);
   opacity: 0;
@@ -156,10 +158,12 @@ body {
   width: 400px;
   background: rgba(42, 64, 102, 0.9);
   padding: 2rem;
-  overflow-y: auto; /* Scroll only sidebar */
+  overflow-y: auto; /* Scroll sidebar only */
   overflow-x: hidden;
   transition: var(--transition);
   box-shadow: -5px 0 15px rgba(0, 0, 0, 0.5);
+  position: relative;
+  z-index: 10;
 }
 
 .transit-sidebar.collapsed {
@@ -211,14 +215,16 @@ body {
 }
 
 .metric-label {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   color: var(--transit-purple);
   font-weight: 600;
+  display: block;
+  margin-bottom: 0.5rem;
 }
 
 .metric-value {
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1rem; /* Smaller than label for distinction */
+  font-weight: 400;
   color: var(--transit-accent);
 }
 

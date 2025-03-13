@@ -100,13 +100,23 @@ function createUSMap() {
       const path = d3.geoPath().projection(projection);
       const states = topojson.feature(us, us.objects.states).features;
 
+      const percentValues = Object.values(statePercentAccess).filter(v => typeof v === 'number');
+      const minPercent = percentValues.length ? Math.min(...percentValues) : 0;
+      const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
+      const colorScale = d3.scaleLinear()
+        .domain([minPercent, maxPercent])
+        .range(['#d4f1d4', '#34c759']); // Light green to transit green
+
       const statesGroup = svg.append('g')
         .selectAll('path')
         .data(states)
         .enter()
         .append('path')
         .attr('d', path)
-        .attr('fill', d => statePercentAccess[statesData[d.id]?.name] !== undefined ? d3.interpolateGreens(statePercentAccess[statesData[d.id]?.name] / 100) : '#3a5066')
+        .attr('fill', d => {
+          const value = statePercentAccess[statesData[d.id]?.name];
+          return value !== undefined ? colorScale(value) : '#3a5066';
+        })
         .attr('stroke', '#fff')
         .attr('stroke-width', 1)
         .attr('class', 'state')
@@ -117,7 +127,8 @@ function createUSMap() {
           d3.select(this.parentNode).select(`text[data-state-id="${d.id}"]`).text(statesData[d.id]?.name || '');
         })
         .on('mouseout', function(event, d) {
-          d3.select(this).transition().attr('fill', d => statePercentAccess[statesData[d.id]?.name] !== undefined ? d3.interpolateGreens(statePercentAccess[statesData[d.id]?.name] / 100) : '#3a5066');
+          const value = statePercentAccess[statesData[d.id]?.name];
+          d3.select(this).transition().attr('fill', value !== undefined ? colorScale(value) : '#3a5066');
           d3.select(this.parentNode).select(`text[data-state-id="${d.id}"]`).text(statesData[d.id]?.abbr || '');
         });
 
@@ -134,9 +145,10 @@ function createUSMap() {
         .text(d => statesData[d.id]?.abbr || '');
 
       mapContainer.appendChild(svg.node());
-      usMap = { svg, path, projection, states };
-      createLegend();
-    });
+      usMap = { svg, path, projection, states, colorScale };
+      createLegend(minPercent, maxPercent);
+    })
+    .catch(err => console.error('Error loading US map:', err));
 }
 
 function createCountyMap(stateId) {
@@ -200,17 +212,18 @@ function createCountyMap(stateId) {
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
         countyMap = { svg, path, projection, counties };
       });
-  }, 800); // Match CSS transition duration
+  }, 800);
 }
 
-function createLegend() {
+function createLegend(minPercent, maxPercent) {
   const legend = document.getElementById('legend');
+  const colorScale = usMap?.colorScale || d3.scaleLinear().domain([0, 100]).range(['#d4f1d4', '#34c759']);
   legend.innerHTML = `
     <h3>Transit Access (%)</h3>
     <div style="display: flex; align-items: center; gap: 10px;">
-      <div style="width: 20px; height: 20px; background: ${d3.interpolateGreens(0)};"></div> 0%
-      <div style="width: 20px; height: 20px; background: ${d3.interpolateGreens(0.5)};"></div> 50%
-      <div style="width: 20px; height: 20px; background: ${d3.interpolateGreens(1)};"></div> 100%
+      <div style="width: 20px; height: 20px; background: ${colorScale(minPercent)};"></div> ${minPercent.toFixed(1)}%
+      <div style="width: 20px; height: 20px; background: ${colorScale((minPercent + maxPercent) / 2)};"></div> ${((minPercent + maxPercent) / 2).toFixed(1)}%
+      <div style="width: 20px; height: 20px; background: ${colorScale(maxPercent)};"></div> ${maxPercent.toFixed(1)}%
     </div>
   `;
 }
@@ -253,6 +266,7 @@ function handleBackToState() {
 
 function updateDataPanel() {
   const dataPanelContent = document.getElementById('dataPanelContent');
+  if (!dataPanelContent) return;
   if (!selectedState) {
     dataPanelContent.innerHTML = `
       <h2 class="neon-text">United States</h2>
@@ -279,7 +293,10 @@ function updateDataPanel() {
 
 function fetchAllStateDataForCountryAverage() {
   fetch(`/api/averageValues`)
-    .then(response => response.json())
+    .then(response => {
+      if (!response.ok) throw new Error('Network response was not ok');
+      return response.json();
+    })
     .then(data => {
       allStateData = data;
       data.forEach(metric => {
@@ -290,7 +307,7 @@ function fetchAllStateDataForCountryAverage() {
           updateStateColors();
         }
       });
-      displayCountryMetrics(data);
+      if (activeView === 'state') displayCountryMetrics(data);
     })
     .catch(error => console.error('Error fetching country data:', error));
 }
@@ -379,10 +396,10 @@ function displayFrequencyDistributions(data) {
       return aNum - bNum;
     });
 
-    let barColor = '#34c759'; // Green for transit
-    if (collectionName.includes('Transit')) barColor = '#ff9500'; // Orange for transit-specific
-    else if (collectionName.includes('Population')) barColor = '#9b5de5'; // Purple for population
-    else if (collectionName.includes('Economic')) barColor = '#f5e050'; // Yellow for economic
+    let barColor = '#34c759';
+    if (collectionName.includes('Transit')) barColor = '#ff9500';
+    else if (collectionName.includes('Population')) barColor = '#9b5de5';
+    else if (collectionName.includes('Economic')) barColor = '#f5e050';
 
     const ctx = canvas.getContext("2d");
     let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
@@ -542,11 +559,21 @@ function displayCountyData(data, countyName) {
 
 function updateStateColors() {
   if (!usMap) return;
+  const percentValues = Object.values(statePercentAccess).filter(v => typeof v === 'number');
+  const minPercent = percentValues.length ? Math.min(...percentValues) : 0;
+  const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
+  const colorScale = d3.scaleLinear()
+    .domain([minPercent, maxPercent])
+    .range(['#d4f1d4', '#34c759']);
+
   usMap.svg.selectAll('.state')
     .attr('fill', d => {
-      const stateName = statesData[d.id]?.name;
-      return statePercentAccess[stateName] !== undefined ? d3.interpolateGreens(statePercentAccess[stateName] / 100) : '#3a5066';
+      const value = statePercentAccess[statesData[d.id]?.name];
+      return value !== undefined ? colorScale(value) : '#3a5066';
     });
+
+  usMap.colorScale = colorScale;
+  createLegend(minPercent, maxPercent);
 }
 
 window.addEventListener('resize', () => {
