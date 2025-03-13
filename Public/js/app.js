@@ -104,7 +104,7 @@ function createUSMap() {
       const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
       const colorScale = d3.scaleLinear()
         .domain([minPercent, maxPercent])
-        .range(['#b8e994', '#2ecc71']); // Light green to transit green
+        .range(['#a9dfbf', '#27ae60']); // Light green to transit green
 
       console.log('statePercentAccess:', statePercentAccess);
       console.log('minPercent:', minPercent, 'maxPercent:', maxPercent);
@@ -117,7 +117,7 @@ function createUSMap() {
         .attr('d', path)
         .attr('fill', d => {
           const value = statePercentAccess[statesData[d.id]?.name];
-          return value !== undefined ? colorScale(value) : '#d0d0d0';
+          return value !== undefined ? colorScale(value) : '#bdc3c7';
         })
         .attr('stroke', '#fff')
         .attr('stroke-width', 1)
@@ -125,14 +125,14 @@ function createUSMap() {
         .attr('data-state-id', d => d.id)
         .on('click', (event, d) => handleStateClick(d.id))
         .on('mouseover', function(event, d) {
-          d3.select(this).attr('cursor', 'pointer');
+          d3.select(this).attr('cursor', 'pointer').attr('fill', '#f1c40f');
           const text = d3.select(`text[data-state-id="${d.id}"]`);
           text.text(statesData[d.id]?.name || '');
           text.attr('font-size', '12px');
         })
         .on('mouseout', function(event, d) {
           const value = statePercentAccess[statesData[d.id]?.name];
-          d3.select(this).attr('fill', value !== undefined ? colorScale(value) : '#d0d0d0');
+          d3.select(this).attr('fill', value !== undefined ? colorScale(value) : '#bdc3c7');
           const text = d3.select(`text[data-state-id="${d.id}"]`);
           text.text(statesData[d.id]?.abbr || '');
           text.attr('font-size', '10px');
@@ -191,15 +191,15 @@ function createCountyMap(stateId) {
           .enter()
           .append('path')
           .attr('d', path)
-          .attr('fill', '#b0c4de')
+          .attr('fill', '#d5d8dc')
           .attr('stroke', '#fff')
           .attr('stroke-width', 0.5)
           .on('click', (event, d) => handleCountyClick(d.properties.name))
           .on('mouseover', function() {
-            d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#e67e22');
+            d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#2980b9');
           })
           .on('mouseout', function() {
-            d3.select(this).transition().attr('fill', '#b0c4de');
+            d3.select(this).transition().attr('fill', '#d5d8dc');
           });
 
         svg.append('g')
@@ -223,7 +223,7 @@ function createCountyMap(stateId) {
 
 function createLegend(minPercent, maxPercent) {
   const legend = document.getElementById('legend');
-  const colorScale = usMap?.colorScale || d3.scaleLinear().domain([0, 100]).range(['#b8e994', '#2ecc71']);
+  const colorScale = usMap?.colorScale || d3.scaleLinear().domain([0, 100]).range(['#a9dfbf', '#27ae60']);
   legend.innerHTML = `
     <h3>Transit Access (%)</h3>
     <div style="display: flex; align-items: center; gap: 10px;">
@@ -235,12 +235,19 @@ function createLegend(minPercent, maxPercent) {
 }
 
 function handleStateClick(stateId) {
-  selectedState = stateId;
-  selectedCounty = null;
-  activeView = 'county';
-  createCountyMap(stateId);
-  updateDataPanel();
-  fetchStateData(stateId);
+  const bus = document.getElementById('busAnimation');
+  bus.classList.remove('active');
+  void bus.offsetWidth; // Trigger reflow
+  bus.classList.add('active');
+  
+  setTimeout(() => {
+    selectedState = stateId;
+    selectedCounty = null;
+    activeView = 'county';
+    createCountyMap(stateId);
+    updateDataPanel();
+    fetchStateData(stateId);
+  }, 1000); // Wait for bus animation to complete
 }
 
 function handleCountyClick(countyName) {
@@ -275,7 +282,7 @@ function updateDataPanel() {
   if (!dataPanelContent) return;
   if (!selectedState) {
     dataPanelContent.innerHTML = `
-      <h2 class="neon-text">United States</h2>
+      <h2 class="section-title">United States</h2>
       <div id="countryMetricsGrid" class="metric-grid"></div>
     `;
     if (allStateData) displayCountryMetrics(allStateData);
@@ -404,15 +411,10 @@ function displayFrequencyDistributions(data) {
       return aNum - bNum;
     });
 
-    let barColor = '#2ecc71';
-    if (collectionName.includes('Transit')) barColor = '#e67e22';
-    else if (collectionName.includes('Population')) barColor = '#3498db';
-    else if (collectionName.includes('Economic')) barColor = '#f5c518';
-
-    const ctx = canvas.getContext("2d");
-    let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, barColor);
-    gradient.addColorStop(1, '#ffffff');
+    let barColor = '#27ae60';
+    if (collectionName.includes('Transit')) barColor = '#f1c40f';
+    else if (collectionName.includes('Population')) barColor = '#2980b9';
+    else if (collectionName.includes('Economic')) barColor = '#e67e22';
 
     const chart = new Chart(canvas, {
       type: 'bar',
@@ -421,7 +423,7 @@ function displayFrequencyDistributions(data) {
         datasets: [{
           label: collectionName,
           data: chartData.map(d => d.count),
-          backgroundColor: gradient,
+          backgroundColor: barColor,
           borderColor: barColor,
           borderWidth: 1,
           borderRadius: 4,
@@ -445,7 +447,7 @@ function displayFrequencyDistributions(data) {
           y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' }, ticks: { color: '#2c3e50' } },
           x: { title: { display: true, text: 'Range', color: '#2c3e50' }, ticks: { color: '#2c3e50' } }
         },
-        animation: { duration: 1500 }
+        animation: { duration: 1000 }
       }
     });
 
@@ -515,15 +517,10 @@ function displayCountyData(data, countyName) {
         return aNum - bNum;
       });
 
-      let barColor = '#2ecc71';
-      if (collectionName.includes('Transit')) barColor = '#e67e22';
-      else if (collectionName.includes('Population')) barColor = '#3498db';
-      else if (collectionName.includes('Economic')) barColor = '#f5c518';
-
-      const ctx = canvas.getContext("2d");
-      let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      gradient.addColorStop(0, barColor);
-      gradient.addColorStop(1, '#ffffff');
+      let barColor = '#27ae60';
+      if (collectionName.includes('Transit')) barColor = '#f1c40f';
+      else if (collectionName.includes('Population')) barColor = '#2980b9';
+      else if (collectionName.includes('Economic')) barColor = '#e67e22';
 
       const chart = new Chart(canvas, {
         type: 'bar',
@@ -532,7 +529,7 @@ function displayCountyData(data, countyName) {
           datasets: [{
             label: collectionName,
             data: chartData.map(d => d.count),
-            backgroundColor: gradient,
+            backgroundColor: barColor,
             borderColor: barColor,
             borderWidth: 1,
             borderRadius: 4,
@@ -556,7 +553,7 @@ function displayCountyData(data, countyName) {
             y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' }, ticks: { color: '#2c3e50' } },
             x: { title: { display: true, text: 'Range', color: '#2c3e50' }, ticks: { color: '#2c3e50' } }
           },
-          animation: { duration: 1500 }
+          animation: { duration: 1000 }
         }
       });
 
@@ -572,12 +569,12 @@ function updateStateColors() {
   const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
   const colorScale = d3.scaleLinear()
     .domain([minPercent, maxPercent])
-    .range(['#b8e994', '#2ecc71']);
+    .range(['#a9dfbf', '#27ae60']);
 
   usMap.svg.selectAll('.state')
     .attr('fill', d => {
       const value = statePercentAccess[statesData[d.id]?.name];
-      return value !== undefined ? colorScale(value) : '#d0d0d0';
+      return value !== undefined ? colorScale(value) : '#bdc3c7';
     });
 
   usMap.colorScale = colorScale;

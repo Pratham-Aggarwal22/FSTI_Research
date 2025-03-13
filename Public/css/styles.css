@@ -1,16 +1,13 @@
 /* public/css/styles.css */
 
 :root {
-  --transit-bg: #e0e6ed; /* Light road gray */
-  --transit-yellow: #f5c518; /* Bus yellow */
-  --transit-green: #2ecc71; /* Go signal */
-  --transit-blue: #3498db; /* Sky/rail */
-  --transit-orange: #e67e22; /* Traffic cone */
-  --transit-dark: #2c3e50; /* Dark accent */
-  --glow-white: rgba(255, 255, 255, 0.9);
-  --shadow-glow: 0 0 15px rgba(245, 197, 24, 0.5);
-  --transition: all 0.4s ease;
-  --border-radius: 12px;
+  --transit-road: #d5d8dc; /* Road gray */
+  --transit-blue: #2980b9; /* Rail */
+  --transit-yellow: #f1c40f; /* Bus */
+  --transit-green: #27ae60; /* Go signal */
+  --transit-dark: #2c3e50; /* Text */
+  --transition: all 0.3s ease;
+  --border-radius: 8px;
 }
 
 * {
@@ -20,8 +17,8 @@
 }
 
 body {
-  font-family: 'Orbitron', sans-serif;
-  background: var(--transit-bg) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><path d="M0 50 H100 M50 0 V100" stroke="rgba(44, 62, 80, 0.2)" stroke-width="2" stroke-dasharray="5, 5"/></svg>') repeat;
+  font-family: 'Roboto', sans-serif;
+  background: var(--transit-road) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50"><path d="M25 0 V50 M0 25 H50" stroke="rgba(44, 62, 80, 0.1)" stroke-width="1" stroke-dasharray="4, 4"/></svg>') repeat;
   color: var(--transit-dark);
   overflow: hidden;
 }
@@ -36,11 +33,9 @@ body {
 
 /* Header */
 .transit-header {
-  background: linear-gradient(90deg, var(--transit-blue), var(--transit-green));
+  background: var(--transit-blue);
   padding: 1rem 2rem;
-  box-shadow: var(--shadow-glow);
-  z-index: 10;
-  animation: slideInDown 0.5s ease-out;
+  border-bottom: 2px solid var(--transit-dark);
 }
 
 .header-content {
@@ -51,14 +46,10 @@ body {
   margin: 0 auto;
 }
 
-.glow-text {
-  font-size: 2.5rem;
+h1 {
+  font-size: 2rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  color: var(--transit-yellow);
-  text-shadow: 0 0 10px var(--transit-yellow);
-  animation: glowPulse 2s infinite;
+  color: #fff;
 }
 
 .control-panel {
@@ -68,26 +59,24 @@ body {
 
 /* Buttons */
 .transit-btn {
-  background: linear-gradient(45deg, var(--transit-yellow), var(--transit-orange));
+  background: var(--transit-yellow);
   border: none;
   padding: 0.75rem 1.5rem;
   border-radius: var(--border-radius);
   color: var(--transit-dark);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: var(--transition);
-  box-shadow: var(--shadow-glow);
 }
 
 .transit-btn:hover {
-  transform: scale(1.1) rotate(2deg);
-  box-shadow: 0 0 20px var(--transit-yellow);
+  background: #f39c12;
 }
 
 .back-btn {
   background: none;
   border: none;
-  color: var(--transit-orange);
+  color: var(--transit-blue);
   font-size: 1.2rem;
   cursor: pointer;
   margin-bottom: 1rem;
@@ -115,56 +104,53 @@ body {
 }
 
 .map-title {
-  font-size: 2rem;
+  font-size: 1.8rem;
+  font-weight: 600;
   text-align: center;
   margin-bottom: 1rem;
-  color: var(--transit-blue);
-  animation: fadeIn 1s ease-in;
+  color: var(--transit-dark);
 }
 
 .map-view {
   height: 80vh;
   width: 100%;
-  background: rgba(255, 255, 255, 0.8);
+  background: #fff;
   border-radius: var(--border-radius);
-  box-shadow: inset 0 0 20px rgba(245, 197, 24, 0.2);
+  border: 1px solid var(--transit-dark);
   position: relative;
   z-index: 5;
 }
 
-/* Transit Zoom Transition */
-.map-view.zoom-to-county {
-  animation: busZoom 0.8s ease-out forwards;
+/* Bus Animation */
+.bus-animation {
+  display: none;
 }
 
-/* Route Fade Effect */
-.state:hover {
-  stroke: var(--transit-orange);
-  stroke-width: 2;
-  stroke-dasharray: 10, 5;
-  animation: routeFade 1s infinite;
+.bus-animation.active {
+  display: block;
+  animation: busTravel 1s linear forwards;
 }
 
 /* Legend */
 .map-legend {
   margin-top: 1rem;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.9);
+  background: #fff;
   border-radius: var(--border-radius);
+  border: 1px solid var(--transit-dark);
   color: var(--transit-dark);
   font-size: 0.9rem;
-  box-shadow: var(--shadow-glow);
 }
 
 /* Sidebar */
 .transit-sidebar {
   width: 400px;
-  background: rgba(255, 255, 255, 0.95);
+  background: #fff;
   padding: 2rem;
   overflow-y: auto;
   overflow-x: hidden;
   transition: var(--transition);
-  box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1);
+  border-left: 1px solid var(--transit-dark);
   position: relative;
   z-index: 10;
 }
@@ -189,11 +175,10 @@ body {
   animation: fadeInUp 0.6s ease-out;
 }
 
-.neon-text {
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--transit-orange);
-  text-shadow: 0 0 8px var(--transit-orange);
+.section-title {
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: var(--transit-blue);
   margin-bottom: 1.5rem;
 }
 
@@ -205,46 +190,54 @@ body {
 }
 
 .metric-card {
-  background: linear-gradient(135deg, var(--transit-yellow), var(--transit-green));
+  background: #ecf0f1;
   padding: 1.5rem;
   border-radius: var(--border-radius);
-  text-align: center;
+  border-left: 4px solid var(--transit-green);
+  position: relative;
   transition: var(--transition);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.metric-card::before {
+  content: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="%2327ae60"/><rect x="10" y="2" width="4" height="6" fill="%23fff"/></svg>');
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
 }
 
 .metric-card:hover {
-  transform: translateY(-5px);
-  box-shadow: var(--shadow-glow);
+  transform: translateY(-3px);
+  background: #dfe6e9;
 }
 
 .metric-label {
-  font-size: 1.2rem;
+  font-size: 1.1rem;
+  font-weight: 500;
   color: var(--transit-dark);
-  font-weight: 600;
   display: block;
   margin-bottom: 0.5rem;
+  margin-left: 1.5rem;
 }
 
 .metric-value {
   font-size: 1rem;
   font-weight: 400;
   color: var(--transit-blue);
+  margin-left: 1.5rem;
 }
 
 /* Charts */
 .chart-wrapper {
-  background: rgba(255, 255, 255, 0.9);
+  background: #fff;
   padding: 1rem;
   border-radius: var(--border-radius);
+  border: 1px solid var(--transit-dark);
   margin-bottom: 1.5rem;
   transition: var(--transition);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .chart-wrapper:hover {
-  transform: scale(1.02);
-  box-shadow: var(--shadow-glow);
+  border-color: var(--transit-green);
 }
 
 .chart-container {
@@ -252,41 +245,20 @@ body {
 }
 
 /* Animations */
-@keyframes glowPulse {
-  0%, 100% { text-shadow: 0 0 10px var(--transit-yellow); }
-  50% { text-shadow: 0 0 20px var(--transit-yellow), 0 0 30px var(--transit-green); }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes slideInDown {
-  from { transform: translateY(-100%); }
-  to { transform: translateY(0); }
-}
-
-@keyframes busZoom {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.2) translateX(-10%); opacity: 0.5; }
-  100% { transform: scale(1) translateX(0); opacity: 0; }
-}
-
-@keyframes routeFade {
-  0% { stroke-dashoffset: 0; }
-  100% { stroke-dashoffset: 20; }
+@keyframes busTravel {
+  0% { left: -100px; }
+  100% { left: 100%; }
 }
 
 /* Responsive Design */
 @media (max-width: 1024px) {
   .transit-sidebar { width: 300px; }
-  .glow-text { font-size: 2rem; }
+  h1 { font-size: 1.8rem; }
 }
 
 @media (max-width: 768px) {
