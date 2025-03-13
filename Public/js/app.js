@@ -105,7 +105,10 @@ function createUSMap() {
       const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
       const colorScale = d3.scaleLinear()
         .domain([minPercent, maxPercent])
-        .range(['#d4f1d4', '#34c759']); // Light green to transit green
+        .range(['#d4f1d4', '#34c759']);
+
+      console.log('statePercentAccess:', statePercentAccess); // Debug log
+      console.log('minPercent:', minPercent, 'maxPercent:', maxPercent); // Debug log
 
       const statesGroup = svg.append('g')
         .selectAll('path')
@@ -123,13 +126,17 @@ function createUSMap() {
         .attr('data-state-id', d => d.id)
         .on('click', (event, d) => handleStateClick(d.id))
         .on('mouseover', function(event, d) {
-          d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#ff9500');
-          d3.select(this.parentNode).select(`text[data-state-id="${d.id}"]`).text(statesData[d.id]?.name || '');
+          d3.select(this).attr('cursor', 'pointer');
+          const text = d3.select(`text[data-state-id="${d.id}"]`);
+          text.text(statesData[d.id]?.name || '');
+          text.attr('font-size', '12px'); // Slightly larger for readability
         })
         .on('mouseout', function(event, d) {
           const value = statePercentAccess[statesData[d.id]?.name];
-          d3.select(this).transition().attr('fill', value !== undefined ? colorScale(value) : '#3a5066');
-          d3.select(this.parentNode).select(`text[data-state-id="${d.id}"]`).text(statesData[d.id]?.abbr || '');
+          d3.select(this).attr('fill', value !== undefined ? colorScale(value) : '#3a5066');
+          const text = d3.select(`text[data-state-id="${d.id}"]`);
+          text.text(statesData[d.id]?.abbr || '');
+          text.attr('font-size', '10px');
         });
 
       const textGroup = svg.append('g')
