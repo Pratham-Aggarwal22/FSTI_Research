@@ -61,9 +61,8 @@ let selectedCounty = null;
 let activeView = 'state';
 let stateCharts = [];
 let countyCharts = [];
-let stateMetrics = {};
+let statePercentAccess = {};
 let allStateData = null;
-let radarChart, scatterMatrix, boxPlot;
 
 function formatStateNameForDb(name) {
   return name.replace(/\s+/g, '_');
@@ -71,43 +70,15 @@ function formatStateNameForDb(name) {
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
-  setupFilters();
 });
 
 function initApp() {
   selectedState = null;
   selectedCounty = null;
   activeView = 'state';
+  document.getElementById('mapTitle').textContent = 'United States';
   document.getElementById('homeButton').addEventListener('click', handleBackToStates);
   fetchAllStateDataForCountryAverage().then(() => createUSMap());
-  initializeCharts();
-}
-
-function setupFilters() {
-  document.getElementById('metricFilter').addEventListener('change', updateMap);
-  document.getElementById('yearFilter').addEventListener('change', updateMap);
-  document.querySelectorAll('input[name="transitType"]').forEach(checkbox => {
-    checkbox.addEventListener('change', updateMap);
-  });
-  document.getElementById('scoreRange').addEventListener('input', updateMap);
-}
-
-function initializeCharts() {
-  radarChart = new Chart(document.getElementById('radarChart').getContext('2d'), {
-    type: 'radar',
-    data: { labels: [], datasets: [] },
-    options: { scales: { r: { beginAtZero: true } } }
-  });
-  scatterMatrix = new Chart(document.getElementById('scatterMatrix').getContext('2d'), {
-    type: 'scatter',
-    data: { datasets: [] },
-    options: { scales: { x: { title: { display: true, text: '' } }, y: { title: { display: true, text: '' } } } }
-  });
-  boxPlot = new Chart(document.getElementById('boxPlot').getContext('2d'), {
-    type: 'boxplot',
-    data: { labels: [], datasets: [] },
-    options: { scales: { x: { title: { display: true, text: 'Range' } }, y: { title: { display: true, text: 'Frequency' } } } }
-  });
 }
 
 function createUSMap() {
@@ -121,103 +92,69 @@ function createUSMap() {
     .attr('height', height)
     .attr('style', 'width: 100%; height: 100%;');
 
-  d3.json('https://unpkg.com/us-atlas@3.0.0/states-10m.json')
+  d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json')
     .then(us => {
       mapContainer.innerHTML = '';
       const projection = d3.geoAlbersUsa().fitSize([width, height], topojson.feature(us, us.objects.states));
       const path = d3.geoPath().projection(projection);
       const states = topojson.feature(us, us.objects.states).features;
 
-      updateMapColors(states, path, svg, projection);
+      const percentValues = Object.values(statePercentAccess).filter(v => typeof v === 'number');
+      const minPercent = percentValues.length ? Math.min(...percentValues) : 0;
+      const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
+      const colorScale = d3.scaleLinear()
+        .domain([minPercent, maxPercent])
+        .range(['#a9dfbf', '#27ae60']); // Light green to transit green
+
+      console.log('statePercentAccess:', statePercentAccess);
+      console.log('minPercent:', minPercent, 'maxPercent:', maxPercent);
+
+      const statesGroup = svg.append('g')
+        .selectAll('path')
+        .data(states)
+        .enter()
+        .append('path')
+        .attr('d', path)
+        .attr('fill', d => {
+          const value = statePercentAccess[statesData[d.id]?.name];
+          return value !== undefined ? colorScale(value) : '#bdc3c7';
+        })
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 1)
+        .attr('class', 'state')
+        .attr('data-state-id', d => d.id)
+        .on('click', (event, d) => handleStateClick(d.id))
+        .on('mouseover', function(event, d) {
+          d3.select(this).attr('cursor', 'pointer').attr('fill', '#f1c40f');
+          const text = d3.select(`text[data-state-id="${d.id}"]`);
+          text.text(statesData[d.id]?.name || '');
+          text.attr('font-size', '12px');
+        })
+        .on('mouseout', function(event, d) {
+          const value = statePercentAccess[statesData[d.id]?.name];
+          d3.select(this).attr('fill', value !== undefined ? colorScale(value) : '#bdc3c7');
+          const text = d3.select(`text[data-state-id="${d.id}"]`);
+          text.text(statesData[d.id]?.abbr || '');
+          text.attr('font-size', '10px');
+        });
+
+      const textGroup = svg.append('g')
+        .selectAll('text')
+        .data(states)
+        .enter()
+        .append('text')
+        .attr('data-state-id', d => d.id)
+        .attr('transform', d => `translate(${path.centroid(d)})`)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '10px')
+        .attr('fill', '#2c3e50')
+        .text(d => statesData[d.id]?.abbr || '');
+
       mapContainer.appendChild(svg.node());
-      usMap = { svg, path, projection, states };
+      usMap = { svg, path, projection, states, colorScale };
+      createLegend(minPercent, maxPercent);
     })
     .catch(err => console.error('Error loading US map:', err));
-}
-
-function updateMapColors(states, path, svg, projection) {
-  const metric = document.getElementById('metricFilter').value;
-  const year = document.getElementById('yearFilter').value;
-  const scoreRange = parseInt(document.getElementById('scoreRange').value);
-  const transitTypes = Array.from(document.querySelectorAll('input[name="transitType"]:checked')).map(cb => cb.value);
-
-  const metricData = Object.fromEntries(
-    Object.entries(stateMetrics).filter(([state, data]) => {
-      const matchesYear = data.year === year;
-      const matchesTransit = transitTypes.includes(data.transitType || 'combined');
-      const value = data[metric] || 0;
-      return matchesYear && matchesTransit && value <= scoreRange;
-    })
-  );
-
-  const percentValues = Object.values(metricData).filter(v => typeof v === 'number');
-  const minPercent = percentValues.length ? Math.min(...percentValues) : 0;
-  const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
-  const colorScale = d3.scaleLinear()
-    .domain([minPercent, maxPercent])
-    .range(['#ef4444', '#eab308', '#22c55e']) // Red -> Yellow -> Green
-    .interpolate(d3.interpolateRgb);
-
-  const statesGroup = svg.selectAll('.state').data(states).join('path')
-    .attr('d', path)
-    .attr('class', 'state')
-    .attr('fill', d => {
-      const value = metricData[statesData[d.id]?.name] || 0;
-      return colorScale(value);
-    })
-    .attr('stroke', '#fff')
-    .attr('stroke-width', 1)
-    .style('cursor', 'pointer')
-    .on('mouseover', function(event, d) {
-      d3.select(this).style('opacity', 0.8);
-    })
-    .on('mouseout', function(event, d) {
-      d3.select(this).style('opacity', 1);
-    })
-    .on('click', (event, d) => handleStateClick(d.id));
-
-  const textGroup = svg.selectAll('.state-label').data(states).join('text')
-    .attr('class', 'state-label')
-    .attr('transform', d => `translate(${path.centroid(d)})`)
-    .attr('text-anchor', 'middle')
-    .attr('font-size', '10px')
-    .attr('fill', '#2c3e50')
-    .text(d => statesData[d.id]?.abbr || '');
-
-  createLegend(minPercent, maxPercent);
-}
-
-function createLegend(minPercent, maxPercent) {
-  const legend = document.getElementById('legend');
-  const colorScale = d3.scaleLinear()
-    .domain([minPercent, maxPercent])
-    .range(['#ef4444', '#eab308', '#22c55e']);
-  legend.innerHTML = `
-    <div class="text-sm font-medium mb-2">Legend</div>
-    <div class="space-y-2">
-      <div class="flex items-center">
-        <div class="w-4 h-4 bg-[#22c55e] rounded mr-2"></div>
-        <span class="text-sm">High (${maxPercent.toFixed(1)}%+)</span>
-      </div>
-      <div class="flex items-center">
-        <div class="w-4 h-4 bg-[#eab308] rounded mr-2"></div>
-        <span class="text-sm">Medium (${(minPercent + maxPercent) / 2}%-${maxPercent.toFixed(1)}%)</span>
-      </div>
-      <div class="flex items-center">
-        <div class="w-4 h-4 bg-[#ef4444] rounded mr-2"></div>
-        <span class="text-sm">Low (<${(minPercent + maxPercent) / 2}%)</span>
-      </div>
-    </div>
-  `;
-}
-
-function handleStateClick(stateId) {
-  selectedState = stateId;
-  selectedCounty = null;
-  activeView = 'county';
-  createCountyMap(stateId);
-  updateDataPanel();
-  fetchStateData(stateId);
 }
 
 function createCountyMap(stateId) {
@@ -233,7 +170,7 @@ function createCountyMap(stateId) {
       .attr('height', height)
       .attr('style', 'width: 100%; height: 100%;');
 
-    d3.json('https://unpkg.com/us-atlas@3.0.0/counties-10m.json')
+    d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json')
       .then(us => {
         mapContainer.innerHTML = '';
         const counties = topojson.feature(us, us.objects.counties).features.filter(c => c.id.toString().startsWith(stateId));
@@ -259,7 +196,7 @@ function createCountyMap(stateId) {
           .attr('stroke-width', 0.5)
           .on('click', (event, d) => handleCountyClick(d.properties.name))
           .on('mouseover', function() {
-            d3.select(this).style('cursor', 'pointer').transition().attr('fill', '#2980b9');
+            d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#2980b9');
           })
           .on('mouseout', function() {
             d3.select(this).transition().attr('fill', '#d5d8dc');
@@ -278,12 +215,39 @@ function createCountyMap(stateId) {
 
         mapContainer.appendChild(svg.node());
         mapContainer.classList.remove('zoom-to-county');
-        document.getElementById('mapView').innerHTML = '';
-        document.getElementById('mapView').appendChild(svg.node());
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
         countyMap = { svg, path, projection, counties };
       });
   }, 800);
+}
+
+function createLegend(minPercent, maxPercent) {
+  const legend = document.getElementById('legend');
+  const colorScale = usMap?.colorScale || d3.scaleLinear().domain([0, 100]).range(['#a9dfbf', '#27ae60']);
+  legend.innerHTML = `
+    <h3>Transit Access (%)</h3>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 20px; height: 20px; background: ${colorScale(minPercent)};"></div> ${minPercent.toFixed(1)}%
+      <div style="width: 20px; height: 20px; background: ${colorScale((minPercent + maxPercent) / 2)};"></div> ${((minPercent + maxPercent) / 2).toFixed(1)}%
+      <div style="width: 20px; height: 20px; background: ${colorScale(maxPercent)};"></div> ${maxPercent.toFixed(1)}%
+    </div>
+  `;
+}
+
+function handleStateClick(stateId) {
+  const bus = document.getElementById('busAnimation');
+  bus.classList.remove('active');
+  void bus.offsetWidth; // Trigger reflow
+  bus.classList.add('active');
+  
+  setTimeout(() => {
+    selectedState = stateId;
+    selectedCounty = null;
+    activeView = 'county';
+    createCountyMap(stateId);
+    updateDataPanel();
+    fetchStateData(stateId);
+  }, 1000); // Wait for bus animation to complete
 }
 
 function handleCountyClick(countyName) {
@@ -295,7 +259,7 @@ function handleBackToStates() {
   selectedState = null;
   selectedCounty = null;
   activeView = 'state';
-  document.getElementById('mapView').innerHTML = '';
+  document.getElementById('mapTitle').textContent = 'United States';
   createUSMap();
   updateDataPanel();
   stateCharts.forEach(chart => chart.destroy());
@@ -318,7 +282,7 @@ function updateDataPanel() {
   if (!dataPanelContent) return;
   if (!selectedState) {
     dataPanelContent.innerHTML = `
-      <h2 class="text-xl font-semibold text-[#1A2B3C] mb-4">United States</h2>
+      <h2 class="section-title">United States</h2>
       <div id="countryMetricsGrid" class="metric-grid"></div>
     `;
     if (allStateData) displayCountryMetrics(allStateData);
@@ -346,19 +310,18 @@ async function fetchAllStateDataForCountryAverage() {
     if (!response.ok) throw new Error('Network response was not ok');
     const data = await response.json();
     allStateData = data;
-    stateMetrics = {};
     data.forEach(metric => {
-      Object.keys(metric).forEach(key => {
-        if (key !== '_id' && key !== 'title' && typeof metric[key] === 'number') {
-          if (!stateMetrics[key]) stateMetrics[key] = { year: '2025', transitType: 'combined', percentAccess: 0, travelDuration: 0, waitTime: 0, transfers: 0 };
-          stateMetrics[key][metric.title] = metric[key];
-        }
-      });
+      if (metric.title === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)") {
+        Object.keys(metric).forEach(key => {
+          if (key !== '_id' && key !== 'title' && typeof metric[key] === 'number') {
+            statePercentAccess[key] = metric[key];
+          }
+        });
+      }
     });
-    console.log('Fetched stateMetrics:', stateMetrics);
-    if (activeView === 'state' && usMap) updateMap();
+    console.log('Fetched statePercentAccess:', statePercentAccess);
+    if (activeView === 'state' && usMap) updateStateColors();
     if (activeView === 'state') displayCountryMetrics(data);
-    updateVisualizations();
   } catch (error) {
     console.error('Error fetching country data:', error);
   }
@@ -381,10 +344,7 @@ function displayCountryMetrics(data) {
   Object.entries(metrics).forEach(([title, value]) => {
     const card = document.createElement('div');
     card.className = 'metric-card';
-    card.innerHTML = `
-      <span class="metric-label">${title}</span>
-      <span class="metric-value">${value}</span>
-    `;
+    card.innerHTML = `<span class="metric-label">${title}</span><span class="metric-value">${value}</span>`;
     grid.appendChild(card);
   });
 }
@@ -411,10 +371,7 @@ function displayStateMetrics(data, stateName) {
       const card = document.createElement('div');
       card.className = 'metric-card';
       const value = typeof metric[stateName] === 'number' ? metric[stateName].toFixed(1) : metric[stateName];
-      card.innerHTML = `
-        <span class="metric-label">${metric.title}</span>
-        <span class="metric-value">${value}</span>
-      `;
+      card.innerHTML = `<span class="metric-label">${metric.title}</span><span class="metric-value">${value}</span>`;
       grid.appendChild(card);
     }
   });
@@ -477,8 +434,19 @@ function displayFrequencyDistributions(data) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { position: 'top', labels: { color: '#2c3e50' } } },
-        scales: { y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' } }, x: { title: { display: true, text: 'Range', color: '#2c3e50' } } },
+        plugins: {
+          legend: { position: 'top', labels: { color: '#2c3e50' } },
+          tooltip: {
+            callbacks: {
+              title: (tooltipItems) => `Range: ${tooltipItems[0].label}`,
+              label: (context) => `Frequency: ${context.raw}`
+            }
+          }
+        },
+        scales: {
+          y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' }, ticks: { color: '#2c3e50' } },
+          x: { title: { display: true, text: 'Range', color: '#2c3e50' }, ticks: { color: '#2c3e50' } }
+        },
         animation: { duration: 1000 }
       }
     });
@@ -514,10 +482,7 @@ function displayCountyData(data, countyName) {
       if (key === '_id' || key === 'title') return;
       const card = document.createElement('div');
       card.className = 'metric-card';
-      card.innerHTML = `
-        <span class="metric-label">${key}</span>
-        <span class="metric-value">${value}</span>
-      `;
+      card.innerHTML = `<span class="metric-label">${key}</span><span class="metric-value">${value}</span>`;
       grid.appendChild(card);
     });
   }
@@ -545,8 +510,6 @@ function displayCountyData(data, countyName) {
           range: key,
           count: typeof value === 'number' ? value : parseInt(value, 10) || 0
         }));
-
-      // public/js/app.js (continued)
 
       chartData.sort((a, b) => {
         const aNum = parseInt(a.range.match(/\d+/)?.[0] || '0', 10);
@@ -577,8 +540,19 @@ function displayCountyData(data, countyName) {
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { position: 'top', labels: { color: '#2c3e50' } } },
-          scales: { y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' } }, x: { title: { display: true, text: 'Range', color: '#2c3e50' } } },
+          plugins: {
+            legend: { position: 'top', labels: { color: '#2c3e50' } },
+            tooltip: {
+              callbacks: {
+                title: (tooltipItems) => `Range: ${tooltipItems[0].label}`,
+                label: (context) => `Frequency: ${context.raw}`
+              }
+            }
+          },
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' }, ticks: { color: '#2c3e50' } },
+            x: { title: { display: true, text: 'Range', color: '#2c3e50' }, ticks: { color: '#2c3e50' } }
+          },
           animation: { duration: 1000 }
         }
       });
@@ -588,74 +562,23 @@ function displayCountyData(data, countyName) {
   }
 }
 
-function updateVisualizations() {
-  const metric = document.getElementById('metricFilter').value;
-  const year = document.getElementById('yearFilter').value;
-  const transitTypes = Array.from(document.querySelectorAll('input[name="transitType"]:checked')).map(cb => cb.value);
+function updateStateColors() {
+  if (!usMap) return;
+  const percentValues = Object.values(statePercentAccess).filter(v => typeof v === 'number');
+  const minPercent = percentValues.length ? Math.min(...percentValues) : 0;
+  const maxPercent = percentValues.length ? Math.max(...percentValues) : 100;
+  const colorScale = d3.scaleLinear()
+    .domain([minPercent, maxPercent])
+    .range(['#a9dfbf', '#27ae60']);
 
-  const filteredData = Object.entries(stateMetrics).filter(([_, data]) => {
-    const matchesYear = data.year === year;
-    const matchesTransit = transitTypes.includes(data.transitType || 'combined');
-    return matchesYear && matchesTransit;
-  }).reduce((acc, [state, data]) => ({ ...acc, [state]: data }), {});
+  usMap.svg.selectAll('.state')
+    .attr('fill', d => {
+      const value = statePercentAccess[statesData[d.id]?.name];
+      return value !== undefined ? colorScale(value) : '#bdc3c7';
+    });
 
-  // Radar Chart
-  const radarData = {
-    labels: ['Percent Access', 'Average Travel Duration', 'Average Wait Time', 'Average Transfers'],
-    datasets: [{
-      label: 'National Average',
-      data: [
-        Object.values(filteredData).reduce((sum, d) => sum + (d.percentAccess || 0), 0) / Object.keys(filteredData).length,
-        Object.values(filteredData).reduce((sum, d) => sum + (d.travelDuration || 0), 0) / Object.keys(filteredData).length,
-        Object.values(filteredData).reduce((sum, d) => sum + (d.waitTime || 0), 0) / Object.keys(filteredData).length,
-        Object.values(filteredData).reduce((sum, d) => sum + (d.transfers || 0), 0) / Object.keys(filteredData).length
-      ],
-      backgroundColor: 'rgba(255, 107, 26, 0.2)', // #FF6B1A with opacity
-      borderColor: '#FF6B1A',
-      borderWidth: 2
-    }]
-  };
-  radarChart.data = radarData;
-  radarChart.update();
-
-  // Scatter Plot Matrix (Sample Size vs. Selected Metric)
-  const scatterData = Object.values(filteredData).map(d => ({
-    x: d.sampleSize || Math.random() * 1000, // Fallback if sampleSize isn’t in data
-    y: d[metric] || 0
-  }));
-  scatterMatrix.data = {
-    datasets: [{
-      label: `${metric} vs. Sample Size`,
-      data: scatterData,
-      backgroundColor: '#1A2B3C',
-      borderColor: '#1A2B3C',
-      pointRadius: 5
-    }]
-  };
-  scatterMatrix.options.scales.x.title.text = 'Sample Size';
-  scatterMatrix.options.scales.y.title.text = metric;
-  scatterMatrix.update();
-
-  // Box Plot (Frequency Distribution for Selected Metric)
-  const boxData = Object.values(filteredData).map(d => d[metric] || 0);
-  boxPlot.data = {
-    labels: [metric],
-    datasets: [{
-      label: 'Distribution',
-      data: [boxData],
-      backgroundColor: 'rgba(39, 174, 96, 0.5)', // #27ae60 with opacity
-      borderColor: '#27ae60',
-      borderWidth: 1
-    }]
-  };
-  boxPlot.update();
-}
-
-function updateMap() {
-  if (usMap) {
-    updateMapColors(usMap.states, usMap.path, usMap.svg, usMap.projection);
-    updateVisualizations();
-  }
+  usMap.colorScale = colorScale;
+  createLegend(minPercent, maxPercent);
 }
 
 window.addEventListener('resize', () => {
@@ -664,18 +587,4 @@ window.addEventListener('resize', () => {
   } else if (activeView === 'county' && selectedState) {
     createCountyMap(selectedState);
   }
-  radarChart.resize();
-  scatterMatrix.resize();
-  boxPlot.resize();
 });
-
-// Toggle Sidebar
-document.getElementById('toggleSidebar').addEventListener('click', () => {
-  const sidebar = document.getElementById('dataSidebar');
-  sidebar.classList.toggle('w-96');
-  sidebar.classList.toggle('w-0');
-  sidebar.classList.toggle('p-4');
-  sidebar.classList.toggle('p-0');
-  sidebar.classList.toggle('overflow-hidden');
-});
-        
