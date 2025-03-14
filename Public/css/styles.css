@@ -1,5 +1,3 @@
-/* public/css/styles.css */
-
 :root {
   --transit-road: #d5d8dc; /* Road gray */
   --transit-blue: #2980b9; /* Rail */
@@ -95,6 +93,39 @@ h1 {
   overflow: hidden;
 }
 
+/* Left Panel */
+.left-panel {
+  width: 300px;
+  background: #fff;
+  padding: 1rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--transit-dark);
+  transition: var(--transition);
+}
+
+.left-panel.collapsed {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#metricSelection {
+  margin-bottom: 1rem;
+}
+
+#metricSelection label {
+  font-weight: 500;
+  margin-right: 0.5rem;
+}
+
+#metricSelection select {
+  padding: 0.5rem;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--transit-dark);
+  width: 100%;
+}
+
+/* Map Section */
 .map-section {
   flex: 1;
   padding: 2rem;
@@ -142,7 +173,7 @@ h1 {
   font-size: 0.9rem;
 }
 
-/* Sidebar */
+/* Sidebar (Right Panel) */
 .transit-sidebar {
   width: 400px;
   background: #fff;
@@ -241,7 +272,7 @@ h1 {
 }
 
 .chart-container {
-  height: 300px;
+  height: 250px;
 }
 
 /* Animations */
@@ -257,18 +288,22 @@ h1 {
 
 /* Responsive Design */
 @media (max-width: 1024px) {
+  .left-panel { width: 250px; }
   .transit-sidebar { width: 300px; }
   h1 { font-size: 1.8rem; }
 }
 
 @media (max-width: 768px) {
   .transit-main { flex-direction: column; }
-  .transit-sidebar {
+  .left-panel, .transit-sidebar {
     width: 100%;
-    height: 50vh;
+    height: 40vh;
     position: relative;
   }
-  .transit-sidebar.collapsed { height: 0; }
+  .left-panel.collapsed, .transit-sidebar.collapsed {
+    height: 0;
+    width: 100%;
+  }
   .map-section { padding: 1rem; }
-  .map-view { height: 60vh; }
+  .map-view { height: 50vh; }
 }
