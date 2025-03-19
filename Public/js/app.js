@@ -63,16 +63,20 @@ let stateCharts = [];
 let countyCharts = [];
 let allStateData = [];
 let selectedMetric = null;
+
+let allCountyData = []; // aggregated county metrics for the selected state
+let selectedCountyMetric = null; // currently selected county metric
+
 let distributionChart = null;
 let topBottomChart = null;
-
-function formatStateNameForDb(name) {
-  return name.replace(/\s+/g, '_');
-}
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
 });
+
+function formatStateNameForDb(name) {
+  return name.replace(/\s+/g, '_');
+}
 
 function initApp() {
   selectedState = null;
@@ -86,7 +90,7 @@ function initApp() {
     populateMetricSelect();
     createDistributionChart();
     createTopBottomChart();
-    displayCountryMetrics(allStateData); // Display country metrics on load
+    updateDataPanel(); // update right sidebar with country metrics on load
   });
 }
 
@@ -123,15 +127,15 @@ function updateMapColors() {
   const metricData = allStateData.find(d => d.title === selectedMetric);
   if (!metricData) return;
 
-  const percentValues = Object.entries(metricData)
+  const values = Object.entries(metricData)
     .filter(([key]) => key !== '_id' && key !== 'title')
     .map(([, value]) => value);
 
-  const minPercent = Math.min(...percentValues);
-  const maxPercent = Math.max(...percentValues);
-  const colorScale = d3.scaleLinear()
-    .domain([minPercent, maxPercent])
-    .range(['#a9dfbf', '#27ae60']);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const colorScale = d3.scaleQuantize()
+    .domain([minVal, maxVal])
+    .range(['#27ae60', '#f1c40f', '#e67e22', '#e74c3c']);
 
   usMap.svg.selectAll('.state')
     .attr('fill', d => {
@@ -139,7 +143,8 @@ function updateMapColors() {
       return value !== undefined ? colorScale(value) : '#bdc3c7';
     });
 
-  createLegend(minPercent, maxPercent);
+  usMap.colorScale = colorScale;
+  createLegend(minVal, maxVal);
 }
 
 function createDistributionChart() {
@@ -250,15 +255,14 @@ function createUSMap() {
       const metricData = allStateData.find(d => d.title === selectedMetric);
       if (!metricData) return;
 
-      const percentValues = Object.entries(metricData)
+      const values = Object.entries(metricData)
         .filter(([key]) => key !== '_id' && key !== 'title')
         .map(([, value]) => value);
-
-      const minPercent = Math.min(...percentValues);
-      const maxPercent = Math.max(...percentValues);
-      const colorScale = d3.scaleLinear()
-        .domain([minPercent, maxPercent])
-        .range(['#a9dfbf', '#27ae60']);
+      const minVal = Math.min(...values);
+      const maxVal = Math.max(...values);
+      const colorScale = d3.scaleQuantize()
+        .domain([minVal, maxVal])
+        .range(['#27ae60', '#f1c40f', '#e67e22', '#e74c3c']);
 
       const statesGroup = svg.append('g')
         .selectAll('path')
@@ -295,28 +299,31 @@ function createUSMap() {
         .enter()
         .append('text')
         .attr('data-state-id', d => d.id)
-        .attr('transform', d => `translate(${path.centroid(d)})`).
-        attr('text-anchor', 'middle')
+        .attr('transform', d => `translate(${path.centroid(d)})`)
+        .attr('text-anchor', 'middle')
         .attr('font-size', '10px')
         .attr('fill', '#2c3e50')
         .text(d => statesData[d.id]?.abbr || '');
 
       mapContainer.appendChild(svg.node());
       usMap = { svg, path, projection, states, colorScale };
-      createLegend(minPercent, maxPercent);
+      createLegend(minVal, maxVal);
     })
     .catch(err => console.error('Error loading US map:', err));
 }
 
-function createLegend(minPercent, maxPercent) {
+function createLegend(minVal, maxVal) {
   const legend = document.getElementById('legend');
-  const colorScale = usMap?.colorScale || d3.scaleLinear().domain([0, 100]).range(['#a9dfbf', '#27ae60']);
+  const colorScale = usMap?.colorScale;
+  if (!colorScale) return;
+  const thresholds = colorScale.thresholds();
   legend.innerHTML = `
     <h3>${selectedMetric}</h3>
     <div style="display: flex; align-items: center; gap: 10px;">
-      <div style="width: 20px; height: 20px; background: ${colorScale(minPercent)};"></div> ${minPercent.toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale((minPercent + maxPercent) / 2)};"></div> ${((minPercent + maxPercent) / 2).toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale(maxPercent)};"></div> ${maxPercent.toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[1])};"></div> ${thresholds[1].toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
     </div>
   `;
 }
@@ -334,7 +341,8 @@ function handleStateClick(stateId) {
     createCountyMap(stateId);
     updateDataPanel();
     fetchStateData(stateId);
-    updateCountyMetrics(); // Add this line to update county metrics
+    // Fetch aggregated county averages for the selected state
+    fetchCountyAverages(stateId);
   }, 1000); // Wait for bus animation to complete
 }
 
@@ -366,11 +374,13 @@ function createCountyMap(stateId) {
           .attr('stroke', '#fff')
           .attr('stroke-width', 2);
 
-        const countiesGroup = svg.append('g')
+        // Draw counties with class "county" so we can update colors later
+        svg.append('g')
           .selectAll('path')
           .data(counties)
           .enter()
           .append('path')
+          .attr('class', 'county')
           .attr('d', path)
           .attr('fill', '#d5d8dc')
           .attr('stroke', '#fff')
@@ -381,6 +391,7 @@ function createCountyMap(stateId) {
           })
           .on('mouseout', function() {
             d3.select(this).transition().attr('fill', '#d5d8dc');
+            updateCountyMapColors(); // reset color on mouseout based on metric
           });
 
         svg.append('g')
@@ -397,7 +408,9 @@ function createCountyMap(stateId) {
         mapContainer.appendChild(svg.node());
         mapContainer.classList.remove('zoom-to-county');
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
-        countyMap = { svg, path, projection, counties };
+        countyMap = { svg, path, projection };
+        // If county metrics have been fetched, update the county map colors
+        updateCountyMapColors();
       });
   }, 800);
 }
@@ -418,6 +431,8 @@ function handleBackToStates() {
   stateCharts = [];
   countyCharts.forEach(chart => chart.destroy());
   countyCharts = [];
+  // Hide county metric controls in the left panel when going back
+  document.getElementById('countyMetricSelection').style.display = 'none';
 }
 
 function handleBackToState() {
@@ -438,6 +453,8 @@ function updateDataPanel() {
       <div id="countryMetricsGrid" class="metric-grid"></div>
     `;
     displayCountryMetrics(allStateData);
+    // Hide county-level controls
+    document.getElementById('countyMetricSelection').style.display = 'none';
     return;
   }
   if (selectedCounty) {
@@ -453,6 +470,8 @@ function updateDataPanel() {
     dataPanelContent.appendChild(statePanel);
     document.getElementById('backButton').addEventListener('click', handleBackToStates);
     document.getElementById('stateName').textContent = statesData[selectedState].name;
+    // Show county-level controls in the left panel when a state is selected
+    document.getElementById('countyMetricSelection').style.display = 'block';
   }
 }
 
@@ -689,6 +708,179 @@ function displayCountyData(data, countyName) {
       countyCharts.push(chart);
     });
   }
+}
+
+// New functions for county-level metric controls
+
+function fetchCountyAverages(stateId) {
+  const stateName = statesData[stateId]?.name;
+  if (!stateName) return;
+  const stateNameForDb = formatStateNameForDb(stateName);
+  fetch(`/api/countyAverageValues/${stateNameForDb}`)
+    .then(response => response.json())
+    .then(data => {
+      allCountyData = data;
+      if (allCountyData.length > 0) {
+        selectedCountyMetric = allCountyData[0].title;
+        populateCountyMetricSelect(allCountyData);
+        updateCountyMapColors();
+        createCountyLegendForMap();
+        createCountyDistributionChart();
+        createCountyTopBottomChart();
+      }
+    })
+    .catch(err => console.error("Error fetching county averages:", err));
+}
+
+function populateCountyMetricSelect(data) {
+  const select = document.getElementById('countyMetricSelect');
+  select.innerHTML = '';
+  data.forEach(metric => {
+    const option = document.createElement('option');
+    option.value = metric.title;
+    option.textContent = metric.title;
+    select.appendChild(option);
+  });
+  select.addEventListener('change', countyHandleMetricChange);
+}
+
+function countyHandleMetricChange(event) {
+  selectedCountyMetric = event.target.value;
+  updateCountyMapColors();
+  createCountyLegendForMap();
+  createCountyDistributionChart();
+  createCountyTopBottomChart();
+}
+
+function updateCountyMapColors() {
+  if (!countyMap) return;
+  const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
+  if (!metricData) return;
+  const values = Object.entries(metricData)
+    .filter(([key]) => key !== '_id' && key !== 'title')
+    .map(([, value]) => value);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const colorScale = d3.scaleQuantize()
+    .domain([minVal, maxVal])
+    .range(['#27ae60', '#f1c40f', '#e67e22', '#e74c3c']);
+  countyMap.svg.selectAll('.county')
+    .attr('fill', d => {
+      const value = metricData[d.properties.name];
+      return value !== undefined ? colorScale(value) : '#bdc3c7';
+    });
+  countyMap.colorScale = colorScale;
+}
+
+function createCountyLegendForMap() {
+  const legend = document.getElementById('legend');
+  const colorScale = countyMap?.colorScale;
+  if (!colorScale) return;
+  const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
+  const values = Object.entries(metricData)
+    .filter(([key]) => key !== '_id' && key !== 'title')
+    .map(([, value]) => value);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const thresholds = colorScale.thresholds();
+  legend.innerHTML = `
+    <h3>${selectedCountyMetric}</h3>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[1])};"></div> ${thresholds[1].toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
+    </div>
+  `;
+}
+
+let countyDistributionChart = null;
+let countyTopBottomChart = null;
+
+function createCountyDistributionChart() {
+  const canvas = document.getElementById('countyDistributionChart');
+  if (!canvas) return;
+  if (countyDistributionChart) countyDistributionChart.destroy();
+
+  const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
+  if (!metricData) return;
+
+  const values = Object.entries(metricData)
+    .filter(([key]) => key !== '_id' && key !== 'title')
+    .map(([, value]) => value);
+
+  const binCount = 10;
+  const bins = d3.histogram()
+    .domain([Math.min(...values), Math.max(...values)])
+    .thresholds(binCount)(values);
+
+  const labels = bins.map(bin => `${bin.x0.toFixed(1)} - ${bin.x1.toFixed(1)}`);
+  const data = bins.map(bin => bin.length);
+
+  countyDistributionChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Frequency',
+        data: data,
+        backgroundColor: 'rgba(41, 128, 185, 0.7)',
+        borderColor: 'rgba(41, 128, 185, 1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: 'Frequency' } },
+        x: { title: { display: true, text: 'Value Range' } }
+      }
+    }
+  });
+}
+
+function createCountyTopBottomChart() {
+  const canvas = document.getElementById('countyTopBottomChart');
+  if (!canvas) return;
+  if (countyTopBottomChart) countyTopBottomChart.destroy();
+
+  const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
+  if (!metricData) return;
+
+  const countyValues = Object.entries(metricData)
+    .filter(([key]) => key !== '_id' && key !== 'title')
+    .map(([county, value]) => ({ county, value }));
+  countyValues.sort((a, b) => b.value - a.value);
+  const top5 = countyValues.slice(0, 5);
+  const bottom5 = countyValues.slice(-5).reverse();
+
+  const labels = [...top5.map(d => d.county), ...bottom5.map(d => d.county)];
+  const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
+  const colors = [...top5.map(() => '#27ae60'), ...bottom5.map(() => '#e74c3c')];
+
+  countyTopBottomChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: selectedCountyMetric,
+        data: data,
+        backgroundColor: colors,
+        borderColor: colors,
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      scales: {
+        x: { beginAtZero: true, title: { display: true, text: 'Value' } },
+        y: { title: { display: true, text: 'County' } }
+      }
+    }
+  });
 }
 
 // Add event listener for window resize to handle responsive design

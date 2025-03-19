@@ -16,7 +16,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MongoDB connection configuration from environment variables
-const uri = process.env.MONGODB_URI; // e.g. mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility
+const uri = process.env.MONGODB_URI; // e.g. mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
 const dbName = process.env.DB_NAME || 'StateWiseComputation';
 const client = new MongoClient(uri);
 
@@ -113,6 +113,22 @@ app.get('/api/countyFullData/:stateName/:countyName', async (req, res) => {
     });
   } catch (error) {
     console.error(`Error fetching full county data for ${req.params.countyName}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// NEW API endpoint for aggregated county-level average values for a state.
+// This assumes that in each state-specific database, the "AverageValues" collection holds aggregated
+// county metrics (structured similar to state-level data but with county names as keys).
+app.get('/api/countyAverageValues/:stateName', async (req, res) => {
+  try {
+    const { stateName } = req.params;
+    const db = client.db(stateName);
+    const collection = db.collection('AverageValues');
+    const data = await collection.find({}).toArray();
+    res.json(data);
+  } catch (error) {
+    console.error('Error fetching county average values:', error);
     res.status(500).json({ error: error.message });
   }
 });
