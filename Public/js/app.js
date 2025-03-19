@@ -86,6 +86,7 @@ function initApp() {
     populateMetricSelect();
     createDistributionChart();
     createTopBottomChart();
+    displayCountryMetrics(allStateData); // Display country metrics on load
   });
 }
 
@@ -320,8 +321,6 @@ function createLegend(minPercent, maxPercent) {
   `;
 }
 
-// Continuation of app.js
-
 function handleStateClick(stateId) {
   const bus = document.getElementById('busAnimation');
   bus.classList.remove('active');
@@ -335,6 +334,7 @@ function handleStateClick(stateId) {
     createCountyMap(stateId);
     updateDataPanel();
     fetchStateData(stateId);
+    updateCountyMetrics(); // Add this line to update county metrics
   }, 1000); // Wait for bus animation to complete
 }
 
