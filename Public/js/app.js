@@ -72,10 +72,24 @@ let topBottomChart = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
+  updateLeftPanel(); // set left panel controls on load
 });
 
 function formatStateNameForDb(name) {
   return name.replace(/\s+/g, '_');
+}
+
+// This function toggles the left panel controls:
+// When no state is selected, show country metric selection.
+// When a state is selected, show county metric controls.
+function updateLeftPanel() {
+  if (!selectedState) {
+    document.getElementById('metricSelection').style.display = 'block';
+    document.getElementById('countyMetricSelection').style.display = 'none';
+  } else {
+    document.getElementById('metricSelection').style.display = 'none';
+    document.getElementById('countyMetricSelection').style.display = 'block';
+  }
 }
 
 function initApp() {
@@ -90,7 +104,8 @@ function initApp() {
     populateMetricSelect();
     createDistributionChart();
     createTopBottomChart();
-    updateDataPanel(); // update right sidebar with country metrics on load
+    updateDataPanel();
+    updateLeftPanel();
   });
 }
 
@@ -220,7 +235,7 @@ function createTopBottomChart() {
   const top5 = stateValues.slice(0, 5);
   const bottom5 = stateValues.slice(-5).reverse();
 
-  // Top performers will be red and bottom performers green
+  // Top performers will be red and bottom performers green.
   const labels = [...top5.map(d => d.state), ...bottom5.map(d => d.state)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
   const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
@@ -345,6 +360,7 @@ function handleStateClick(stateId) {
     fetchStateData(stateId);
     // Fetch aggregated county averages for the selected state
     fetchCountyAverages(stateId);
+    updateLeftPanel();
   }, 1000); // Wait for bus animation to complete
 }
 
@@ -411,7 +427,6 @@ function createCountyMap(stateId) {
         mapContainer.classList.remove('zoom-to-county');
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
         countyMap = { svg, path, projection };
-        // If county metrics have been fetched, update the county map colors
         updateCountyMapColors();
       });
   }, 800);
@@ -433,8 +448,7 @@ function handleBackToStates() {
   stateCharts = [];
   countyCharts.forEach(chart => chart.destroy());
   countyCharts = [];
-  // Hide county metric controls in the left panel when going back
-  document.getElementById('countyMetricSelection').style.display = 'none';
+  updateLeftPanel();
 }
 
 function handleBackToState() {
@@ -448,15 +462,12 @@ function handleBackToState() {
 
 function updateDataPanel() {
   const dataPanelContent = document.getElementById('dataPanelContent');
-  if (!dataPanelContent) return;
   if (!selectedState) {
     dataPanelContent.innerHTML = `
       <h2 class="section-title">United States</h2>
       <div id="countryMetricsGrid" class="metric-grid"></div>
     `;
     displayCountryMetrics(allStateData);
-    // Hide county-level controls
-    document.getElementById('countyMetricSelection').style.display = 'none';
     return;
   }
   if (selectedCounty) {
@@ -466,8 +477,12 @@ function updateDataPanel() {
     dataPanelContent.appendChild(countyPanel);
     document.getElementById('backToStateButton').addEventListener('click', handleBackToState);
   } else {
-    // When a state is selected (but no county), clear the right panel so state data isn't shown.
+    const template = document.getElementById('stateDataTemplate');
+    const statePanel = template.content.cloneNode(true);
     dataPanelContent.innerHTML = '';
+    dataPanelContent.appendChild(statePanel);
+    document.getElementById('backButton').addEventListener('click', handleBackToStates);
+    document.getElementById('stateName').textContent = statesData[selectedState].name;
   }
 }
 
@@ -666,7 +681,6 @@ function displayCountyData(data, countyName) {
       else if (collectionName.includes('Population')) barColor = '#2980b9';
       else if (collectionName.includes('Economic')) barColor = '#e67e22';
 
-      // For county top/bottom chart, ensure top is red and bottom is green.
       const chart = new Chart(canvas, {
         type: 'bar',
         data: {
@@ -685,20 +699,11 @@ function displayCountyData(data, countyName) {
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'top', labels: { color: '#2c3e50' } },
-            tooltip: {
-              callbacks: {
-                title: (tooltipItems) => `Range: ${tooltipItems[0].label}`,
-                label: (context) => `Frequency: ${context.raw}`
-              }
-            }
-          },
+          indexAxis: 'y',
           scales: {
-            y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' }, ticks: { color: '#2c3e50' } },
-            x: { title: { display: true, text: 'Range', color: '#2c3e50' }, ticks: { color: '#2c3e50' } }
-          },
-          animation: { duration: 1000 }
+            x: { beginAtZero: true, title: { display: true, text: 'Value' } },
+            y: { title: { display: true, text: 'County' } }
+          }
         }
       });
 
