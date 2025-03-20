@@ -130,12 +130,11 @@ function updateMapColors() {
   const values = Object.entries(metricData)
     .filter(([key]) => key !== '_id' && key !== 'title')
     .map(([, value]) => value);
-
   const minVal = Math.min(...values);
   const maxVal = Math.max(...values);
   const colorScale = d3.scaleQuantize()
     .domain([minVal, maxVal])
-    .range(['#27ae60', '#f1c40f', '#e67e22', '#e74c3c']);
+    .range(['#27ae60', '#e67e22', '#e74c3c']); // green, orange, red
 
   usMap.svg.selectAll('.state')
     .attr('fill', d => {
@@ -145,6 +144,21 @@ function updateMapColors() {
 
   usMap.colorScale = colorScale;
   createLegend(minVal, maxVal);
+}
+
+function createLegend(minVal, maxVal) {
+  const legend = document.getElementById('legend');
+  const colorScale = usMap?.colorScale;
+  if (!colorScale) return;
+  const thresholds = colorScale.thresholds(); // two thresholds for three colors
+  legend.innerHTML = `
+    <h3>${selectedMetric}</h3>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
+    </div>
+  `;
 }
 
 function createDistributionChart() {
@@ -206,9 +220,10 @@ function createTopBottomChart() {
   const top5 = stateValues.slice(0, 5);
   const bottom5 = stateValues.slice(-5).reverse();
 
+  // Top performers will be red and bottom performers green
   const labels = [...top5.map(d => d.state), ...bottom5.map(d => d.state)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
-  const colors = [...top5.map(() => '#27ae60'), ...bottom5.map(() => '#e74c3c')];
+  const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
 
   topBottomChart = new Chart(canvas, {
     type: 'bar',
@@ -262,7 +277,7 @@ function createUSMap() {
       const maxVal = Math.max(...values);
       const colorScale = d3.scaleQuantize()
         .domain([minVal, maxVal])
-        .range(['#27ae60', '#f1c40f', '#e67e22', '#e74c3c']);
+        .range(['#27ae60', '#e67e22', '#e74c3c']);
 
       const statesGroup = svg.append('g')
         .selectAll('path')
@@ -280,14 +295,17 @@ function createUSMap() {
         .attr('data-state-id', d => d.id)
         .on('click', (event, d) => handleStateClick(d.id))
         .on('mouseover', function(event, d) {
-          d3.select(this).attr('cursor', 'pointer').attr('fill', '#f1c40f');
+          d3.select(this).attr('cursor', 'pointer').attr('stroke-width', 2);
           const text = d3.select(`text[data-state-id="${d.id}"]`);
           text.text(statesData[d.id]?.name || '');
           text.attr('font-size', '12px');
         })
         .on('mouseout', function(event, d) {
-          const value = metricData[statesData[d.id]?.name];
-          d3.select(this).attr('fill', value !== undefined ? colorScale(value) : '#bdc3c7');
+          d3.select(this).attr('stroke-width', 1)
+            .attr('fill', () => {
+              const value = metricData[statesData[d.id]?.name];
+              return value !== undefined ? colorScale(value) : '#bdc3c7';
+            });
           const text = d3.select(`text[data-state-id="${d.id}"]`);
           text.text(statesData[d.id]?.abbr || '');
           text.attr('font-size', '10px');
@@ -310,22 +328,6 @@ function createUSMap() {
       createLegend(minVal, maxVal);
     })
     .catch(err => console.error('Error loading US map:', err));
-}
-
-function createLegend(minVal, maxVal) {
-  const legend = document.getElementById('legend');
-  const colorScale = usMap?.colorScale;
-  if (!colorScale) return;
-  const thresholds = colorScale.thresholds();
-  legend.innerHTML = `
-    <h3>${selectedMetric}</h3>
-    <div style="display: flex; align-items: center; gap: 10px;">
-      <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[1])};"></div> ${thresholds[1].toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
-    </div>
-  `;
 }
 
 function handleStateClick(stateId) {
@@ -464,14 +466,8 @@ function updateDataPanel() {
     dataPanelContent.appendChild(countyPanel);
     document.getElementById('backToStateButton').addEventListener('click', handleBackToState);
   } else {
-    const template = document.getElementById('stateDataTemplate');
-    const statePanel = template.content.cloneNode(true);
+    // When a state is selected (but no county), clear the right panel so state data isn't shown.
     dataPanelContent.innerHTML = '';
-    dataPanelContent.appendChild(statePanel);
-    document.getElementById('backButton').addEventListener('click', handleBackToStates);
-    document.getElementById('stateName').textContent = statesData[selectedState].name;
-    // Show county-level controls in the left panel when a state is selected
-    document.getElementById('countyMetricSelection').style.display = 'block';
   }
 }
 
@@ -560,7 +556,7 @@ function displayFrequencyDistributions(data) {
     });
 
     let barColor = '#27ae60';
-    if (collectionName.includes('Transit')) barColor = '#f1c40f';
+    if (collectionName.includes('Transit')) barColor = '#e67e22';
     else if (collectionName.includes('Population')) barColor = '#2980b9';
     else if (collectionName.includes('Economic')) barColor = '#e67e22';
 
@@ -666,10 +662,11 @@ function displayCountyData(data, countyName) {
       });
 
       let barColor = '#27ae60';
-      if (collectionName.includes('Transit')) barColor = '#f1c40f';
+      if (collectionName.includes('Transit')) barColor = '#e67e22';
       else if (collectionName.includes('Population')) barColor = '#2980b9';
       else if (collectionName.includes('Economic')) barColor = '#e67e22';
 
+      // For county top/bottom chart, ensure top is red and bottom is green.
       const chart = new Chart(canvas, {
         type: 'bar',
         data: {
@@ -763,10 +760,11 @@ function updateCountyMapColors() {
   const maxVal = Math.max(...values);
   const colorScale = d3.scaleQuantize()
     .domain([minVal, maxVal])
-    .range(['#27ae60', '#f1c40f', '#e67e22', '#e74c3c']);
+    .range(['#27ae60', '#e67e22', '#e74c3c']);
   countyMap.svg.selectAll('.county')
     .attr('fill', d => {
-      const value = metricData[d.properties.name];
+      const countyNameKey = d.properties.name.toUpperCase();
+      const value = metricData[countyNameKey];
       return value !== undefined ? colorScale(value) : '#bdc3c7';
     });
   countyMap.colorScale = colorScale;
@@ -788,7 +786,6 @@ function createCountyLegendForMap() {
     <div style="display: flex; align-items: center; gap: 10px;">
       <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[1])};"></div> ${thresholds[1].toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
     </div>
   `;
@@ -855,9 +852,10 @@ function createCountyTopBottomChart() {
   const top5 = countyValues.slice(0, 5);
   const bottom5 = countyValues.slice(-5).reverse();
 
+  // Top performers will be red and bottom performers green
   const labels = [...top5.map(d => d.county), ...bottom5.map(d => d.county)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
-  const colors = [...top5.map(() => '#27ae60'), ...bottom5.map(() => '#e74c3c')];
+  const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
 
   countyTopBottomChart = new Chart(canvas, {
     type: 'bar',
