@@ -64,24 +64,23 @@ let countyCharts = [];
 let allStateData = [];
 let selectedMetric = null;
 
-let allCountyData = []; // aggregated county metrics for the selected state
-let selectedCountyMetric = null; // currently selected county metric
+let allCountyData = [];
+let selectedCountyMetric = null;
 
 let distributionChart = null;
 let topBottomChart = null;
+let countyDistributionChart = null;
+let countyTopBottomChart = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
-  updateLeftPanel(); // set left panel controls on load
+  updateLeftPanel();
 });
 
 function formatStateNameForDb(name) {
   return name.replace(/\s+/g, '_');
 }
 
-// This function toggles the left panel controls:
-// When no state is selected, show country metric selection.
-// When a state is selected, show county metric controls.
 function updateLeftPanel() {
   if (!selectedState) {
     document.getElementById('metricSelection').style.display = 'block';
@@ -149,7 +148,7 @@ function updateMapColors() {
   const maxVal = Math.max(...values);
   const colorScale = d3.scaleQuantize()
     .domain([minVal, maxVal])
-    .range(['#27ae60', '#e67e22', '#e74c3c']); // green, orange, red
+    .range(['#27ae60', '#e67e22', '#e74c3c']);
 
   usMap.svg.selectAll('.state')
     .attr('fill', d => {
@@ -163,11 +162,12 @@ function updateMapColors() {
 
 function createLegend(minVal, maxVal) {
   const legend = document.getElementById('legend');
-  const colorScale = usMap?.colorScale;
+  const colorScale = activeView === 'state' ? usMap?.colorScale : countyMap?.colorScale;
   if (!colorScale) return;
-  const thresholds = colorScale.thresholds(); // two thresholds for three colors
+  const title = activeView === 'state' ? selectedMetric : selectedCountyMetric;
+  const thresholds = colorScale.thresholds();
   legend.innerHTML = `
-    <h3>${selectedMetric}</h3>
+    <h3>${title}</h3>
     <div style="display: flex; align-items: center; gap: 10px;">
       <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
@@ -235,7 +235,6 @@ function createTopBottomChart() {
   const top5 = stateValues.slice(0, 5);
   const bottom5 = stateValues.slice(-5).reverse();
 
-  // Top performers will be red and bottom performers green.
   const labels = [...top5.map(d => d.state), ...bottom5.map(d => d.state)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
   const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
@@ -348,7 +347,7 @@ function createUSMap() {
 function handleStateClick(stateId) {
   const bus = document.getElementById('busAnimation');
   bus.classList.remove('active');
-  void bus.offsetWidth; // Trigger reflow
+  void bus.offsetWidth;
   bus.classList.add('active');
 
   setTimeout(() => {
@@ -358,10 +357,9 @@ function handleStateClick(stateId) {
     createCountyMap(stateId);
     updateDataPanel();
     fetchStateData(stateId);
-    // Fetch aggregated county averages for the selected state
     fetchCountyAverages(stateId);
     updateLeftPanel();
-  }, 1000); // Wait for bus animation to complete
+  }, 1000);
 }
 
 function createCountyMap(stateId) {
@@ -392,7 +390,16 @@ function createCountyMap(stateId) {
           .attr('stroke', '#fff')
           .attr('stroke-width', 2);
 
-        // Draw counties with class "county" so we can update colors later
+        const metricData = allCountyData.find(d => d.title === selectedCountyMetric) || {};
+        const values = Object.entries(metricData)
+          .filter(([key]) => key !== '_id' && key !== 'title')
+          .map(([, value]) => value);
+        const minVal = values.length ? Math.min(...values) : 0;
+        const maxVal = values.length ? Math.max(...values) : 1;
+        const colorScale = d3.scaleQuantize()
+          .domain([minVal, maxVal])
+          .range(['#27ae60', '#e67e22', '#e74c3c']);
+
         svg.append('g')
           .selectAll('path')
           .data(counties)
@@ -400,16 +407,19 @@ function createCountyMap(stateId) {
           .append('path')
           .attr('class', 'county')
           .attr('d', path)
-          .attr('fill', '#d5d8dc')
+          .attr('fill', d => {
+            const value = metricData[d.properties.name.toUpperCase()];
+            return value !== undefined ? colorScale(value) : '#bdc3c7';
+          })
           .attr('stroke', '#fff')
           .attr('stroke-width', 0.5)
           .on('click', (event, d) => handleCountyClick(d.properties.name))
           .on('mouseover', function() {
             d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#2980b9');
           })
-          .on('mouseout', function() {
-            d3.select(this).transition().attr('fill', '#d5d8dc');
-            updateCountyMapColors(); // reset color on mouseout based on metric
+          .on('mouseout', function(event, d) {
+            const value = metricData[d.properties.name.toUpperCase()];
+            d3.select(this).transition().attr('fill', value !== undefined ? colorScale(value) : '#bdc3c7');
           });
 
         svg.append('g')
@@ -426,8 +436,8 @@ function createCountyMap(stateId) {
         mapContainer.appendChild(svg.node());
         mapContainer.classList.remove('zoom-to-county');
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
-        countyMap = { svg, path, projection };
-        updateCountyMapColors();
+        countyMap = { svg, path, projection, colorScale };
+        createLegend(minVal, maxVal);
       });
   }, 800);
 }
@@ -448,6 +458,8 @@ function handleBackToStates() {
   stateCharts = [];
   countyCharts.forEach(chart => chart.destroy());
   countyCharts = [];
+  if (countyDistributionChart) countyDistributionChart.destroy();
+  if (countyTopBottomChart) countyTopBottomChart.destroy();
   updateLeftPanel();
 }
 
@@ -712,8 +724,6 @@ function displayCountyData(data, countyName) {
   }
 }
 
-// New functions for county-level metric controls
-
 function fetchCountyAverages(stateId) {
   const stateName = statesData[stateId]?.name;
   if (!stateName) return;
@@ -726,9 +736,12 @@ function fetchCountyAverages(stateId) {
         selectedCountyMetric = allCountyData[0].title;
         populateCountyMetricSelect(allCountyData);
         updateCountyMapColors();
-        createCountyLegendForMap();
         createCountyDistributionChart();
         createCountyTopBottomChart();
+        const values = Object.entries(allCountyData[0])
+          .filter(([k]) => k !== '_id' && k !== 'title')
+          .map(([, v]) => v);
+        createLegend(Math.min(...values), Math.max(...values));
       }
     })
     .catch(err => console.error("Error fetching county averages:", err));
@@ -749,9 +762,13 @@ function populateCountyMetricSelect(data) {
 function countyHandleMetricChange(event) {
   selectedCountyMetric = event.target.value;
   updateCountyMapColors();
-  createCountyLegendForMap();
   createCountyDistributionChart();
   createCountyTopBottomChart();
+  const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
+  const values = Object.entries(metricData)
+    .filter(([key]) => key !== '_id' && key !== 'title')
+    .map(([, value]) => value);
+  createLegend(Math.min(...values), Math.max(...values));
 }
 
 function updateCountyMapColors() {
@@ -774,30 +791,6 @@ function updateCountyMapColors() {
     });
   countyMap.colorScale = colorScale;
 }
-
-function createCountyLegendForMap() {
-  const legend = document.getElementById('legend');
-  const colorScale = countyMap?.colorScale;
-  if (!colorScale) return;
-  const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
-  const values = Object.entries(metricData)
-    .filter(([key]) => key !== '_id' && key !== 'title')
-    .map(([, value]) => value);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
-  const thresholds = colorScale.thresholds();
-  legend.innerHTML = `
-    <h3>${selectedCountyMetric}</h3>
-    <div style="display: flex; align-items: center; gap: 10px;">
-      <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
-      <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
-    </div>
-  `;
-}
-
-let countyDistributionChart = null;
-let countyTopBottomChart = null;
 
 function createCountyDistributionChart() {
   const canvas = document.getElementById('countyDistributionChart');
@@ -857,7 +850,6 @@ function createCountyTopBottomChart() {
   const top5 = countyValues.slice(0, 5);
   const bottom5 = countyValues.slice(-5).reverse();
 
-  // Top performers will be red and bottom performers green
   const labels = [...top5.map(d => d.county), ...bottom5.map(d => d.county)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
   const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
@@ -886,7 +878,6 @@ function createCountyTopBottomChart() {
   });
 }
 
-// Add event listener for window resize to handle responsive design
 window.addEventListener('resize', () => {
   if (activeView === 'state' && usMap) {
     createUSMap();
