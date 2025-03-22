@@ -27,14 +27,23 @@
     <main class="transit-main">
       <!-- Left Panel -->
       <div id="leftPanel" class="left-panel">
-        <!-- Country Overview Heading -->
-        <h2 id="countryOverviewTitle">Overview</h2>
-        
+        <h2>Overview</h2>
         <div id="metricSelection">
           <label for="metricSelect">Select Metric:</label>
           <select id="metricSelect"></select>
         </div>
-      
+        <div class="chart-wrapper">
+          <h4>Distribution</h4>
+          <div id="distributionChartContainer" class="chart-container">
+            <canvas id="distributionChart"></canvas>
+          </div>
+        </div>
+        <div class="chart-wrapper">
+          <h4>Top/Bottom Performers</h4>
+          <div id="topBottomChartContainer" class="chart-container">
+            <canvas id="topBottomChart"></canvas>
+          </div>
+        </div>
         <!-- County-Level Metric Selection -->
         <div id="countyMetricSelection" style="display: none;">
           <h2>County Overview</h2>
@@ -115,4 +124,3 @@
   </script>
 </body>
 </html>
- 
