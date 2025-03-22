@@ -156,13 +156,22 @@ function updateMapColors() {
   if (!metricData) return;
 
   const values = Object.entries(metricData)
+<<<<<<< HEAD
     .filter(([k]) => k !== '_id' && k !== 'title')
     .map(([, v]) => v);
+=======
+    .filter(([key]) => key !== '_id' && key !== 'title')
+    .map(([, value]) => value);
+>>>>>>> parent of 8f82cce (b)
   const minVal = Math.min(...values);
   const maxVal = Math.max(...values);
   const colorScale = d3.scaleQuantize()
     .domain([minVal, maxVal])
+<<<<<<< HEAD
     .range(['#27ae60', '#e67e22', '#e74c3c']);
+=======
+    .range(['#27ae60', '#e67e22', '#e74c3c']); // green, orange, red
+>>>>>>> parent of 8f82cce (b)
 
   usMap.svg.selectAll('.state')
     .attr('fill', d => {
@@ -177,8 +186,13 @@ function updateMapColors() {
 function createLegend(minVal, maxVal) {
   const legend = document.getElementById('legend');
   const colorScale = usMap?.colorScale;
+<<<<<<< HEAD
   if (!legend || !colorScale) return;
   const thresholds = colorScale.thresholds();
+=======
+  if (!colorScale) return;
+  const thresholds = colorScale.thresholds(); // two thresholds for three colors
+>>>>>>> parent of 8f82cce (b)
   legend.innerHTML = `
     <h3>${selectedMetric}</h3>
     <div style="display: flex; align-items: center; gap: 10px;">
@@ -244,6 +258,11 @@ function createTopBottomChart() {
   stateValues.sort((a, b) => b.value - a.value);
   const top5 = stateValues.slice(0, 5);
   const bottom5 = stateValues.slice(-5).reverse();
+<<<<<<< HEAD
+=======
+
+  // Top performers will be red and bottom performers green
+>>>>>>> parent of 8f82cce (b)
   const labels = [...top5.map(d => d.state), ...bottom5.map(d => d.state)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
   const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
@@ -329,7 +348,11 @@ function createUSMap() {
           d3.select(this).attr('stroke-width', 1)
             .attr('fill', () => {
               const value = metricData[statesData[d.id]?.name];
+<<<<<<< HEAD
               return (value !== undefined) ? colorScale(value) : '#bdc3c7';
+=======
+              return value !== undefined ? colorScale(value) : '#bdc3c7';
+>>>>>>> parent of 8f82cce (b)
             });
           const text = d3.select(`text[data-state-id="${d.id}"]`);
           text.text(statesData[d.id]?.abbr || '');
@@ -491,12 +514,14 @@ function updateDataPanel() {
     dataPanelContent.appendChild(countyPanel);
     document.getElementById('backToStateButton').addEventListener('click', handleBackToState);
   } else {
-    const template = document.getElementById('stateDataTemplate');
-    const statePanel = template.content.cloneNode(true);
+    // When a state is selected (but no county), clear the right panel so state data isn't shown.
     dataPanelContent.innerHTML = '';
+<<<<<<< HEAD
     dataPanelContent.appendChild(statePanel);
     document.getElementById('backButton').addEventListener('click', handleBackToStates);
     document.getElementById('stateName').textContent = statesData[selectedState].name;
+=======
+>>>>>>> parent of 8f82cce (b)
   }
 }
 
@@ -702,6 +727,7 @@ function displayCountyData(data, countyName) {
       else if (collectionName.includes('Population')) barColor = '#2980b9';
       else if (collectionName.includes('Economic')) barColor = '#e67e22';
 
+      // For county top/bottom chart, ensure top is red and bottom is green.
       const chart = new Chart(canvas, {
         type: 'bar',
         data: {
@@ -827,12 +853,20 @@ function updateCountyMapColors() {
   const colorScale = d3.scaleQuantize()
     .domain([minVal, maxVal])
     .range(['#27ae60', '#e67e22', '#e74c3c']);
+<<<<<<< HEAD
 
   countyMap.svg.selectAll('.county')
     .attr('fill', d => {
       const cName = d.properties.name.toUpperCase();
       const val = metricData[cName];
       return (val !== undefined) ? colorScale(val) : '#bdc3c7';
+=======
+  countyMap.svg.selectAll('.county')
+    .attr('fill', d => {
+      const countyNameKey = d.properties.name.toUpperCase();
+      const value = metricData[countyNameKey];
+      return value !== undefined ? colorScale(value) : '#bdc3c7';
+>>>>>>> parent of 8f82cce (b)
     });
 
   countyMap.colorScale = colorScale;
@@ -856,9 +890,15 @@ function createCountyLegendForMap() {
   legend.innerHTML = `
     <h3>${selectedCountyMetric}</h3>
     <div style="display: flex; align-items: center; gap: 10px;">
+<<<<<<< HEAD
       <div style="width: 20px; height: 20px; background: ${countyMap.colorScale(minVal)};"></div> ${minVal.toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${countyMap.colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${countyMap.colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
+=======
+      <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
+      <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
+>>>>>>> parent of 8f82cce (b)
     </div>
   `;
 }
@@ -922,6 +962,11 @@ function createCountyTopBottomChart() {
   countyValues.sort((a, b) => b.value - a.value);
   const top5 = countyValues.slice(0, 5);
   const bottom5 = countyValues.slice(-5).reverse();
+<<<<<<< HEAD
+=======
+
+  // Top performers will be red and bottom performers green
+>>>>>>> parent of 8f82cce (b)
   const labels = [...top5.map(d => d.county), ...bottom5.map(d => d.county)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
   const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
