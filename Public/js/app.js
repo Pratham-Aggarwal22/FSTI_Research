@@ -784,14 +784,6 @@ function fetchCountyAverages(stateId) {
       if (!response.ok) throw new Error('Network response was not ok');
       return response.json();
     })
-    .then(data => {
-      allCountyData = data;
-      if (allCountyData.length > 0) {
-        selectedCountyMetric = allCountyData[0].title;
-        populateCountyMetricSelect();
-      }
-      return data;
-    })
     .catch(err => {
       console.error("Error fetching county averages:", err);
       throw err;
