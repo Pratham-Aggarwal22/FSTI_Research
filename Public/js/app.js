@@ -88,6 +88,14 @@ function updateLeftPanel() {
   } else {
     document.getElementById('metricSelection').style.display = 'none';
     document.getElementById('countyMetricSelection').style.display = 'block';
+    
+    // Update the county metrics display
+    if (allCountyData && allCountyData.length > 0) {
+      const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
+      if (metricData) {
+        displayCountyMetrics(metricData);
+      }
+    }
   }
 }
 
@@ -355,22 +363,35 @@ function handleStateClick(stateId) {
     selectedCounty = null;
     activeView = 'county';
     
+    // First fetch the county averages for the map
     fetchCountyAverages(stateId)
       .then(() => {
         createCountyMap(stateId);
         updateDataPanel();
-        fetchStateData(stateId);
         
         document.getElementById('metricSelection').style.display = 'none';
         document.getElementById('countyMetricSelection').style.display = 'block';
         
-        createCountyDistributionChart();
-        createCountyTopBottomChart();
+        // Use the same data fetching approach as the right panel
+        const stateName = statesData[stateId].name;
+        const stateNameForDb = formatStateNameForDb(stateName);
+        
+        // Fetch the county data using the existing endpoint
+        return fetch(`/api/countyAverageValues/${encodeURIComponent(stateNameForDb)}`);
+      })
+      .then(response => response.json())
+      .then(data => {
+        allCountyData = data;
+        if (allCountyData.length > 0) {
+          selectedCountyMetric = allCountyData[0].title;
+          populateCountyMetricSelect();
+          createCountyDistributionChart();
+          createCountyTopBottomChart();
+        }
         updateLeftPanel();
       })
       .catch(err => {
         console.error('Error handling state click:', err);
-        // Optionally show an error message to the user
       });
   }, 1000);
 }
