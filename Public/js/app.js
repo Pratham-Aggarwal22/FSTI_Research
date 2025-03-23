@@ -359,6 +359,14 @@ function handleStateClick(stateId) {
     fetchStateData(stateId);
     fetchCountyAverages(stateId);
     updateLeftPanel();
+    
+    // Show county metric selection and hide state metric selection
+    document.getElementById('metricSelection').style.display = 'none';
+    document.getElementById('countyMetricSelection').style.display = 'block';
+    
+    // Update distribution and top/bottom charts for counties
+    createCountyDistributionChart();
+    createCountyTopBottomChart();
   }, 1000);
 }
 
@@ -390,6 +398,7 @@ function createCountyMap(stateId) {
           .attr('stroke', '#fff')
           .attr('stroke-width', 2);
 
+        // Get the metric data for coloring
         const metricData = allCountyData.find(d => d.title === selectedCountyMetric) || {};
         const values = Object.entries(metricData)
           .filter(([key]) => key !== '_id' && key !== 'title')
@@ -414,24 +423,24 @@ function createCountyMap(stateId) {
           .attr('stroke', '#fff')
           .attr('stroke-width', 0.5)
           .on('click', (event, d) => handleCountyClick(d.properties.name))
-          .on('mouseover', function() {
-            d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#2980b9');
+          .on('mouseover', function(event, d) {
+            d3.select(this)
+              .attr('cursor', 'pointer')
+              .attr('stroke-width', 2)
+              .attr('stroke', '#2c3e50');
+            
+            // Show county name and value
+            const value = metricData[d.properties.name.toUpperCase()];
+            const tooltip = d3.select('#tooltip')
+              .style('display', 'block')
+              .html(`${d.properties.name}<br>${value !== undefined ? value.toFixed(2) : 'N/A'}`);
           })
           .on('mouseout', function(event, d) {
-            const value = metricData[d.properties.name.toUpperCase()];
-            d3.select(this).transition().attr('fill', value !== undefined ? colorScale(value) : '#bdc3c7');
+            d3.select(this)
+              .attr('stroke-width', 0.5)
+              .attr('stroke', '#fff');
+            d3.select('#tooltip').style('display', 'none');
           });
-
-        svg.append('g')
-          .selectAll('text')
-          .data(counties)
-          .enter()
-          .append('text')
-          .attr('transform', d => `translate(${path.centroid(d)})`)
-          .attr('text-anchor', 'middle')
-          .attr('font-size', '8px')
-          .attr('fill', '#2c3e50')
-          .text(d => d.properties.name);
 
         mapContainer.appendChild(svg.node());
         mapContainer.classList.remove('zoom-to-county');
@@ -460,6 +469,14 @@ function handleBackToStates() {
   countyCharts = [];
   if (countyDistributionChart) countyDistributionChart.destroy();
   if (countyTopBottomChart) countyTopBottomChart.destroy();
+  
+  // Show state metric selection and hide county metric selection
+  document.getElementById('metricSelection').style.display = 'block';
+  document.getElementById('countyMetricSelection').style.display = 'none';
+  
+  // Update charts for states
+  createDistributionChart();
+  createTopBottomChart();
   updateLeftPanel();
 }
 
