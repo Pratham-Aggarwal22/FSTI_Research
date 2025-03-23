@@ -355,21 +355,23 @@ function handleStateClick(stateId) {
     selectedCounty = null;
     activeView = 'county';
     
-    // Fetch county data first
-    fetchCountyAverages(stateId).then(() => {
-      createCountyMap(stateId);
-      updateDataPanel();
-      fetchStateData(stateId);
-      
-      // Show county metric selection and hide state metric selection
-      document.getElementById('metricSelection').style.display = 'none';
-      document.getElementById('countyMetricSelection').style.display = 'block';
-      
-      // Update distribution and top/bottom charts for counties
-      createCountyDistributionChart();
-      createCountyTopBottomChart();
-      updateLeftPanel();
-    });
+    fetchCountyAverages(stateId)
+      .then(() => {
+        createCountyMap(stateId);
+        updateDataPanel();
+        fetchStateData(stateId);
+        
+        document.getElementById('metricSelection').style.display = 'none';
+        document.getElementById('countyMetricSelection').style.display = 'block';
+        
+        createCountyDistributionChart();
+        createCountyTopBottomChart();
+        updateLeftPanel();
+      })
+      .catch(err => {
+        console.error('Error handling state click:', err);
+        // Optionally show an error message to the user
+      });
   }, 1000);
 }
 
@@ -389,11 +391,25 @@ function createCountyMap(stateId) {
     d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json')
       .then(us => {
         mapContainer.innerHTML = '';
-        const counties = topojson.feature(us, us.objects.counties).features.filter(c => c.id.toString().startsWith(stateId));
-        const stateFeature = topojson.feature(us, us.objects.states).features.find(s => s.id === stateId);
+        const counties = topojson.feature(us, us.objects.counties).features
+          .filter(c => c.id.toString().startsWith(stateId));
+        const stateFeature = topojson.feature(us, us.objects.states).features
+          .find(s => s.id === stateId);
+        
         const projection = d3.geoAlbersUsa().fitSize([width, height], stateFeature);
         const path = d3.geoPath().projection(projection);
 
+        // Get the metric data for coloring
+        const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
+        const values = Object.values(metricData || {}).filter(v => typeof v === 'number');
+        const minVal = Math.min(...values);
+        const maxVal = Math.max(...values);
+        
+        const colorScale = d3.scaleQuantize()
+          .domain([minVal, maxVal])
+          .range(['#27ae60', '#e67e22', '#e74c3c']);
+
+        // Draw state boundary
         svg.append('path')
           .datum(stateFeature)
           .attr('d', path)
@@ -401,17 +417,7 @@ function createCountyMap(stateId) {
           .attr('stroke', '#fff')
           .attr('stroke-width', 2);
 
-        // Get the metric data for coloring
-        const metricData = allCountyData.find(d => d.title === selectedCountyMetric) || {};
-        const values = Object.entries(metricData)
-          .filter(([key]) => key !== '_id' && key !== 'title')
-          .map(([, value]) => value);
-        const minVal = values.length ? Math.min(...values) : 0;
-        const maxVal = values.length ? Math.max(...values) : 1;
-        const colorScale = d3.scaleQuantize()
-          .domain([minVal, maxVal])
-          .range(['#27ae60', '#e67e22', '#e74c3c']);
-
+        // Draw counties
         svg.append('g')
           .selectAll('path')
           .data(counties)
@@ -420,25 +426,27 @@ function createCountyMap(stateId) {
           .attr('class', 'county')
           .attr('d', path)
           .attr('fill', d => {
-            const value = metricData[d.properties.name.toUpperCase()];
+            if (!metricData) return '#bdc3c7';
+            const countyName = d.properties.name.toUpperCase();
+            const value = metricData[countyName];
             return value !== undefined ? colorScale(value) : '#bdc3c7';
           })
           .attr('stroke', '#fff')
           .attr('stroke-width', 0.5)
-          .on('click', (event, d) => handleCountyClick(d.properties.name))
           .on('mouseover', function(event, d) {
             d3.select(this)
               .attr('cursor', 'pointer')
               .attr('stroke-width', 2)
               .attr('stroke', '#2c3e50');
             
-            // Show county name and value
-            const value = metricData[d.properties.name.toUpperCase()];
+            const value = metricData ? metricData[d.properties.name.toUpperCase()] : undefined;
             const tooltip = d3.select('#tooltip')
               .style('display', 'block')
+              .style('left', (event.pageX + 10) + 'px')
+              .style('top', (event.pageY - 10) + 'px')
               .html(`${d.properties.name}<br>${value !== undefined ? value.toFixed(2) : 'N/A'}`);
           })
-          .on('mouseout', function(event, d) {
+          .on('mouseout', function() {
             d3.select(this)
               .attr('stroke-width', 0.5)
               .attr('stroke', '#fff');
@@ -450,7 +458,8 @@ function createCountyMap(stateId) {
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
         countyMap = { svg, path, projection, colorScale };
         createLegend(minVal, maxVal);
-      });
+      })
+      .catch(err => console.error('Error loading county map:', err));
   }, 800);
 }
 
@@ -746,22 +755,26 @@ function displayCountyData(data, countyName) {
 
 function fetchCountyAverages(stateId) {
   const stateName = statesData[stateId]?.name;
-  if (!stateName) return;
+  if (!stateName) return Promise.reject('Invalid state ID');
   const stateNameForDb = formatStateNameForDb(stateName);
   
-  fetch(`/api/countyAverageValues/${stateNameForDb}`)
-    .then(response => response.json())
+  return fetch(`/api/countyAverageValues/${encodeURIComponent(stateNameForDb)}`)
+    .then(response => {
+      if (!response.ok) throw new Error('Network response was not ok');
+      return response.json();
+    })
     .then(data => {
       allCountyData = data;
       if (allCountyData.length > 0) {
         selectedCountyMetric = allCountyData[0].title;
         populateCountyMetricSelect();
-        updateCountyMapColors();
-        createCountyDistributionChart();
-        createCountyTopBottomChart();
       }
+      return data;
     })
-    .catch(err => console.error("Error fetching county averages:", err));
+    .catch(err => {
+      console.error("Error fetching county averages:", err);
+      throw err;
+    });
 }
 
 function populateCountyMetricSelect() {
