@@ -354,19 +354,22 @@ function handleStateClick(stateId) {
     selectedState = stateId;
     selectedCounty = null;
     activeView = 'county';
-    createCountyMap(stateId);
-    updateDataPanel();
-    fetchStateData(stateId);
-    fetchCountyAverages(stateId);
-    updateLeftPanel();
     
-    // Show county metric selection and hide state metric selection
-    document.getElementById('metricSelection').style.display = 'none';
-    document.getElementById('countyMetricSelection').style.display = 'block';
-    
-    // Update distribution and top/bottom charts for counties
-    createCountyDistributionChart();
-    createCountyTopBottomChart();
+    // Fetch county data first
+    fetchCountyAverages(stateId).then(() => {
+      createCountyMap(stateId);
+      updateDataPanel();
+      fetchStateData(stateId);
+      
+      // Show county metric selection and hide state metric selection
+      document.getElementById('metricSelection').style.display = 'none';
+      document.getElementById('countyMetricSelection').style.display = 'block';
+      
+      // Update distribution and top/bottom charts for counties
+      createCountyDistributionChart();
+      createCountyTopBottomChart();
+      updateLeftPanel();
+    });
   }, 1000);
 }
 
@@ -745,47 +748,37 @@ function fetchCountyAverages(stateId) {
   const stateName = statesData[stateId]?.name;
   if (!stateName) return;
   const stateNameForDb = formatStateNameForDb(stateName);
+  
   fetch(`/api/countyAverageValues/${stateNameForDb}`)
     .then(response => response.json())
     .then(data => {
       allCountyData = data;
       if (allCountyData.length > 0) {
         selectedCountyMetric = allCountyData[0].title;
-        populateCountyMetricSelect(allCountyData);
+        populateCountyMetricSelect();
         updateCountyMapColors();
         createCountyDistributionChart();
         createCountyTopBottomChart();
-        const values = Object.entries(allCountyData[0])
-          .filter(([k]) => k !== '_id' && k !== 'title')
-          .map(([, v]) => v);
-        createLegend(Math.min(...values), Math.max(...values));
       }
     })
     .catch(err => console.error("Error fetching county averages:", err));
 }
 
-function populateCountyMetricSelect(data) {
+function populateCountyMetricSelect() {
   const select = document.getElementById('countyMetricSelect');
-  select.innerHTML = '';
-  data.forEach(metric => {
+  select.innerHTML = ''; // Clear existing options
+  allCountyData.forEach(metric => {
     const option = document.createElement('option');
     option.value = metric.title;
     option.textContent = metric.title;
     select.appendChild(option);
   });
-  select.addEventListener('change', countyHandleMetricChange);
-}
-
-function countyHandleMetricChange(event) {
-  selectedCountyMetric = event.target.value;
-  updateCountyMapColors();
-  createCountyDistributionChart();
-  createCountyTopBottomChart();
-  const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
-  const values = Object.entries(metricData)
-    .filter(([key]) => key !== '_id' && key !== 'title')
-    .map(([, value]) => value);
-  createLegend(Math.min(...values), Math.max(...values));
+  select.addEventListener('change', (event) => {
+    selectedCountyMetric = event.target.value;
+    updateCountyMapColors();
+    createCountyDistributionChart();
+    createCountyTopBottomChart();
+  });
 }
 
 function updateCountyMapColors() {
@@ -826,18 +819,15 @@ function createCountyDistributionChart() {
     .domain([Math.min(...values), Math.max(...values)])
     .thresholds(binCount)(values);
 
-  const labels = bins.map(bin => `${bin.x0.toFixed(1)} - ${bin.x1.toFixed(1)}`);
-  const data = bins.map(bin => bin.length);
-
   countyDistributionChart = new Chart(canvas, {
     type: 'bar',
     data: {
-      labels: labels,
+      labels: bins.map(b => `${b.x0.toFixed(1)} - ${b.x1.toFixed(1)}`),
       datasets: [{
-        label: 'Frequency',
-        data: data,
-        backgroundColor: 'rgba(41, 128, 185, 0.7)',
-        borderColor: 'rgba(41, 128, 185, 1)',
+        label: selectedCountyMetric,
+        data: bins.map(b => b.length),
+        backgroundColor: '#3498db',
+        borderColor: '#2980b9',
         borderWidth: 1
       }]
     },
@@ -845,8 +835,13 @@ function createCountyDistributionChart() {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        y: { beginAtZero: true, title: { display: true, text: 'Frequency' } },
-        x: { title: { display: true, text: 'Value Range' } }
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'Number of Counties' }
+        },
+        x: {
+          title: { display: true, text: 'Value Range' }
+        }
       }
     }
   });
@@ -862,14 +857,16 @@ function createCountyTopBottomChart() {
 
   const countyValues = Object.entries(metricData)
     .filter(([key]) => key !== '_id' && key !== 'title')
-    .map(([county, value]) => ({ county, value }));
+    .map(([county, value]) => ({ county, value }))
+    .filter(item => !isNaN(item.value));
+
   countyValues.sort((a, b) => b.value - a.value);
   const top5 = countyValues.slice(0, 5);
   const bottom5 = countyValues.slice(-5).reverse();
 
   const labels = [...top5.map(d => d.county), ...bottom5.map(d => d.county)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
-  const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
+  const colors = [...Array(5).fill('#e74c3c'), ...Array(5).fill('#27ae60')];
 
   countyTopBottomChart = new Chart(canvas, {
     type: 'bar',
@@ -888,8 +885,13 @@ function createCountyTopBottomChart() {
       maintainAspectRatio: false,
       indexAxis: 'y',
       scales: {
-        x: { beginAtZero: true, title: { display: true, text: 'Value' } },
-        y: { title: { display: true, text: 'County' } }
+        x: { 
+          beginAtZero: true,
+          title: { display: true, text: 'Value' }
+        },
+        y: {
+          title: { display: true, text: 'County' }
+        }
       }
     }
   });
