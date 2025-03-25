@@ -428,6 +428,7 @@ function createCountyMap(stateId) {
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
         countyMap = { svg, path, projection };
         updateCountyMapColors();
+        createCountyLegendForMap();
       });
   }, 800);
 }
@@ -712,7 +713,7 @@ function displayCountyData(data, countyName) {
   }
 }
 
-// New functions for county-level metric controls
+// NEW functions for county-level metric controls
 
 function fetchCountyAverages(stateId) {
   const stateName = statesData[stateId]?.name;
@@ -758,20 +759,29 @@ function updateCountyMapColors() {
   if (!countyMap) return;
   const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
   if (!metricData) return;
-  const values = Object.entries(metricData)
-    .filter(([key]) => key !== '_id' && key !== 'title')
-    .map(([, value]) => value);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
+  
+  // Get only numeric values for proper scale computation.
+  const numericValues = Object.entries(metricData)
+    .filter(([key, value]) => key !== '_id' && key !== 'title' && !isNaN(Number(value)))
+    .map(([, value]) => Number(value));
+  
+  const minVal = Math.min(...numericValues);
+  const maxVal = Math.max(...numericValues);
   const colorScale = d3.scaleQuantize()
     .domain([minVal, maxVal])
-    .range(['#27ae60', '#e67e22', '#e74c3c']);
+    .range(['#27ae60', '#e67e22', '#e74c3c']); // green, orange, red
+  
   countyMap.svg.selectAll('.county')
     .attr('fill', d => {
       const countyNameKey = d.properties.name.toUpperCase();
-      const value = metricData[countyNameKey];
-      return value !== undefined ? colorScale(value) : '#bdc3c7';
+      let value = metricData[countyNameKey];
+      // If value is "N/A" or not a number, return the dedicated N/A color.
+      if (value === "N/A" || isNaN(Number(value))) {
+        return '#808080'; // Color for N/A values
+      }
+      return colorScale(Number(value));
     });
+  
   countyMap.colorScale = colorScale;
 }
 
@@ -780,11 +790,14 @@ function createCountyLegendForMap() {
   const colorScale = countyMap?.colorScale;
   if (!colorScale) return;
   const metricData = allCountyData.find(d => d.title === selectedCountyMetric);
-  const values = Object.entries(metricData)
-    .filter(([key]) => key !== '_id' && key !== 'title')
-    .map(([, value]) => value);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
+  
+  // Consider only numeric values to build the scale thresholds.
+  const numericValues = Object.entries(metricData)
+    .filter(([key, value]) => key !== '_id' && key !== 'title' && !isNaN(Number(value)))
+    .map(([, value]) => Number(value));
+  
+  const minVal = Math.min(...numericValues);
+  const maxVal = Math.max(...numericValues);
   const thresholds = colorScale.thresholds();
   legend.innerHTML = `
     <h3>${selectedCountyMetric}</h3>
@@ -792,6 +805,7 @@ function createCountyLegendForMap() {
       <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
+      <div style="width: 20px; height: 20px; background: #808080;"></div> N/A
     </div>
   `;
 }
