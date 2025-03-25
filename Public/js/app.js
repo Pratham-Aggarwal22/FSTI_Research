@@ -79,7 +79,7 @@ function formatStateNameForDb(name) {
   return name.replace(/\s+/g, '_');
 }
 
-// This function toggles the left panel controls:
+// Toggle left panel controls:
 // When no state is selected, show country metric selection.
 // When a state is selected, show county metric controls.
 function updateLeftPanel() {
@@ -355,10 +355,16 @@ function handleStateClick(stateId) {
     selectedState = stateId;
     selectedCounty = null;
     activeView = 'county';
+
+    // Immediately update left panel: hide country overview and show county overview.
+    document.getElementById('metricSelection').style.display = 'none';
+    document.getElementById('countyMetricSelection').style.display = 'block';
+    // Clear any previous legend (country legend) from the map section.
+    document.getElementById('legend').innerHTML = '';
+
     createCountyMap(stateId);
     updateDataPanel();
     fetchStateData(stateId);
-    // Fetch aggregated county averages for the selected state
     fetchCountyAverages(stateId);
     updateLeftPanel();
   }, 1000); // Wait for bus animation to complete
