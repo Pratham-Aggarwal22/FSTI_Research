@@ -29,13 +29,13 @@
       <div id="leftPanel" class="left-panel">
         <h2>Overview</h2>
         
-        <!-- Country Metric Selection -->
+        <!-- Country Metric Selection (shown when no state is selected) -->
         <div id="metricSelection">
           <label for="metricSelect">Select Metric:</label>
           <select id="metricSelect"></select>
         </div>
 
-        <!-- Wrap the country-level charts in one container so we can hide them all together -->
+        <!-- Country Charts Container (shown when no state is selected) -->
         <div id="countryChartsContainer">
           <div class="chart-wrapper">
             <h4>Distribution</h4>
@@ -51,21 +51,16 @@
           </div>
         </div>
 
-        <!-- County-Level Metric Selection (initially hidden) -->
+        <!-- County-Level Overview (shown when a state is selected) -->
         <div id="countyMetricSelection" style="display: none;">
           <h2>County Overview</h2>
           <div>
             <label for="countyMetricSelect">Select Metric:</label>
             <select id="countyMetricSelect"></select>
           </div>
+          <!-- Removed the county distribution chart -->
           <div class="chart-wrapper">
-            <h4>County Distribution</h4>
-            <div id="countyDistributionChartContainer" class="chart-container">
-              <canvas id="countyDistributionChart"></canvas>
-            </div>
-          </div>
-          <div class="chart-wrapper">
-            <h4>County Top/Bottom Performers</h4>
+            <h4>Top/Bottom Performers</h4>
             <div id="countyTopBottomChartContainer" class="chart-container">
               <canvas id="countyTopBottomChart"></canvas>
             </div>

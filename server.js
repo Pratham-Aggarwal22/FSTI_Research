@@ -80,10 +80,8 @@ app.get('/api/frequencyDistributions/:stateName', async (req, res) => {
   }
 });
 
-// NEW API endpoint for full county data from a state-specific database.
-// Assumes that each state has its own database (named with first letter uppercase, rest lower,
-// with spaces replaced by underscores, e.g. "New_York") and that the county data is stored in the "Averages" collection,
-// with frequency data stored in collections whose names start with "Frequency-".
+// API endpoint for full county data from a state-specific database.
+// Each state has its own database and the county data is stored in the "Averages" collection.
 app.get('/api/countyFullData/:stateName/:countyName', async (req, res) => {
   console.log("County full data endpoint hit:", req.params);
   try {
@@ -117,14 +115,13 @@ app.get('/api/countyFullData/:stateName/:countyName', async (req, res) => {
   }
 });
 
-// NEW API endpoint for aggregated county-level average values for a state.
-// This assumes that in each state-specific database, the "AverageValues" collection holds aggregated
-// county metrics (structured similar to state-level data but with county names as keys).
+// API endpoint for aggregated county-level average values for a state.
+// (Updated to use the "Averages" collection, since each state's county data is stored there.)
 app.get('/api/countyAverageValues/:stateName', async (req, res) => {
   try {
     const { stateName } = req.params;
     const db = client.db(stateName);
-    const collection = db.collection('AverageValues');
+    const collection = db.collection('Averages'); // Changed from 'AverageValues' to 'Averages'
     const data = await collection.find({}).toArray();
     res.json(data);
   } catch (error) {
