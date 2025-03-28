@@ -130,6 +130,30 @@ app.get('/api/countyAverageValues/:stateName', async (req, res) => {
   }
 });
 
+// Updated API endpoint for equity county average values
+app.get('/api/equityCountyAverageValues/:category/:state', async (req, res) => {
+  try {
+    const { category, state } = req.params;
+    const dbNameEquity = category.replace(/\s+/g, '_'); // e.g., "Employment Data" -> "Employment_Data"
+    const dbEquity = client.db(dbNameEquity);
+    
+    // Check if "County Level" collection exists
+    const collections = await dbEquity.listCollections({ name: "County Level" }).toArray();
+    if (!collections || collections.length === 0) {
+      console.warn(`No "County Level" collection found in database ${dbNameEquity}`);
+      return res.json([]); // return empty array if collection does not exist
+    }
+    
+    const collection = dbEquity.collection("County Level");
+    // Filter by state field equals the given state name (e.g., "California")
+    const data = await collection.find({ state: state }).toArray();
+    res.json(data);
+  } catch (error) {
+    console.error(`Error fetching equity county average values for ${req.params.category} in ${req.params.state}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start the server after connecting to MongoDB
 async function startServer() {
   await connectToMongoDB();
