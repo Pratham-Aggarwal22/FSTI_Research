@@ -54,6 +54,16 @@ const statesData = {
   "56": { name: "Wyoming", abbr: "WY" }
 };
 
+// Helper function to adjust state names for county-level databases and equity queries.
+function getCountyDbName(stateName) {
+  const corrections = {
+    "Alabama": "Albama",
+    "Michigan": "MIchigan",
+    "Pennsylvania": "Pennisylvania"
+  };
+  return corrections[stateName] || stateName;
+}
+
 let usMap = null;
 let countyMap = null;
 let selectedState = null;
@@ -356,15 +366,16 @@ function handleStateClick(stateId) {
     createCountyMap(stateId);
     updateDataPanel();
     fetchStateData(stateId);
-    // Fetch transit county averages from the state's database
-    fetch(`/api/countyAverageValues/${encodeURIComponent(statesData[stateId].name)}`)
+    // Use the corrected state name for county averages.
+    const dbName = formatStateNameForDb(getCountyDbName(statesData[stateId].name));
+    fetch(`/api/countyAverageValues/${encodeURIComponent(dbName)}`)
       .then(response => response.json())
       .then(data => {
         allCountyData = data;
         if (allCountyData.length > 0) {
           transitMetricKeys = Object.keys(allCountyData[0]).filter(key => key !== '_id' && key !== 'title');
           selectedCountyMetric = transitMetricKeys[0];
-          populateCountyMetricSelect(transitMetricKeys);  // NEW: Populate the county metric dropdown
+          populateCountyMetricSelect(transitMetricKeys);  // Populate the county metric dropdown
           createCountyTopBottomChart();
         } else {
           transitMetricKeys = [];
@@ -721,9 +732,9 @@ function createCountyTopBottomChart() {
     countyTopBottomChart.destroy();
   }
   const countyValues = allCountyData.map(doc => ({
-    county: doc.title,
+    county: doc.title != null ? String(doc.title) : '',
     value: Number(doc[selectedCountyMetric])
-  })).filter(obj => !isNaN(obj.value));
+  })).filter(obj => obj.county && !isNaN(obj.value));
   countyValues.sort((a, b) => b.value - a.value);
   const top5 = countyValues.slice(0, 5);
   const labels = top5.map(d => d.county);
@@ -780,8 +791,9 @@ function loadComparisonData() {
   const stateName = statesData[selectedState].name;
   const equityCategory = document.getElementById('equityCategorySelect').value;
   
-  // Fetch transit county averages from the state's database
-  fetch(`/api/countyAverageValues/${encodeURIComponent(stateName)}`)
+  // Use the corrected state name for county averages.
+  const dbName = formatStateNameForDb(getCountyDbName(stateName));
+  fetch(`/api/countyAverageValues/${encodeURIComponent(dbName)}`)
     .then(response => response.json())
     .then(data => {
       allCountyData = data;
@@ -793,14 +805,16 @@ function loadComparisonData() {
         transitMetricKeys = [];
         selectedCountyMetric = null;
       }
-      // Then load equity county averages
+      // Then load equity county averages with corrected state name.
       loadEquityComparisonData(equityCategory, stateName);
     })
     .catch(err => console.error("Error fetching transit county averages:", err));
 }
 
 function loadEquityComparisonData(category, stateName) {
-  fetch(`/api/equityCountyAverageValues/${encodeURIComponent(category)}/${encodeURIComponent(stateName)}`)
+  // Use formatStateNameForDb to ensure two-word states are formatted with underscores.
+  const formattedState = formatStateNameForDb(stateName);
+  fetch(`/api/equityCountyAverageValues/${encodeURIComponent(category)}/${encodeURIComponent(formattedState)}`)
     .then(response => response.json())
     .then(data => {
       equityCountyData = data;
@@ -818,6 +832,7 @@ function loadEquityComparisonData(category, stateName) {
     })
     .catch(err => console.error("Error fetching equity county averages:", err));
 }
+
 
 function populateTransitMetricDropdown() {
   const select = document.getElementById('transitMetricSelect');
@@ -856,8 +871,11 @@ function createComparisonScatterPlot() {
   if (!equityMetric || !transitMetric) return;
   const dataPoints = [];
   allCountyData.forEach(transitDoc => {
-    const transitCounty = transitDoc.title.toUpperCase().replace(/\s*COUNTY$/, "").trim();
-    const equityDoc = equityCountyData.find(d => d.title.toUpperCase().replace(/\s*COUNTY$/, "").trim() === transitCounty);
+    const transitCounty = transitDoc.title ? String(transitDoc.title).toUpperCase().replace(/\s*COUNTY$/, "").trim() : "";
+    const equityDoc = equityCountyData.find(d => {
+      const docTitle = d.title ? String(d.title).toUpperCase().replace(/\s*COUNTY$/, "").trim() : "";
+      return docTitle === transitCounty;
+    });
     if (equityDoc) {
       const transitValue = Number(transitDoc[transitMetric]);
       let equityValue;
@@ -932,10 +950,12 @@ function updateCountyMapColors() {
   if (!countyMap) return;
   const metricValues = {};
   allCountyData.forEach(doc => {
-    const countyName = doc.title.toUpperCase();
-    const val = Number(doc[selectedCountyMetric]);
-    if (!isNaN(val)) {
-      metricValues[countyName] = val;
+    if (doc.title != null) {
+      const countyName = String(doc.title).toUpperCase();
+      const val = Number(doc[selectedCountyMetric]);
+      if (!isNaN(val)) {
+        metricValues[countyName] = val;
+      }
     }
   });
   const values = Object.values(metricValues);
@@ -961,10 +981,12 @@ function createCountyLegendForMap() {
   if (!colorScale) return;
   const metricValues = {};
   allCountyData.forEach(doc => {
-    const countyName = doc.title.toUpperCase();
-    const val = Number(doc[selectedCountyMetric]);
-    if (!isNaN(val)) {
-      metricValues[countyName] = val;
+    if (doc.title != null) {
+      const countyName = String(doc.title).toUpperCase();
+      const val = Number(doc[selectedCountyMetric]);
+      if (!isNaN(val)) {
+        metricValues[countyName] = val;
+      }
     }
   });
   const values = Object.values(metricValues);
