@@ -317,11 +317,7 @@ function createUSMap() {
           text.attr('font-size', '12px');
         })
         .on('mouseout', function(event, d) {
-          d3.select(this).attr('stroke-width', 1)
-            .attr('fill', () => {
-              const value = metricData[statesData[d.id]?.name];
-              return value !== undefined ? colorScale(value) : '#bdc3c7';
-            });
+          d3.select(this).attr('stroke-width', 1);
           const text = d3.select(`text[data-state-id="${d.id}"]`);
           text.text(statesData[d.id]?.abbr || '');
           text.attr('font-size', '10px');
@@ -417,10 +413,9 @@ function createCountyMap(stateId) {
           .attr('stroke-width', 0.5)
           .on('click', (event, d) => handleCountyClick(d.properties.name))
           .on('mouseover', function() {
-            d3.select(this).attr('cursor', 'pointer').transition().attr('fill', '#2980b9');
+            d3.select(this).attr('cursor', 'pointer');
           })
           .on('mouseout', function() {
-            d3.select(this).transition().attr('fill', '#d5d8dc');
             updateCountyMapColors();
           });
         svg.append('g')
@@ -482,6 +477,7 @@ function updateDataPanel() {
   if (!selectedState) {
     dataPanelContent.innerHTML = `
       <h2 class="section-title">United States</h2>
+      <h3>Averages</h3>
       <div id="countryMetricsGrid" class="metric-grid"></div>
     `;
     displayCountryMetrics(allStateData);
@@ -730,10 +726,9 @@ function createCountyTopBottomChart() {
   })).filter(obj => !isNaN(obj.value));
   countyValues.sort((a, b) => b.value - a.value);
   const top5 = countyValues.slice(0, 5);
-  const bottom5 = countyValues.slice(-5).reverse();
-  const labels = [...top5.map(d => d.county), ...bottom5.map(d => d.county)];
-  const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
-  const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
+  const labels = top5.map(d => d.county);
+  const data = top5.map(d => d.value);
+  const colors = top5.map(() => '#e74c3c');
   countyTopBottomChart = new Chart(canvas, {
     type: 'bar',
     data: {
