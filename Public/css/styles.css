@@ -152,14 +152,26 @@ h1 {
   z-index: 5;
 }
 
-/* Bus Animation */
-.bus-animation {
-  display: none;
+/* Tab Container */
+.tab-container {
+  display: flex;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #ccc;
 }
 
-.bus-animation.active {
-  display: block;
-  animation: busTravel 1s linear forwards;
+.tab {
+  flex: 1;
+  padding: 0.5rem;
+  background: #f1f1f1;
+  border: none;
+  cursor: pointer;
+  transition: var(--transition);
+  font-weight: bold;
+  text-align: center;
+}
+
+.tab.active {
+  background: var(--transit-yellow);
 }
 
 /* Legend */
@@ -275,16 +287,42 @@ h1 {
   height: 250px;
 }
 
+/* Full Screen Equity Comparison View */
+.full-screen-equity {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.full-screen-equity canvas {
+  flex: 1;
+}
+
+/* Increase Equity Comparison Chart Size */
+.equity-chart {
+  height: 600px; /* Increased height */
+}
+
+/* Equity Comparison Controls - add spacing between groups */
+.equity-group {
+  margin-bottom: 0.5rem;
+}
+
 /* Animations */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes busTravel {
-  0% { left: -100px; }
-  100% { left: 100%; }
-}
+/* Removed bus animation styles */
 
 /* Responsive Design */
 @media (max-width: 1024px) {
