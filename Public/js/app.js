@@ -352,7 +352,6 @@ function createUSMap() {
 }
 
 function handleStateClick(stateId) {
-  // Removed bus animation code; now simply proceed with state transition using fade
   setTimeout(() => {
     selectedState = stateId;
     selectedCounty = null;
@@ -467,17 +466,13 @@ function handleBackToStates() {
 
 function handleBackToState() {
   if (selectedCounty) {
-    // Currently in county view; clear county selection only.
     selectedCounty = null;
-    // Update map title to state-level and refresh state data
     document.getElementById('mapTitle').textContent = `${statesData[selectedState].name} Counties`;
     updateDataPanel();
     fetchStateData(selectedState);
-    // Ensure that equity tab is visible in state view
     document.getElementById('equityComparisonTab').style.display = 'block';
     updateLeftPanel();
   } else {
-    // If already in state view, go back to USA (home) map
     selectedState = null;
     activeView = 'state';
     document.getElementById('mapTitle').textContent = 'United States';
@@ -507,6 +502,27 @@ function updateDataPanel() {
     dataPanelContent.innerHTML = '';
     dataPanelContent.appendChild(countyPanel);
     document.getElementById('backToStateButton').addEventListener('click', handleBackToState);
+    
+    // Toggle functionality for county view
+    const averagesOption = document.getElementById('averagesOption');
+    const frequencyOption = document.getElementById('frequencyOption');
+    const averagesSection = document.getElementById('averagesSection');
+    const frequencySection = document.getElementById('frequencySection');
+    
+    if (averagesOption && frequencyOption && averagesSection && frequencySection) {
+      averagesOption.addEventListener('click', () => {
+        averagesSection.style.display = 'block';
+        frequencySection.style.display = 'none';
+        averagesOption.classList.add('active');
+        frequencyOption.classList.remove('active');
+      });
+      frequencyOption.addEventListener('click', () => {
+        averagesSection.style.display = 'none';
+        frequencySection.style.display = 'block';
+        frequencyOption.classList.add('active');
+        averagesOption.classList.remove('active');
+      });
+    }
   } else {
     const template = document.getElementById('stateDataTemplate');
     const statePanel = template.content.cloneNode(true);
@@ -514,6 +530,33 @@ function updateDataPanel() {
     dataPanelContent.appendChild(statePanel);
     document.getElementById('backButton').addEventListener('click', handleBackToStates);
     document.getElementById('stateName').textContent = statesData[selectedState].name;
+    
+    // Toggle functionality for state view (default view: Frequency Charts)
+    const stateAveragesOption = document.getElementById('stateAveragesOption');
+    const stateFrequencyOption = document.getElementById('stateFrequencyOption');
+    const stateAveragesSection = document.getElementById('stateAveragesSection');
+    const stateFrequencySection = document.getElementById('stateFrequencySection');
+    
+    if (stateAveragesOption && stateFrequencyOption && stateAveragesSection && stateFrequencySection) {
+      // Default: Frequency Charts is visible, Averages hidden
+      stateAveragesSection.style.display = 'none';
+      stateFrequencySection.style.display = 'block';
+      stateFrequencyOption.classList.add('active');
+      stateAveragesOption.classList.remove('active');
+      
+      stateAveragesOption.addEventListener('click', () => {
+        stateAveragesSection.style.display = 'block';
+        stateFrequencySection.style.display = 'none';
+        stateAveragesOption.classList.add('active');
+        stateFrequencyOption.classList.remove('active');
+      });
+      stateFrequencyOption.addEventListener('click', () => {
+        stateAveragesSection.style.display = 'none';
+        stateFrequencySection.style.display = 'block';
+        stateFrequencyOption.classList.add('active');
+        stateAveragesOption.classList.remove('active');
+      });
+    }
   }
 }
 
@@ -568,9 +611,8 @@ function displayStateMetrics(data, stateName) {
 }
 
 function displayFrequencyDistributions(data) {
-  const container = document.getElementById('frequencyDistributionsContainer');
   const chartsContainer = document.getElementById('chartsContainer');
-  if (!container || !chartsContainer) return;
+  if (!chartsContainer) return;
   chartsContainer.innerHTML = '';
   stateCharts.forEach(chart => { if (chart.destroy) chart.destroy(); });
   stateCharts = [];
@@ -860,14 +902,12 @@ function switchToEquityComparison() {
   if (!selectedState || selectedCounty) {
     return;
   }
-  // Load comparison data to populate dropdowns
   loadComparisonData();
   document.getElementById('mapView').style.display = 'none';
   document.getElementById('legend').style.display = 'none';
   document.getElementById('equityComparisonContent').style.display = 'block';
   document.getElementById('equityComparisonTab').classList.add('active');
   document.getElementById('mapViewTab').classList.remove('active');
-  // Give a brief delay to ensure dropdowns are populated before drawing the chart
   setTimeout(createComparisonScatterPlotFull, 500);
 }
 

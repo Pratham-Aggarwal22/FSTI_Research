@@ -111,26 +111,40 @@
     </main>
     
     <!-- Templates -->
+    <!-- Updated State Data Template with Toggle Options -->
     <template id="stateDataTemplate">
       <div class="state-data">
         <button id="backButton" class="back-btn">← Back</button>
         <h2 id="stateName" class="section-title"></h2>
-        <h3>Averages</h3>
-        <div class="metric-grid" id="stateMetricsGrid"></div>
-        <div id="frequencyDistributionsContainer">
+        <div id="stateDataOptions" style="margin-bottom: 1rem;">
+          <button id="stateAveragesOption" class="toggle-btn">Averages</button>
+          <button id="stateFrequencyOption" class="toggle-btn active">Frequency Charts</button>
+        </div>
+        <div id="stateAveragesSection" style="display: none;">
+          <h3>Averages</h3>
+          <div class="metric-grid" id="stateMetricsGrid"></div>
+        </div>
+        <div id="stateFrequencySection">
           <h3 class="section-title">Frequency Distributions</h3>
           <div id="chartsContainer"></div>
         </div>
       </div>
     </template>
 
+    <!-- County Data Template with Toggle Options (unchanged from previous update) -->
     <template id="countyDataTemplate">
       <div class="county-data">
         <button id="backToStateButton" class="back-btn">← Back to State</button>
         <h2 id="countyName" class="section-title"></h2>
-        <h3>Averages</h3>
-        <div class="metric-grid" id="countyMetricsGrid"></div>
-        <div id="countyFrequencyContainer">
+        <div id="countyDataOptions" style="margin-bottom: 1rem;">
+          <button id="averagesOption" class="toggle-btn active">Averages</button>
+          <button id="frequencyOption" class="toggle-btn">Frequency Charts</button>
+        </div>
+        <div id="averagesSection">
+          <h3>Averages</h3>
+          <div class="metric-grid" id="countyMetricsGrid"></div>
+        </div>
+        <div id="frequencySection" style="display: none;">
           <h3 class="section-title">Frequency Distributions</h3>
           <div id="countyChartsContainer"></div>
         </div>
