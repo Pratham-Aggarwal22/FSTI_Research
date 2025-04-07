@@ -1,347 +1,1245 @@
-:root {
-  --transit-road: #d5d8dc; /* Road gray */
-  --transit-blue: #2980b9; /* Rail */
-  --transit-yellow: #f1c40f; /* Bus */
-  --transit-green: #27ae60; /* Go signal */
-  --transit-dark: #2c3e50; /* Text */
-  --transition: all 0.3s ease;
-  --border-radius: 8px;
-}
+/* TransitViz - Modern Transit Data Explorer
+   A complete redesign with a transit and data-driven theme */
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+   :root {
+    /* Primary colors */
+    --primary: #2c41ff;
+    --primary-light: #5a68ff;
+    --primary-dark: #1931e0;
+    
+    /* Secondary colors - transportation themed */
+    --transit-blue: #0984e3;     /* Bus routes */
+    --transit-orange: #fd9644;   /* Rail lines */
+    --transit-green: #20bf6b;    /* Success/positive metrics */
+    --transit-red: #eb3b5a;      /* Warning/negative metrics */
+    --transit-yellow: #f7b731;   /* Caution/neutral metrics */
+    
+    /* Neutral colors */
+    --bg-light: #f8f9fa;
+    --bg-white: #ffffff;
+    --bg-dark: #1a2035;
+    --bg-darker: #141824;
+    
+    /* Text colors */
+    --text-dark: #1e272e;
+    --text-medium: #57606f;
+    --text-light: #a4b0be;
+    --text-white: #f5f6fa;
+    
+    /* Border and shadow */
+    --border-color: #dfe4ea;
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.1);
+    
+    /* Chart colors */
+    --chart-color-1: var(--primary);
+    --chart-color-2: var(--transit-orange);
+    --chart-color-3: var(--transit-green);
+    --chart-color-4: var(--transit-yellow);
+    --chart-color-5: #26de81;
+    --chart-color-6: #a55eea;
+    
+    /* Animation speeds */
+    --transition-fast: 0.15s ease;
+    --transition-medium: 0.3s ease;
+    --transition-slow: 0.5s ease;
+    
+    /* Sizing & spacing */
+    --navbar-height: 64px;
+    --sidebar-width: 320px;
+    --collapsed-sidebar-width: 0px;
+    --border-radius-sm: 4px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+    --border-radius-xl: 20px;
+    
+    /* Font settings */
+    --font-primary: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-secondary: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  
+  /* Dark mode theme variables */
+  .dark-mode {
+    --bg-light: #1e2536;
+    --bg-white: #283044;
+    --text-dark: #f5f6fa;
+    --text-medium: #dfe4ea;
+    --text-light: #a4b0be;
+    --border-color: #3d4455;
+    --chart-color-1: #5767ff;  /* Brighter primary for dark mode */
+    --chart-color-2: #fda864;  /* Brighter orange for dark mode */
+    --chart-color-3: #2edf85;  /* Brighter green for dark mode */
+    --chart-color-4: #f9c649;  /* Brighter yellow for dark mode */
+  }
+  
+  /* Base styles */
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    font-family: var(--font-primary);
+    background-color: var(--bg-light);
+    color: var(--text-dark);
+    overflow: hidden;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+  }
+  
+  .close-btn:hover {
+    background-color: var(--bg-light);
+    color: var(--transit-red);
+  }
+  
+  .modal-body {
+    flex: 1;
+    padding: 1.5rem;
+    overflow: hidden;
+  }
+  
+  /* Animation for state transitions */
+  .zoom-to-county {
+    animation: zoomToCounty 0.8s ease-in-out forwards;
+  }
+  
+  @keyframes zoomToCounty {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.5); }
+    100% { transform: scale(1); }
+  }
+  
+  /* Responsive adjustments */
+  @media (max-width: 1280px) {
+    :root {
+      --sidebar-width: 280px;
+    }
+    
+    .metric-grid {
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+  }
+  
+  @media (max-width: 1024px) {
+    :root {
+      --sidebar-width: 250px;
+    }
+    
+    .navbar {
+      padding: 0 1rem;
+    }
+    
+    .logo {
+      font-size: 1.25rem;
+    }
+    
+    .navbar-controls {
+      gap: 1rem;
+    }
+    
+    .state-charts-container,
+    .county-charts-container {
+      grid-template-columns: 1fr;
+    }
+  }
+  
+  @media (max-width: 768px) {
+    .content-wrapper {
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    
+    .sidebar {
+      width: 100%;
+      height: auto;
+      max-height: 50vh;
+    }
+    
+    .sidebar.collapsed {
+      max-height: var(--navbar-height);
+      width: 100%;
+    }
+    
+    .main-content {
+      height: 100%;
+      min-height: 50vh;
+    }
+    
+    .equity-control-group {
+      min-width: 100%;
+    }
+    
+    .navbar-brand {
+      flex-direction: row;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    
+    .tagline {
+      display: none;
+    }
+    
+    .show-sidebar-btn {
+      display: none !important; /* Hide on mobile */
+    }
+  }
+  
+  @media (max-width: 576px) {
+    .navbar {
+      flex-direction: column;
+      height: auto;
+      padding: 0.75rem;
+      gap: 0.75rem;
+    }
+    
+    :root {
+      --navbar-height: 116px;
+    }
+    
+    .navbar-controls {
+      width: 100%;
+      justify-content: space-between;
+    }
+    
+    .location-indicator span {
+      max-width: 120px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .nav-button span {
+      display: none;
+    }
+    
+    .chart-card {
+      min-height: 250px;
+    }
+  }
+  
+  /* Dark mode specific adjustments */
+  .dark-mode .modal-content,
+  .dark-mode .map-container,
+  .dark-mode .chart-card,
+  .dark-mode .selection-container,
+  .dark-mode .map-legend,
+  .dark-mode .equity-controls,
+  .dark-mode .comparison-chart-container,
+  .dark-mode .transit-info-card {
+    background-color: var(--bg-white);
+  }
+  
+  .dark-mode .metric-card {
+    background-color: var(--bg-darker);
+  }
+  
+  .dark-mode .chart-action-btn:hover {
+    background-color: var(--bg-darker);
+  }
+  
+  .dark-mode .toggle-label .fa-sun {
+    color: var(--text-light);
+  }
+  
+  .dark-mode .toggle-label .fa-moon {
+    color: var(--transit-yellow);
+  }
+  
+  /* Dark mode text color fix for charts */
+  .dark-mode canvas {
+    filter: brightness(1.1);
+  }
+  
+  /* Improved visibility for dark mode charts */
+  .dark-mode .chart-body text,
+  .dark-mode .chart-header h4,
+  .dark-mode .metric-value,
+  .dark-mode .metric-label,
+  .dark-mode .data-title,
+  .dark-mode .section-header h3,
+  .dark-mode .modal-header h3,
+  .dark-mode .transit-info-title,
+  .dark-mode .transit-info-data {
+    color: #ffffff !important;
+  }
+  
+  /* Fix for dark mode chart visibility */
+  .dark-mode .chart-body canvas {
+    filter: brightness(1.2) contrast(1.1);
+  }
+  
+  .dark-mode .section-subtitle {
+    color: var(--text-light) !important;
+  }
+  
+  .dark-mode .sidebar-header h2 {
+    color: var(--text-white);
+  }
+  
+  /* SVG map styles */
+  .state {
+    transition: fill 0.3s ease, stroke-width 0.3s ease;
+    cursor: pointer;
+  }
 
-body {
-  font-family: 'Roboto', sans-serif;
-  background: var(--transit-road) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50"><path d="M25 0 V50 M0 25 H50" stroke="rgba(44, 62, 80, 0.1)" stroke-width="1" stroke-dasharray="4, 4"/></svg>') repeat;
-  color: var(--transit-dark);
-  overflow: hidden;
-}
+  .state:hover {
+    stroke-width: 2px !important;
+  }
 
-.transit-container {
-  height: 100vh;
-  width: 100vw;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
+  .county {
+    transition: fill 0.3s ease, stroke-width 0.3s ease;
+    cursor: pointer;
+  }
 
-/* Header */
-.transit-header {
-  background: var(--transit-blue);
-  padding: 1rem 2rem;
-  border-bottom: 2px solid var(--transit-dark);
-}
-
-.header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-h1 {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #fff;
-}
-
-.control-panel {
-  display: flex;
-  gap: 1rem;
-}
-
-/* Buttons */
-.transit-btn {
-  background: var(--transit-yellow);
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: var(--border-radius);
-  color: var(--transit-dark);
-  font-weight: 500;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.transit-btn:hover {
-  background: #f39c12;
-}
-
-.back-btn {
-  background: none;
-  border: none;
-  color: var(--transit-blue);
-  font-size: 1.2rem;
-  cursor: pointer;
-  margin-bottom: 1rem;
-  transition: var(--transition);
-}
-
-.back-btn:hover {
-  color: var(--transit-green);
-  transform: translateX(-5px);
-}
-
-/* Main Content */
-.transit-main {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-/* Left Panel */
-.left-panel {
-  width: 300px;
-  background: #fff;
-  padding: 1rem;
-  overflow-y: auto;
-  border-right: 1px solid var(--transit-dark);
-  transition: var(--transition);
-}
-
-.left-panel.collapsed {
-  width: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-#metricSelection {
-  margin-bottom: 1rem;
-}
-
-#metricSelection label {
-  font-weight: 500;
-  margin-right: 0.5rem;
-}
-
-#metricSelection select {
-  padding: 0.5rem;
-  border-radius: var(--border-radius);
-  border: 1px solid var(--transit-dark);
-  width: 100%;
-}
-
-/* Map Section */
-.map-section {
-  flex: 1;
-  padding: 2rem;
-  position: relative;
-  overflow-y: auto;
-  z-index: 5;
-}
-
-.map-title {
-  font-size: 1.8rem;
-  font-weight: 600;
-  text-align: center;
-  margin-bottom: 1rem;
-  color: var(--transit-dark);
-}
-
-.map-view {
-  height: 80vh;
-  width: 100%;
-  background: #fff;
-  border-radius: var(--border-radius);
-  border: 1px solid var(--transit-dark);
-  position: relative;
-  z-index: 5;
-}
-
-/* Tab Container */
-.tab-container {
-  display: flex;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid #ccc;
-}
-
-.tab {
-  flex: 1;
-  padding: 0.5rem;
-  background: #f1f1f1;
-  border: none;
-  cursor: pointer;
-  transition: var(--transition);
-  font-weight: bold;
-  text-align: center;
-}
-
-.tab.active {
-  background: var(--transit-yellow);
-}
-
-/* Legend */
-.map-legend {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #fff;
-  border-radius: var(--border-radius);
-  border: 1px solid var(--transit-dark);
-  color: var(--transit-dark);
-  font-size: 0.9rem;
-}
-
-/* Sidebar (Right Panel) */
-.transit-sidebar {
-  width: 400px;
-  background: #fff;
-  padding: 2rem;
-  overflow-y: auto;
-  overflow-x: hidden;
-  transition: var(--transition);
-  border-left: 1px solid var(--transit-dark);
-  position: relative;
-  z-index: 10;
-}
-
-.transit-sidebar.collapsed {
-  width: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-.sidebar-content {
-  opacity: 1;
-  transition: opacity 0.3s ease;
-}
-
-.transit-sidebar.collapsed .sidebar-content {
-  opacity: 0;
-}
-
-/* Data Styling */
-.state-data, .county-data {
-  animation: fadeInUp 0.6s ease-out;
-}
-
-.section-title {
-  font-size: 1.8rem;
-  font-weight: 600;
-  color: var(--transit-blue);
-  margin-bottom: 1.5rem;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-}
-
-.metric-card {
-  background: #ecf0f1;
-  padding: 1.5rem;
-  border-radius: var(--border-radius);
-  border-left: 4px solid var(--transit-green);
-  position: relative;
-  transition: var(--transition);
-}
-
-.metric-card::before {
-  content: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="%2327ae60"/><rect x="10" y="2" width="4" height="6" fill="%23fff"/></svg>');
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-}
-
-.metric-card:hover {
-  transform: translateY(-3px);
-  background: #dfe6e9;
-}
-
-.metric-label {
-  font-size: 1.1rem;
-  font-weight: 500;
-  color: var(--transit-dark);
-  display: block;
-  margin-bottom: 0.5rem;
-  margin-left: 1.5rem;
-}
-
-.metric-value {
-  font-size: 1rem;
-  font-weight: 400;
-  color: var(--transit-blue);
-  margin-left: 1.5rem;
-}
-
-/* Charts */
-.chart-wrapper {
-  background: #fff;
-  padding: 1rem;
-  border-radius: var(--border-radius);
-  border: 1px solid var(--transit-dark);
-  margin-bottom: 1.5rem;
-  transition: var(--transition);
-}
-
-.chart-wrapper:hover {
-  border-color: var(--transit-green);
-}
-
-.chart-container {
-  height: 250px;
-}
-
-/* Full Screen Equity Comparison View */
-.full-screen-equity {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: #fff;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  padding: 1rem;
-  overflow-y: auto;
-}
-
-.full-screen-equity canvas {
-  flex: 1;
-}
-
-/* Increase Equity Comparison Chart Size */
-.equity-chart {
-  height: 600px; /* Increased height */
-}
-
-/* Equity Comparison Controls - add spacing between groups */
-.equity-group {
-  margin-bottom: 0.5rem;
-}
-
-/* Animations */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Removed bus animation styles */
-
-/* Responsive Design */
-@media (max-width: 1024px) {
-  .left-panel { width: 250px; }
-  .transit-sidebar { width: 300px; }
-  h1 { font-size: 1.8rem; }
-}
-
-@media (max-width: 768px) {
-  .transit-main { flex-direction: column; }
-  .left-panel, .transit-sidebar {
+  .county:hover {
+    stroke-width: 1.5px !important;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 0.5rem;
+    transition: color var(--transition-medium);
+  }
+  
+  button {
+    cursor: pointer;
+    font-family: var(--font-primary);
+  }
+  
+  /* App container */
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+  }
+  
+  /* Navbar styles */
+  .navbar {
+    height: var(--navbar-height);
     width: 100%;
-    height: 40vh;
+    background-color: var(--bg-white);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 1.5rem;
+    z-index: 50;
+    transition: background-color var(--transition-medium);
+  }
+  
+  .navbar-brand {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary);
+  }
+  
+  .logo i {
+    font-size: 1.25rem;
+  }
+  
+  .tagline {
+    font-size: 0.75rem;
+    color: var(--text-medium);
+    font-weight: 400;
+    transition: color var(--transition-medium);
+  }
+  
+  .navbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  
+  .location-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background-color: var(--bg-light);
+    border-radius: var(--border-radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-medium);
+    transition: background-color var(--transition-medium), color var(--transition-medium);
+  }
+  
+  .location-indicator i {
+    color: var(--primary);
+  }
+  
+  .nav-button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius-md);
+    font-weight: 500;
+    font-size: 0.875rem;
+    transition: background-color var(--transition-fast);
+  }
+  
+  .nav-button:hover {
+    background-color: var(--primary-dark);
+  }
+  
+  .nav-button i {
+    font-size: 0.875rem;
+  }
+  
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+  }
+  
+  .toggle-checkbox {
+    opacity: 0;
+    position: absolute;
+  }
+  
+  .toggle-label {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 48px;
+    height: 24px;
+    background-color: var(--border-color);
+    border-radius: 30px;
+    padding: 0 5px;
+    cursor: pointer;
+  }
+  
+  .toggle-label i {
+    font-size: 12px;
+    z-index: 2;
+  }
+  
+  .toggle-label .fa-sun {
+    color: var(--transit-yellow);
+  }
+  
+  .toggle-label .fa-moon {
+    color: #a4b0be;
+  }
+  
+  .toggle-ball {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background-color: white;
+    border-radius: 50%;
+    top: 3px;
+    left: 3px;
+    transition: transform var(--transition-medium);
+    z-index: 1;
+  }
+  
+  .toggle-checkbox:checked + .toggle-label .toggle-ball {
+    transform: translateX(24px);
+  }
+  
+  .toggle-checkbox:checked + .toggle-label {
+    background-color: var(--primary);
+  }
+  
+  /* Content wrapper */
+  .content-wrapper {
+    display: flex;
+    height: calc(100vh - var(--navbar-height));
+    width: 100%;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  /* Sidebar styles */
+  .sidebar {
+    width: var(--sidebar-width);
+    height: 100%;
+    background-color: var(--bg-white);
+    transition: width var(--transition-medium), background-color var(--transition-medium);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    z-index: 20;
+    box-shadow: var(--shadow-sm);
+  }
+  
+  .sidebar.collapsed {
+    width: var(--collapsed-sidebar-width);
+    overflow: hidden;
+  }
+  
+  /* Show sidebar button */
+  .show-sidebar-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--primary);
+    color: white;
+    width: 32px;
+    height: 80px;
+    border-radius: 0 var(--border-radius-md) var(--border-radius-md) 0;
+    cursor: pointer;
+    z-index: 25;
+    box-shadow: var(--shadow-md);
+    transition: background-color var(--transition-fast);
+  }
+  
+  .show-sidebar-btn:hover {
+    background-color: var(--primary-dark);
+  }
+  
+  .show-sidebar-btn i {
+    font-size: 1rem;
+  }
+  
+  .left-sidebar-toggle {
+    left: 0;
+    border-radius: 0 var(--border-radius-md) var(--border-radius-md) 0;
+  }
+  
+  .right-sidebar-toggle {
+    right: 0;
+    border-radius: var(--border-radius-md) 0 0 var(--border-radius-md);
+  }
+  
+  .sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  .sidebar-header h2 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+    color: var(--text-dark);
+    transition: color var(--transition-medium);
+  }
+  
+  .sidebar-header h2 i {
+    margin-right: 0.5rem;
+    color: var(--primary);
+  }
+  
+  .collapse-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-medium);
+    font-size: 0.875rem;
+    height: 28px;
+    width: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+  }
+  
+  .collapse-btn:hover {
+    background-color: var(--primary-light);
+    color: white;
+  }
+  
+  .sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    transition: opacity var(--transition-medium);
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-light) transparent;
+  }
+  
+  .sidebar.collapsed .sidebar-content {
+    opacity: 0;
+  }
+  
+  /* Analytics panel specific styles */
+  .analytics-panel {
+    border-right: 1px solid var(--border-color);
+  }
+  
+  .selection-container {
+    background-color: var(--bg-light);
+    border-radius: var(--border-radius-md);
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    transition: background-color var(--transition-medium);
+  }
+  
+  .metric-header {
+    margin-bottom: 1rem;
+  }
+  
+  .metric-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: var(--text-dark);
+    transition: color var(--transition-medium);
+  }
+  
+  .selection-group {
+    margin-top: 1rem;
+  }
+  
+  .selection-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-medium);
+    transition: color var(--transition-medium);
+  }
+  
+  .selection-group label i {
+    color: var(--primary);
+    margin-right: 0.25rem;
+  }
+  
+  .custom-select-wrapper {
+    position: relative;
+    width: 100%;
+  }
+  
+  .custom-select {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    background-color: var(--bg-white);
+    color: var(--text-dark);
+    appearance: none;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-medium), color var(--transition-medium);
+  }
+  
+  .custom-select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(44, 65, 255, 0.2);
+  }
+  
+  .custom-select-wrapper i {
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-medium);
+    pointer-events: none;
+    transition: color var(--transition-medium);
+  }
+  
+  /* Charts container */
+  .charts-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  
+  .chart-card {
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-color);
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-medium);
+  }
+  
+  .chart-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  .chart-header h4 {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-dark);
+    transition: color var(--transition-medium);
+  }
+  
+  .chart-header h4 i {
+    color: var(--primary);
+    margin-right: 0.5rem;
+  }
+  
+  .chart-actions {
     position: relative;
   }
-  .left-panel.collapsed, .transit-sidebar.collapsed {
-    height: 0;
-    width: 100%;
+  
+  .chart-action-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-medium);
+    font-size: 0.875rem;
+    height: 28px;
+    width: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
   }
-  .map-section { padding: 1rem; }
-  .map-view { height: 50vh; }
-}
+  
+  .chart-action-btn:hover {
+    background-color: var(--bg-light);
+    color: var(--primary);
+  }
+  
+  .chart-action-btn:hover + .tooltip {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  
+  .tooltip {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    background-color: var(--text-dark);
+    color: white;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--border-radius-sm);
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 10;
+  }
+  
+  .chart-body {
+    padding: 1rem;
+    height: 220px;
+    position: relative;
+    transition: height var(--transition-medium);
+  }
+  
+  /* Taller chart containers - reduced height to avoid stretching */
+  .taller-chart {
+    height: 350px !important;
+  }
+  
+  /* Main content area */
+  .main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    padding: 1rem;
+    background-color: var(--bg-light);
+    transition: background-color var(--transition-medium);
+  }
+  
+  /* View tabs */
+  .view-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  
+  .view-tab {
+    background-color: var(--bg-white);
+    border: 1px solid var(--border-color);
+    color: var(--text-medium);
+    border-radius: var(--border-radius-md);
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+  }
+  
+  .view-tab.active {
+    background-color: var(--primary);
+    color: white;
+    border-color: var(--primary);
+  }
+  
+  .view-tab:hover:not(.active) {
+    background-color: var(--bg-light);
+    color: var(--primary);
+  }
+  
+  .view-tab i {
+    margin-right: 0.5rem;
+  }
+  
+  /* Breadcrumb */
+  .breadcrumb {
+    font-size: 0.875rem;
+    color: var(--text-medium);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: color var(--transition-medium);
+  }
+  
+  .breadcrumb i {
+    color: var(--primary);
+  }
+  
+  /* Map content */
+  .map-content {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  
+  .map-container {
+    flex: 1;
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    position: relative;
+    transition: background-color var(--transition-medium);
+    /* Reduced padding to maximize map visibility */
+    padding: 5px;
+    margin: 5px;
+    /* Fixed height to ensure full map visibility */
+    min-height: calc(100vh - 230px);
+  }
+  
+  .map-loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(255, 255, 255, 0.9);
+    z-index: 5;
+    transition: background-color var(--transition-medium);
+  }
+  
+  .dark-mode .map-loading {
+    background-color: rgba(40, 48, 68, 0.9);
+  }
+  
+  .spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--border-color);
+    border-top: 4px solid var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 1rem;
+  }
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  .map-legend {
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-md);
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+    box-shadow: var(--shadow-sm);
+    font-size: 0.875rem;
+    transition: background-color var(--transition-medium);
+    color: var(--text-dark);
+  }
+  
+  /* Equity comparison container */
+  .equity-comparison-container {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    gap: 1rem;
+  }
+  
+  .equity-controls {
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-md);
+    padding: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    box-shadow: var(--shadow-sm);
+    transition: background-color var(--transition-medium);
+  }
+  
+  .equity-control-group {
+    flex: 1;
+    min-width: 200px;
+  }
+  
+  .equity-control-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-medium);
+    transition: color var(--transition-medium);
+  }
+  
+  .equity-control-group label i {
+    color: var(--primary);
+    margin-right: 0.25rem;
+  }
+  
+  .comparison-chart-container {
+    flex: 1;
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-md);
+    padding: 1rem;
+    box-shadow: var(--shadow-sm);
+    transition: background-color var(--transition-medium);
+    height: 400px; /* Reduced to avoid stretching */
+  }
+  
+  /* Data insights panel specific styles */
+  .data-panel {
+    border-left: 1px solid var(--border-color);
+  }
+  
+  /* State and County Data Templates */
+  .template-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .back-btn {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: transparent;
+    border: none;
+    color: var(--primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.5rem 0;
+    transition: color var(--transition-fast);
+  }
+  
+  .back-btn:hover {
+    color: var(--primary-dark);
+  }
+  
+  .data-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    transition: color var(--transition-medium);
+  }
+  
+  .data-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  .data-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-medium);
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.75rem 1rem;
+    position: relative;
+    transition: color var(--transition-fast);
+  }
+  
+  .data-tab.active {
+    color: var(--primary);
+  }
+  
+  .data-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background-color: var(--primary);
+  }
+  
+  .data-tab i {
+    margin-right: 0.5rem;
+  }
+  
+  .section-header {
+    margin-bottom: 1rem;
+  }
+  
+  .section-header h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    margin-bottom: 0.25rem;
+    transition: color var(--transition-medium);
+  }
+  
+  .section-header h3 i {
+    color: var(--primary);
+    margin-right: 0.5rem;
+  }
+  
+  .section-subtitle {
+    font-size: 0.875rem;
+    color: var(--text-medium);
+    transition: color var(--transition-medium);
+  }
+  
+  /* Metric grid in data panels */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .metric-card {
+    background-color: var(--bg-light);
+    border-radius: var(--border-radius-md);
+    padding: 1.25rem 1rem;
+    transition: transform var(--transition-fast), background-color var(--transition-medium);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background-color: var(--primary);
+  }
+  
+  .metric-card:hover {
+    transform: translateY(-2px);
+  }
+  
+  .metric-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-medium);
+    margin-bottom: 0.75rem;
+    display: block;
+    transition: color var(--transition-medium);
+  }
+  
+  .metric-value {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    display: block;
+    transition: color var(--transition-medium);
+  }
+  
+  /* Charts in data panels */
+  .state-charts-container,
+  .county-charts-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+  }
+  
+  .state-charts-container .chart-container,
+  .county-charts-container .chart-container {
+    height: 300px !important; /* Reduced from previous height */
+  }
+  
+  /* Modal for fullscreen charts */
+  .modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  
+  .modal-content {
+    width: 90%;
+    max-width: 1000px;
+    height: 80%;
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: modalFadeIn 0.3s forwards;
+    transition: background-color var(--transition-medium);
+  }
+  
+  @keyframes modalFadeIn {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  .modal-header h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    margin: 0;
+    transition: color var(--transition-medium);
+  }
+  
+  .close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-medium);
+    font-size: 1.25rem;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+  }
+
+  /* Allow vertical scrolling in the map content area */
+  .map-content {
+    overflow-y: auto;
+  }
+
+  /* Ultimate override for disabled equity tab - put at END of CSS file */
+  #equityComparisonTab.disabled-tab,
+  #equityComparisonTab[disabled] {
+    background-color: #555 !important;
+    color: #999 !important;
+    cursor: not-allowed !important;
+    opacity: 0.6 !important;
+    border-color: #555 !important;
+    pointer-events: none !important;
+  }
+
+  .view-tab.disabled-tab:hover {
+    background-color: #555 !important;
+    color: #999 !important;
+  }
+
+  /* Add these to the end of your styles.css file */
+
+  /* County tooltip styles */
+  .county-tooltip {
+    position: absolute;
+    visibility: hidden;
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    pointer-events: none;
+    font-size: 12px;
+    z-index: 100;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    transition: opacity 0.2s ease;
+  }
+
+  /* Disabled equity tab styling */
+  #equityComparisonTab.disabled-tab,
+  #equityComparisonTab[disabled] {
+    background-color: #555 !important;
+    color: #999 !important;
+    cursor: not-allowed !important;
+    opacity: 0.6 !important;
+    border-color: #555 !important;
+    pointer-events: none !important;
+  }
+
+  .view-tab.disabled-tab:hover {
+    background-color: #555 !important;
+    color: #999 !important;
+  }
+  /* Enhanced tooltip styles - add to styles.css */
+  .county-tooltip {
+    position: absolute;
+    visibility: hidden;
+    background-color: white;
+    color: #333;
+    padding: 8px 12px;
+    border-radius: 4px;
+    pointer-events: none;
+    font-size: 12px;
+    font-weight: bold;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    z-index: 100;
+    transition: opacity 0.2s ease;
+    text-align: center;
+    min-width: 80px;
+  }
+
+  .tooltip-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 8px solid white;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  /* Styling for non-clickable counties */
+  .county[data-clickable="false"] {
+    cursor: default !important;
+    pointer-events: none;
+  }

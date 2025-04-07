@@ -86,6 +86,11 @@ let topBottomChart = null;
 let countyTopBottomChart = null;
 let comparisonChart = null;
 
+// Helper: Return chart text color based on dark mode status.
+function getChartTextColor() {
+  return document.body.classList.contains("dark-mode") ? "#ffffff" : "#2c3e50";
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
   updateLeftPanel();
@@ -103,24 +108,43 @@ function formatStateNameForDb(name) {
   return name.replace(/\s+/g, '_');
 }
 
+// -----------------------------------------------------------------------------
+// UPDATE LEFT PANEL FUNCTION (Modified for Equity Comparison button disable)
 function updateLeftPanel() {
+  const equityBtn = document.getElementById('equityComparisonTab');
   if (!selectedState) {
     document.getElementById('metricSelection').style.display = 'block';
     document.getElementById('countryChartsContainer').style.display = 'block';
     document.getElementById('countyMetricSelection').style.display = 'none';
-    document.getElementById('equityComparisonTab').style.display = 'none';
+    equityBtn.style.display = 'none';
   } else {
     document.getElementById('metricSelection').style.display = 'none';
     document.getElementById('countryChartsContainer').style.display = 'none';
     document.getElementById('countyMetricSelection').style.display = 'block';
-    // Show equity tab only when in state view (i.e. no county selected)
+    // If county data is displayed, disable the equity comparison button
     if (selectedCounty) {
-      document.getElementById('equityComparisonTab').style.display = 'none';
+      equityBtn.style.display = 'block';
+      equityBtn.style.backgroundColor = '#555';
+      equityBtn.style.cursor = 'not-allowed';
+      equityBtn.setAttribute('title', 'Switch to State Data to view the comparison');
+      equityBtn.disabled = true;
+      equityBtn.classList.add('disabled-tab');
+      equityBtn.onclick = function(e) { e.preventDefault(); return false; };
     } else {
-      document.getElementById('equityComparisonTab').style.display = 'block';
+      // Enable equity comparison button when in state view
+      equityBtn.style.display = 'block';
+      equityBtn.style.backgroundColor = '';
+      equityBtn.style.cursor = 'pointer';
+      equityBtn.removeAttribute('title');
+      equityBtn.disabled = false;
+      equityBtn.classList.remove('disabled-tab');
+      equityBtn.onclick = switchToEquityComparison;
     }
   }
 }
+
+// -----------------------------------------------------------------------------
+// INITIALIZATION AND DATA FETCHING
 function initApp() {
   selectedState = null;
   selectedCounty = null;
@@ -198,6 +222,7 @@ function createLegend(minVal, maxVal) {
       <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> ${minVal.toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${colorScale(thresholds[0])};"></div> ${thresholds[0].toFixed(1)}
       <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> ${maxVal.toFixed(1)}
+      <div style="width: 20px; height: 20px; background: #808080;"></div> N/A
     </div>
   `;
 }
@@ -219,6 +244,7 @@ function createDistributionChart() {
     .thresholds(binCount)(values);
   const labels = bins.map(bin => `${bin.x0.toFixed(1)} - ${bin.x1.toFixed(1)}`);
   const data = bins.map(bin => bin.length);
+  const chartTextColor = getChartTextColor();
   distributionChart = new Chart(canvas, {
     type: 'bar',
     data: {
@@ -235,8 +261,15 @@ function createDistributionChart() {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        y: { beginAtZero: true, title: { display: true, text: 'Frequency' } },
-        x: { title: { display: true, text: 'Value Range' } }
+        y: { 
+          beginAtZero: true, 
+          title: { display: true, text: 'Frequency', color: chartTextColor },
+          ticks: { color: chartTextColor }
+        },
+        x: { 
+          title: { display: true, text: 'Value Range', color: chartTextColor },
+          ticks: { color: chartTextColor }
+        }
       }
     }
   });
@@ -257,6 +290,7 @@ function createTopBottomChart() {
   const labels = [...top5.map(d => d.state), ...bottom5.map(d => d.state)];
   const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
   const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
+  const chartTextColor = getChartTextColor();
   topBottomChart = new Chart(canvas, {
     type: 'bar',
     data: {
@@ -274,13 +308,22 @@ function createTopBottomChart() {
       maintainAspectRatio: false,
       indexAxis: 'y',
       scales: {
-        x: { beginAtZero: true, title: { display: true, text: 'Value' } },
-        y: { title: { display: true, text: 'State' } }
+        x: { 
+          beginAtZero: true, 
+          title: { display: true, text: 'Value', color: chartTextColor },
+          ticks: { color: chartTextColor }
+        },
+        y: { 
+          title: { display: true, text: 'State', color: chartTextColor },
+          ticks: { color: chartTextColor }
+        }
       }
     }
   });
 }
 
+// -----------------------------------------------------------------------------
+// COUNTY MAP AND DATA FUNCTIONS
 function createUSMap() {
   const mapContainer = document.getElementById('mapView');
   mapContainer.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
@@ -372,6 +415,7 @@ function handleStateClick(stateId) {
           transitMetricKeys = Object.keys(allCountyData[0]).filter(key => key !== '_id' && key !== 'title');
           selectedCountyMetric = transitMetricKeys[0];
           populateCountyMetricSelect(transitMetricKeys);
+          populateTransitMetricDropdown();
           createCountyTopBottomChart();
         } else {
           transitMetricKeys = [];
@@ -394,47 +438,100 @@ function createCountyMap(stateId) {
       .attr('width', width)
       .attr('height', height)
       .attr('style', 'width: 100%; height: 100%;');
+    
     d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json')
       .then(us => {
         mapContainer.innerHTML = '';
+        mapContainer.appendChild(svg.node());
+        
         const counties = topojson.feature(us, us.objects.counties).features.filter(c => c.id.toString().startsWith(stateId));
         const stateFeature = topojson.feature(us, us.objects.states).features.find(s => s.id === stateId);
         const projection = d3.geoAlbersUsa().fitSize([width, height], stateFeature);
         const path = d3.geoPath().projection(projection);
-        svg.append('path')
+        
+        // Create the base layer for counties and state outline
+        const countyLayer = svg.append('g').attr('class', 'county-layer');
+        
+        // Add state outline
+        countyLayer.append('path')
           .datum(stateFeature)
           .attr('d', path)
           .attr('fill', 'none')
           .attr('stroke', '#fff')
           .attr('stroke-width', 2);
-        svg.append('g')
-          .selectAll('path')
+        
+        // Add counties
+        countyLayer.selectAll('path')
           .data(counties)
           .enter()
           .append('path')
           .attr('class', 'county')
+          .attr('data-county-name', d => d.properties.name)
           .attr('d', path)
           .attr('fill', '#d5d8dc')
           .attr('stroke', '#fff')
           .attr('stroke-width', 0.5)
-          .on('click', (event, d) => handleCountyClick(d.properties.name))
-          .on('mouseover', function() {
-            d3.select(this).attr('cursor', 'pointer');
+          .attr('data-clickable', 'true')  // Add clickable flag attribute
+          .on('click', function(event, d) {
+            // Only handle click if county is clickable
+            if (d3.select(this).attr('data-clickable') === 'true') {
+              handleCountyClick(d.properties.name);
+            }
+          })
+          .on('mouseover', function(event, d) {
+            // Only highlight if county is clickable
+            if (d3.select(this).attr('data-clickable') === 'true') {
+              // Highlight county
+              d3.select(this)
+                .attr('cursor', 'pointer')
+                .attr('stroke-width', 1.5);
+              
+              // Calculate centroid for text placement
+              const centroid = path.centroid(d);
+              
+              // Remove any existing labels
+              svg.selectAll(".county-hover-label").remove();
+              
+              // Create a background for the label (white box)
+              svg.append("rect")
+                .attr("class", "county-hover-label")
+                .attr("x", centroid[0] - (d.properties.name.length * 3) - 5)
+                .attr("y", centroid[1] - 9)
+                .attr("width", d.properties.name.length * 6 + 10)
+                .attr("height", 18)
+                .attr("fill", "white")
+                .attr("stroke", "#333")
+                .attr("stroke-width", 0.5)
+                .attr("rx", 3);
+              
+              // Add the county name label above everything
+              svg.append("text")
+                .attr("class", "county-hover-label")
+                .attr("x", centroid[0])
+                .attr("y", centroid[1] + 4)  // Small vertical adjustment to center in box
+                .attr("text-anchor", "middle")
+                .attr("fill", "#000")
+                .attr("font-size", "10px")
+                .attr("font-weight", "bold")
+                .text(d.properties.name);
+            }
           })
           .on('mouseout', function() {
-            updateCountyMapColors();
+            // Only reset if county is clickable
+            if (d3.select(this).attr('data-clickable') === 'true') {
+              // Reset county stroke
+              d3.select(this).attr('stroke-width', 0.5);
+              
+              // Hide label
+              svg.selectAll(".county-hover-label").remove();
+              
+              // Update county colors if no county is selected
+              if (!selectedCounty) {
+                updateCountyMapColors();
+              }
+            }
           });
-        svg.append('g')
-          .selectAll('text')
-          .data(counties)
-          .enter()
-          .append('text')
-          .attr('transform', d => `translate(${path.centroid(d)})`)
-          .attr('text-anchor', 'middle')
-          .attr('font-size', '8px')
-          .attr('fill', '#2c3e50')
-          .text(d => d.properties.name);
-        mapContainer.appendChild(svg.node());
+          
         mapContainer.classList.remove('zoom-to-county');
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
         countyMap = { svg, path, projection };
@@ -446,7 +543,38 @@ function createCountyMap(stateId) {
 
 function handleCountyClick(countyName) {
   selectedCounty = countyName;
+  
+  // Fade out and disable non-selected counties
+  if (countyMap && countyMap.svg) {
+    countyMap.svg.selectAll('.county')
+      .transition()
+      .duration(300)
+      .attr('fill', function() {
+        const name = d3.select(this).attr('data-county-name');
+        if (name === countyName) {
+          // Keep selected county at full opacity with current color and clickable
+          d3.select(this).attr('data-clickable', 'true');
+          return d3.select(this).attr('fill');
+        } else {
+          // Fade out non-selected counties and make them non-clickable
+          d3.select(this).attr('data-clickable', 'false')
+                         .attr('cursor', 'default');
+          return d3.color(d3.select(this).attr('fill')).copy({opacity: 0.3});
+        }
+      });
+  }
+  
+  // Disable equity tab
+  const equityBtn = document.getElementById('equityComparisonTab');
+  equityBtn.classList.add('disabled-tab');
+  equityBtn.style.backgroundColor = '#555';
+  equityBtn.style.cursor = 'not-allowed';
+  equityBtn.setAttribute('title', 'Switch to State Data to view the comparison');
+  equityBtn.disabled = true;
+  equityBtn.onclick = function(e) { e.preventDefault(); return false; };
+  
   fetchCountyData(countyName);
+  updateLeftPanel();
 }
 
 function handleBackToStates() {
@@ -468,9 +596,32 @@ function handleBackToState() {
   if (selectedCounty) {
     selectedCounty = null;
     document.getElementById('mapTitle').textContent = `${statesData[selectedState].name} Counties`;
+    
+    // Restore all counties to normal opacity and make them clickable again
+    if (countyMap && countyMap.svg) {
+      countyMap.svg.selectAll('.county')
+        .transition()
+        .duration(300)
+        .attr('fill', function() {
+          // Get the original color from the color scale
+          return d3.select(this).attr('original-fill') || '#d5d8dc';
+        })
+        .attr('data-clickable', 'true')
+        .attr('cursor', 'pointer');
+    }
+    
     updateDataPanel();
     fetchStateData(selectedState);
-    document.getElementById('equityComparisonTab').style.display = 'block';
+    
+    // Re-enable equity comparison button
+    const equityBtn = document.getElementById('equityComparisonTab');
+    equityBtn.classList.remove('disabled-tab');
+    equityBtn.style.backgroundColor = '';
+    equityBtn.style.cursor = '';
+    equityBtn.removeAttribute('title');
+    equityBtn.disabled = false;
+    equityBtn.onclick = switchToEquityComparison;
+    
     updateLeftPanel();
   } else {
     selectedState = null;
@@ -538,8 +689,7 @@ function updateDataPanel() {
     const stateFrequencySection = document.getElementById('stateFrequencySection');
     
     if (stateAveragesOption && stateFrequencyOption && stateAveragesSection && stateFrequencySection) {
-      // Default: Frequency Charts is visible, Averages hidden
-      stateAveragesSection.style.display = 'none';
+      stateAveragesSection.style.display = 'none';  // Changed to 'none' for default Frequency view
       stateFrequencySection.style.display = 'block';
       stateFrequencyOption.classList.add('active');
       stateAveragesOption.classList.remove('active');
@@ -550,6 +700,7 @@ function updateDataPanel() {
         stateAveragesOption.classList.add('active');
         stateFrequencyOption.classList.remove('active');
       });
+      
       stateFrequencyOption.addEventListener('click', () => {
         stateAveragesSection.style.display = 'none';
         stateFrequencySection.style.display = 'block';
@@ -617,6 +768,7 @@ function displayFrequencyDistributions(data) {
   stateCharts.forEach(chart => { if (chart.destroy) chart.destroy(); });
   stateCharts = [];
   if (Object.keys(data).length === 0) return;
+  const chartTextColor = getChartTextColor();
   Object.entries(data).forEach(([collectionName, stateData]) => {
     const wrapper = document.createElement('div');
     wrapper.className = 'chart-wrapper';
@@ -663,7 +815,7 @@ function displayFrequencyDistributions(data) {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'top', labels: { color: '#2c3e50' } },
+          legend: { position: 'top', labels: { color: chartTextColor } },
           tooltip: {
             callbacks: {
               title: (tooltipItems) => `Range: ${tooltipItems[0].label}`,
@@ -672,8 +824,8 @@ function displayFrequencyDistributions(data) {
           }
         },
         scales: {
-          y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: '#2c3e50' }, ticks: { color: '#2c3e50' } },
-          x: { title: { display: true, text: 'Range', color: '#2c3e50' }, ticks: { color: '#2c3e50' } }
+          y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: chartTextColor }, ticks: { color: chartTextColor } },
+          x: { title: { display: true, text: 'Range', color: chartTextColor }, ticks: { color: chartTextColor } }
         },
         animation: { duration: 1000 }
       }
@@ -738,6 +890,7 @@ function displayCountyData(data, countyName) {
         const bNum = parseInt(b.range.match(/\d+/)?.[0] || '0', 10);
         return aNum - bNum;
       });
+      const chartTextColor = getChartTextColor();
       let barColor = '#27ae60';
       if (collectionName.includes('Transit')) barColor = '#e67e22';
       else if (collectionName.includes('Population')) barColor = '#2980b9';
@@ -760,11 +913,20 @@ function displayCountyData(data, countyName) {
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          indexAxis: 'y',
+          plugins: {
+            legend: { position: 'top', labels: { color: chartTextColor } },
+            tooltip: {
+              callbacks: {
+                title: (tooltipItems) => `Range: ${tooltipItems[0].label}`,
+                label: (context) => `Frequency: ${context.raw}`
+              }
+            }
+          },
           scales: {
-            x: { beginAtZero: true, title: { display: true, text: 'Value' } },
-            y: { title: { display: true, text: 'County' } }
-          }
+            y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: chartTextColor }, ticks: { color: chartTextColor } },
+            x: { title: { display: true, text: 'Range', color: chartTextColor }, ticks: { color: chartTextColor } }
+          },
+          animation: { duration: 1000 }
         }
       });
       countyCharts.push(chart);
@@ -772,21 +934,25 @@ function displayCountyData(data, countyName) {
   }
 }
 
+// -----------------------------------------------------------------------------
+// FIXED COUNTY RANKING GRAPH: Now use all county data to create ranking by county name.
 function createCountyTopBottomChart() {
   const canvas = document.getElementById('countyTopBottomChart');
   if (!canvas) return;
   if (countyTopBottomChart && typeof countyTopBottomChart.destroy === 'function') {
     countyTopBottomChart.destroy();
   }
+  if (!allCountyData || allCountyData.length === 0) return;
   const countyValues = allCountyData.map(doc => ({
-    county: doc.title != null ? String(doc.title) : '',
+    county: doc.title,
     value: Number(doc[selectedCountyMetric])
-  })).filter(obj => obj.county && !isNaN(obj.value));
+  }));
   countyValues.sort((a, b) => b.value - a.value);
   const top5 = countyValues.slice(0, 5);
-  const labels = top5.map(d => d.county);
-  const data = top5.map(d => d.value);
-  const colors = top5.map(() => '#e74c3c');
+  const bottom5 = countyValues.slice(-5).reverse();
+  const labels = [...top5.map(d => d.county), ...bottom5.map(d => d.county)];
+  const data = [...top5.map(d => d.value), ...bottom5.map(d => d.value)];
+  const colors = [...top5.map(() => '#e74c3c'), ...bottom5.map(() => '#27ae60')];
   countyTopBottomChart = new Chart(canvas, {
     type: 'bar',
     data: {
@@ -804,8 +970,15 @@ function createCountyTopBottomChart() {
       maintainAspectRatio: false,
       indexAxis: 'y',
       scales: {
-        x: { beginAtZero: true, title: { display: true, text: 'Value' } },
-        y: { title: { display: true, text: 'County' } }
+        x: { 
+          beginAtZero: true, 
+          title: { display: true, text: 'Value', color: getChartTextColor() },
+          ticks: { color: getChartTextColor() }
+        },
+        y: { 
+          title: { display: true, text: 'County', color: getChartTextColor() },
+          ticks: { color: getChartTextColor() }
+        }
       }
     }
   });
@@ -851,11 +1024,30 @@ function updateCountyMapColors() {
     .domain([minVal, maxVal])
     .range(['#27ae60', '#e67e22', '#e74c3c']);
   countyMap.svg.selectAll('.county')
-    .attr('fill', d => {
-      const countyNameKey = d.properties.name.toUpperCase();
+    .attr('fill', function() {
+      const countyNameKey = d3.select(this).attr('data-county-name').toUpperCase();
       const value = metricValues[countyNameKey];
-      if (value === undefined) return '#808080';
-      return colorScale(value);
+      const color = value === undefined ? '#808080' : colorScale(value);
+      
+      // Store original fill color to restore when deselecting
+      d3.select(this).attr('original-fill', color);
+      
+      // If a county is selected, fade all others and make them non-clickable
+      if (selectedCounty) {
+        if (countyNameKey !== selectedCounty.toUpperCase()) {
+          d3.select(this).attr('data-clickable', 'false')
+                         .attr('cursor', 'default');
+          return d3.color(color).copy({opacity: 0.3});
+        } else {
+          d3.select(this).attr('data-clickable', 'true');
+          return color;
+        }
+      } else {
+        // All counties clickable if none is selected
+        d3.select(this).attr('data-clickable', 'true')
+                       .attr('cursor', 'pointer');
+        return color;
+      }
     });
   countyMap.colorScale = colorScale;
 }
@@ -890,6 +1082,8 @@ function createCountyLegendForMap() {
   `;
 }
 
+// -----------------------------------------------------------------------------
+// EQUITY COMPARISON FUNCTIONS
 function switchToMapView() {
   document.getElementById('mapView').style.display = 'block';
   document.getElementById('legend').style.display = 'block';
@@ -963,6 +1157,10 @@ function populateTransitMetricDropdown() {
     select.appendChild(option);
   });
   select.addEventListener('change', createComparisonScatterPlotFull);
+  if (select.options.length > 0) {
+    select.value = select.options[0].value;
+    createComparisonScatterPlotFull();
+  }
 }
 
 function populateEquityMetricDropdown() {
@@ -975,6 +1173,10 @@ function populateEquityMetricDropdown() {
     select.appendChild(option);
   });
   select.addEventListener('change', createComparisonScatterPlotFull);
+  if (select.options.length > 0) {
+    select.value = select.options[0].value;
+    createComparisonScatterPlotFull();
+  }
 }
 
 function createComparisonScatterPlotFull() {
@@ -985,8 +1187,8 @@ function createComparisonScatterPlotFull() {
     console.error("Dropdowns for equity or transit metrics are missing.");
     return;
   }
-  const equityMetric = equitySelect.value;
-  const transitMetric = transitSelect.value;
+  const equityMetric = equitySelect.value || (equitySelect.options[0] && equitySelect.options[0].value);
+  const transitMetric = transitSelect.value || (transitSelect.options[0] && transitSelect.options[0].value);
   if (!equityMetric || !transitMetric) return;
   const dataPoints = [];
   allCountyData.forEach(transitDoc => {
@@ -1058,8 +1260,8 @@ function createComparisonScatterPlotFull() {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { title: { display: true, text: `Equity: ${equityMetric}` }, beginAtZero: true },
-        y: { title: { display: true, text: `Transit: ${transitMetric}` }, beginAtZero: true }
+        x: { title: { display: true, text: `Equity: ${equityMetric}`, color: getChartTextColor() }, beginAtZero: true, ticks: { color: getChartTextColor() } },
+        y: { title: { display: true, text: `Transit: ${transitMetric}`, color: getChartTextColor() }, beginAtZero: true, ticks: { color: getChartTextColor() } }
       }
     }
   });
