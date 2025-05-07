@@ -4,6 +4,21 @@ import { MongoClient } from 'mongodb';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
+import cookieParser from 'cookie-parser';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+
+// Import routes
+import authRoutes from './routes/auth.js';
+import comparisonRoutes from './routes/comparison.js';
+
+// Import middleware
+import { isGuestRoute } from './middleware/auth.js';
+
+
+// In server.js, near the top after imports
+import { verifyToken } from './utils/jwt.js';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -16,9 +31,20 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MongoDB connection configuration from environment variables
-const uri = process.env.MONGODB_URI; // e.g. mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
+const uri = process.env.MONGODB_URI;
 const dbName = process.env.DB_NAME || 'StateWiseComputation';
 const client = new MongoClient(uri);
+
+// Connect to MongoDB for Mongoose (for authentication)
+mongoose.connect(process.env.MONGODB_URI || uri, {
+  dbName: 'Login_authentication', // Database for user authentication
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+}).then(() => {
+  console.log('Connected to MongoDB for authentication');
+}).catch(err => {
+  console.error('Error connecting to MongoDB for authentication:', err);
+});
 
 async function connectToMongoDB() {
   try {
@@ -31,24 +57,72 @@ async function connectToMongoDB() {
   }
 }
 
+// Add this function to your server.js file
+function formatNumberInObject(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => formatNumberInObject(item));
+  }
+  
+  // Handle objects
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === '_id' || key === 'title') {
+      result[key] = value;
+    } else if (typeof value === 'number') {
+      result[key] = parseFloat(value.toFixed(2));
+    } else if (typeof value === 'object' && value !== null) {
+      result[key] = formatNumberInObject(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 // Middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'Public')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'Views'));
 
+// Apply authentication middleware selectively
+app.use(isGuestRoute);
+
+// Add this to your server.js before defining routes
+app.use((req, res, next) => {
+  // Make isAuthenticated available to all templates
+  res.locals.isAuthenticated = req.cookies.access_token ? true : false;
+  next();
+});
+
+// Routes
+app.use('/auth', authRoutes);
+app.use('/comparison', comparisonRoutes);
+
 // Route for main page
 app.get('/', (req, res) => {
-  res.render('index');
+  res.render('index', { 
+    title: 'TransitViz',
+    user: req.user || null
+  });
 });
 
 // API endpoint for state-level average values (used for state data)
+// Use this in all your API endpoints, for example:
 app.get('/api/averageValues', async (req, res) => {
   try {
     const db = client.db(dbName);
     const collection = db.collection('AverageValues');
     const data = await collection.find({}).toArray();
-    res.json(data);
+    
+    // Format all numbers in the response
+    const formattedData = formatNumberInObject(data);
+    res.json(formattedData);
   } catch (error) {
     console.error('Error fetching average values:', error);
     res.status(500).json({ error: error.message });
@@ -134,19 +208,50 @@ app.get('/api/countyAverageValues/:stateName', async (req, res) => {
 app.get('/api/equityCountyAverageValues/:category/:state', async (req, res) => {
   try {
     const { category, state } = req.params;
+    console.log(`Fetching equity data for category: ${category}, state: ${state}`);
+    
     const dbNameEquity = category.replace(/\s+/g, '_'); // e.g., "Employment Data" -> "Employment_Data"
     const dbEquity = client.db(dbNameEquity);
     
+    // For Population_Data, try a different collection name if "County Level" doesn't exist
+    let collectionName = "County Level";
+    
     // Check if "County Level" collection exists
-    const collections = await dbEquity.listCollections({ name: "County Level" }).toArray();
-    if (!collections || collections.length === 0) {
-      console.warn(`No "County Level" collection found in database ${dbNameEquity}`);
-      return res.json([]); // return empty array if collection does not exist
+    const collections = await dbEquity.listCollections().toArray();
+    const collectionNames = collections.map(c => c.name);
+    console.log(`Available collections in ${dbNameEquity}:`, collectionNames);
+    
+    if (!collectionNames.includes("County Level")) {
+      // Try fallback collection names
+      if (collectionNames.includes("Counties")) {
+        collectionName = "Counties";
+      } else if (collectionNames.includes("county_data")) {
+        collectionName = "county_data";
+      }
+      console.log(`"County Level" not found, using "${collectionName}" instead`);
     }
     
-    const collection = dbEquity.collection("County Level");
-    // Filter by state field equals the given state name (e.g., "California")
-    const data = await collection.find({ state: state }).toArray();
+    const collection = dbEquity.collection(collectionName);
+    
+    // Filter by state field (with flexibility)
+    let query = { state: state };
+    
+    // For Population_Data, try a more flexible query if needed
+    if (category === "Population_Data") {
+      const statePattern = new RegExp(state, 'i'); // Case-insensitive match
+      query = { 
+        $or: [
+          { state: state },
+          { state: statePattern },
+          { State: state },
+          { State: statePattern }
+        ]
+      };
+    }
+    
+    const data = await collection.find(query).toArray();
+    console.log(`Found ${data.length} records for ${category} in ${state}`);
+    
     res.json(data);
   } catch (error) {
     console.error(`Error fetching equity county average values for ${req.params.category} in ${req.params.state}:`, error);
@@ -166,6 +271,15 @@ startServer().catch(console.error);
 
 process.on('SIGINT', async () => {
   await client.close();
-  console.log('MongoDB connection closed');
+  await mongoose.connection.close();
+  console.log('MongoDB connections closed');
   process.exit(0);
+});
+// Add this to server.js
+app.get('/auth-debug', (req, res) => {
+  res.json({
+    cookies: req.cookies,
+    user: req.user || null,
+    isAuthenticated: !!req.cookies.access_token
+  });
 });

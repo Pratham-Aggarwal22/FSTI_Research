@@ -1,0 +1,195 @@
+/* Public/css/auth.css */
+.auth-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, var(--primary-light), var(--primary-dark));
+    padding: 2rem;
+  }
+  
+  .auth-card {
+    width: 100%;
+    max-width: 600px;
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    transition: transform 0.3s ease;
+  }
+  
+  .auth-card:hover {
+    transform: translateY(-5px);
+  }
+  
+  .auth-header {
+    padding: 2rem;
+    text-align: center;
+    background-color: var(--bg-light);
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  .auth-header h1 {
+    color: var(--primary);
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  
+  .auth-header .tagline {
+    color: var(--text-medium);
+    font-size: 0.9rem;
+  }
+  
+  .auth-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  .auth-tab {
+    flex: 1;
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-medium);
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-decoration: none;
+  }
+  
+  .auth-tab.active {
+    color: var(--primary);
+    border-bottom: 2px solid var(--primary);
+  }
+  
+  .auth-tab:hover:not(.active) {
+    background-color: var(--bg-light);
+  }
+  
+  .auth-error {
+    background-color: rgba(235, 59, 90, 0.1);
+    color: var(--transit-red);
+    padding: 0.75rem 1rem;
+    margin: 1rem;
+    border-radius: var(--border-radius-md);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .auth-error::before {
+    content: '\f06a';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+  }
+  
+  .auth-form {
+    padding: 2rem;
+  }
+  
+  .form-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .form-group {
+    flex: 1;
+    margin-bottom: 1.5rem;
+  }
+  
+  .form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: var(--text-dark);
+  }
+  
+  .form-group input,
+  .form-group select {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    font-family: var(--font-primary);
+    font-size: 0.9rem;
+  }
+  
+  .form-group input:focus,
+  .form-group select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(44, 65, 255, 0.1);
+    outline: none;
+  }
+  
+  .form-actions {
+    text-align: center;
+  }
+  
+  .btn-primary {
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--border-radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1rem;
+  }
+  
+  .btn-primary:hover {
+    background-color: var(--primary-dark);
+  }
+  
+  .auth-footer {
+    padding: 1.5rem;
+    text-align: center;
+    background-color: var(--bg-light);
+    border-top: 1px solid var(--border-color);
+  }
+  
+  .auth-footer p {
+    margin: 0.5rem 0;
+    font-size: 0.9rem;
+    color: var(--text-medium);
+  }
+  
+  .auth-footer a {
+    color: var(--primary);
+    font-weight: 500;
+    text-decoration: none;
+  }
+  
+  .auth-footer a:hover {
+    text-decoration: underline;
+  }
+  
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .form-row {
+      flex-direction: column;
+      gap: 0;
+    }
+    
+    .auth-card {
+      max-width: 100%;
+    }
+  }
+  
+  /* Dark mode adjustments */
+  .dark-mode .auth-container {
+    background: linear-gradient(135deg, #3949ab, #1a237e);
+  }
+  
+  .dark-mode .auth-error {
+    background-color: rgba(235, 59, 90, 0.2);
+  }

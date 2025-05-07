@@ -1,22 +1,25 @@
 {
-  "name": "researchwebsite",
+  "name": "transit-viz",
   "version": "1.0.0",
-  "type":"module",
+  "description": "Modern Transit Data Explorer with Authentication and Comparison",
   "main": "server.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "cors": "^2.8.5",
+    "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.7",
-    "ejs": "^3.1.10",
+    "ejs": "^3.1.9",
     "express": "^4.21.2",
-    "mongodb": "^6.14.0"
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^4.17.2",
+    "mongoose": "^8.2.1",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
   }
-  
 }

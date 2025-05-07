@@ -1,0 +1,218 @@
+<!-- Views/comparison/index.ejs -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TransitViz - Data Comparison</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/comparison.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Navbar -->
+    <nav class="navbar">
+      <div class="navbar-brand">
+        <a href="/" class="logo">
+          <i class="fas fa-bus"></i> TransitViz
+        </a>
+        <span class="tagline">Modern Transit Data Explorer</span>
+      </div>
+      
+      <div class="navbar-controls">
+        <div class="user-profile">
+          <i class="fas fa-user-circle"></i>
+          <span><%= user.username %></span>
+          <div class="user-dropdown">
+            <a href="#"><i class="fas fa-user"></i> Profile</a>
+            <a href="/auth/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+          </div>
+        </div>
+        
+        <a href="/" class="nav-button">
+          <i class="fas fa-globe-americas"></i>
+          <span>Map View</span>
+        </a>
+        
+        <div class="theme-toggle">
+          <input type="checkbox" id="themeToggle" class="toggle-checkbox">
+          <label for="themeToggle" class="toggle-label">
+            <i class="fas fa-sun"></i>
+            <i class="fas fa-moon"></i>
+            <span class="toggle-ball"></span>
+          </label>
+        </div>
+      </div>
+    </nav>
+    
+    <!-- Comparison content -->
+    <div class="comparison-container">
+      <div class="comparison-sidebar">
+        <div class="sidebar-header">
+          <h2><i class="fas fa-chart-bar"></i> Comparison</h2>
+        </div>
+        
+        <div class="sidebar-content">
+          <div class="comparison-controls">
+            <div class="control-group">
+              <label><i class="fas fa-layer-group"></i> Comparison Level</label>
+              <div class="segmented-control">
+                <input type="radio" name="comparisonLevel" id="stateLevel" value="state" checked>
+                <label for="stateLevel">States</label>
+                
+                <input type="radio" name="comparisonLevel" id="countyLevel" value="county">
+                <label for="countyLevel">Counties</label>
+              </div>
+            </div>
+            
+            <div class="control-group state-selection-container">
+              <label><i class="fas fa-map-marked-alt"></i> Select States</label>
+              <div class="multi-select">
+                <div class="selected-options">
+                  <div class="placeholder">Select states to compare...</div>
+                </div>
+                <div class="options-dropdown" id="stateOptions">
+                  <div class="search-box">
+                    <input type="text" placeholder="Search states...">
+                  </div>
+                  <div class="options-list">
+                    <!-- States will be populated by JavaScript -->
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="control-group county-selection-container" style="display: none;">
+              <label><i class="fas fa-map"></i> Select State</label>
+              <select id="stateForCounties" class="custom-select">
+                <option value="">Select a state first</option>
+                <!-- States will be populated by JavaScript -->
+              </select>
+              
+              <label class="mt-3"><i class="fas fa-map-pin"></i> Select Counties</label>
+              <div class="multi-select">
+                <div class="selected-options">
+                  <div class="placeholder">Select counties to compare...</div>
+                </div>
+                <div class="options-dropdown" id="countyOptions">
+                  <div class="search-box">
+                    <input type="text" placeholder="Search counties...">
+                  </div>
+                  <div class="options-list">
+                    <!-- Counties will be populated by JavaScript -->
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="control-group">
+              <label><i class="fas fa-chart-pie"></i> Chart Type</label>
+              <select id="chartType" class="custom-select">
+                <option value="bar">Bar Chart</option>
+                <option value="line">Line Chart</option>
+                <option value="radar">Radar Chart</option>
+                <option value="polar">Polar Area Chart</option>
+                <option value="pie">Pie Chart</option>
+                <option value="doughnut">Doughnut Chart</option>
+              </select>
+            </div>
+            
+            <div class="control-group">
+              <label><i class="fas fa-analytics"></i> Metrics</label>
+              <select id="metricSelect" class="custom-select">
+                <option value="">Select metric...</option>
+                <!-- Metrics will be populated by JavaScript -->
+              </select>
+            </div>
+            
+            <button id="compareBtn" class="compare-btn">
+              <i class="fas fa-bolt"></i> Generate Comparison
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="comparison-content">
+        <div class="comparison-header">
+          <h1>Transit Data Comparison</h1>
+          <p class="subtitle">Compare transit metrics across states or counties</p>
+        </div>
+        
+        <div class="empty-state" id="emptyState">
+          <div class="empty-illustration">
+            <i class="fas fa-chart-line"></i>
+          </div>
+          <h2>Start Comparing Transit Data</h2>
+          <p>Select entities and metrics from the sidebar to generate visualizations.</p>
+          <ul class="steps">
+            <li><i class="fas fa-1"></i> Choose comparison level (states or counties)</li>
+            <li><i class="fas fa-2"></i> Select entities to compare</li>
+            <li><i class="fas fa-3"></i> Pick a chart type and metric</li>
+            <li><i class="fas fa-4"></i> Click "Generate Comparison"</li>
+          </ul>
+        </div>
+        
+        <div class="comparison-results" id="comparisonResults" style="display: none;">
+          <div class="chart-controls">
+            <div class="control-row">
+              <button id="downloadChartBtn" class="action-btn">
+                <i class="fas fa-download"></i> Download Chart
+              </button>
+              <button id="fullScreenBtn" class="action-btn">
+                <i class="fas fa-expand"></i> Full Screen
+              </button>
+            </div>
+            <div class="control-row">
+              <button id="toggleData3dBtn" class="action-btn">
+                <i class="fas fa-cube"></i> Toggle 3D View
+              </button>
+              <button id="animateDataBtn" class="action-btn">
+                <i class="fas fa-play"></i> Animate Data
+              </button>
+            </div>
+          </div>
+          
+          <div class="chart-container">
+            <canvas id="comparisonChart"></canvas>
+          </div>
+          
+          <div class="data-table-container">
+            <h3>Comparison Data</h3>
+            <table class="data-table" id="dataTable">
+              <thead>
+                <tr>
+                  <th>Entity</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Data will be populated by JavaScript -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Full screen modal -->
+  <div id="fullScreenModal" class="fullscreen-modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">Full Screen Comparison</h3>
+      <button id="closeModalBtn" class="close-btn">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <canvas id="fullscreenChart"></canvas>
+    </div>
+  </div>
+
+  <script src="/js/comparison.js"></script>
+</body>
+</html>

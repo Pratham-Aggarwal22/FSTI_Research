@@ -1,506 +1,437 @@
+<!-- Views/index.ejs -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TransitViz | Public Transportation Data Explorer</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
-    rel="stylesheet"
-  />
-  <link
-    rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-  />
-  <link rel="stylesheet" href="/css/styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TransitViz - Modern Transit Data Explorer</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" integrity="sha512-GWzVrcGlo0TxTRvz9ttioyYJ+Wwk9Ck0G81D+eO63BaqHaJ3YZX9wuqjwgfcV/MrB2PhaVX9DkYVhbFpStnqpQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://d3js.org/topojson.v3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="app-container">
-    <!-- Navbar -->
     <nav class="navbar">
       <div class="navbar-brand">
         <div class="logo">
-          <i class="fas fa-bus-alt"></i>
-          <span>TransitViz</span>
+          <i class="fas fa-bus"></i> TransitViz
         </div>
-        <div class="tagline">Public Transportation Data Explorer</div>
+        <span class="tagline">Modern Transit Data Explorer</span>
       </div>
-      <div class="navbar-controls">
-        <div class="location-indicator">
-          <i class="fas fa-map-marker-alt"></i>
-          <span id="currentLocation">United States</span>
+      
+      <!-- In the navbar section of Views/index.ejs -->
+        <div class="navbar-controls">
+          <div class="location-indicator">
+            <i class="fas fa-map-marker-alt"></i>
+            <span id="mapTitle">United States</span>
+          </div>
+          
+          <% if (locals.isAuthenticated) { %>
+            <div class="user-profile">
+              <i class="fas fa-user-circle"></i>
+              <span><%= user ? user.username : 'User' %></span>
+              <div class="user-dropdown">
+                <a href="/auth/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+              </div>
+            </div>
+          <% } else { %>
+            <a href="/auth/login" class="nav-button">
+              <i class="fas fa-sign-in-alt"></i>
+              <span>Login</span>
+            </a>
+          <% } %>
+          
+          <div class="theme-toggle">
+            <input type="checkbox" id="themeToggle" class="toggle-checkbox">
+            <label for="themeToggle" class="toggle-label">
+              <i class="fas fa-sun"></i>
+              <i class="fas fa-moon"></i>
+              <span class="toggle-ball"></span>
+            </label>
+          </div>
         </div>
-        <button id="homeButton" class="nav-button">
-          <i class="fas fa-home"></i>
-          <span>Home</span>
-        </button>
-        <div class="theme-toggle">
-          <input type="checkbox" id="darkModeToggle" class="toggle-checkbox" />
-          <label for="darkModeToggle" class="toggle-label">
-            <i class="fas fa-sun"></i>
-            <i class="fas fa-moon"></i>
-            <span class="toggle-ball"></span>
-          </label>
-        </div>
-      </div>
     </nav>
-
-    <!-- Main content area -->
+    
     <div class="content-wrapper">
-      <!-- Left Panel - Analytics Dashboard -->
-      <aside class="sidebar analytics-panel" id="leftPanel">
+      <div class="sidebar analytics-panel" id="leftPanel">
         <div class="sidebar-header">
-          <h2><i class="fas fa-chart-line"></i> Analytics Dashboard</h2>
-          <button id="toggleLeftPanel" class="collapse-btn">
+          <h2><i class="fas fa-chart-bar"></i> Analytics</h2>
+          <button class="collapse-btn" id="leftCollapseBtn">
             <i class="fas fa-chevron-left"></i>
           </button>
         </div>
-
         <div class="sidebar-content">
-          <!-- Country Metric Selection (shown when no state is selected) -->
-          <div id="metricSelection" class="selection-container">
+          <!-- Views/index.ejs (continued) -->
+          <div class="selection-container" id="metricSelection">
             <div class="metric-header">
               <h3>Transit Metrics</h3>
+              <p>Select a metric to visualize on the map</p>
             </div>
             <div class="selection-group">
-              <label for="metricSelect">
-                <i class="fas fa-filter"></i> Select Metric:
-              </label>
+              <label for="metricSelect"><i class="fas fa-chart-line"></i> Metric</label>
               <div class="custom-select-wrapper">
-                <select id="metricSelect" class="custom-select"></select>
-                <i class="fas fa-caret-down"></i>
+                <select id="metricSelect" class="custom-select">
+                  <!-- This will be populated by JavaScript -->
+                </select>
+                <i class="fas fa-chevron-down"></i>
               </div>
             </div>
           </div>
-
-          <!-- Country Charts Container (shown when no state is selected) -->
+          
+          <div class="selection-container" id="countyMetricSelection" style="display: none;">
+            <div class="metric-header">
+              <h3>County Transit Metrics</h3>
+              <p>Select a metric to visualize county data</p>
+            </div>
+            <div class="selection-group">
+              <label for="countyMetricSelect"><i class="fas fa-chart-line"></i> Metric</label>
+              <div class="custom-select-wrapper">
+                <select id="countyMetricSelect" class="custom-select">
+                  <!-- This will be populated by JavaScript -->
+                </select>
+                <i class="fas fa-chevron-down"></i>
+              </div>
+            </div>
+          </div>
+          
           <div id="countryChartsContainer" class="charts-container">
             <div class="chart-card">
               <div class="chart-header">
                 <h4><i class="fas fa-chart-bar"></i> Distribution</h4>
                 <div class="chart-actions">
-                  <button class="chart-action-btn" id="distributionFullscreen">
-                    <i class="fas fa-expand"></i>
+                  <button class="chart-action-btn">
+                    <i class="fas fa-expand-alt"></i>
                   </button>
-                  <div class="tooltip">View fullscreen</div>
+                  <span class="tooltip">Expand</span>
                 </div>
               </div>
-              <div id="distributionChartContainer" class="chart-body taller-chart">
+              <div class="chart-body">
                 <canvas id="distributionChart"></canvas>
               </div>
             </div>
-
+            
             <div class="chart-card">
               <div class="chart-header">
-                <h4><i class="fas fa-trophy"></i> Top/Bottom Performers</h4>
+                <h4><i class="fas fa-trophy"></i> Top & Bottom States</h4>
                 <div class="chart-actions">
-                  <button class="chart-action-btn" id="performersFullscreen">
-                    <i class="fas fa-expand"></i>
+                  <button class="chart-action-btn">
+                    <i class="fas fa-expand-alt"></i>
                   </button>
-                  <div class="tooltip">View fullscreen</div>
+                  <span class="tooltip">Expand</span>
                 </div>
               </div>
-              <div id="topBottomChartContainer" class="chart-body taller-chart">
+              <div class="chart-body">
                 <canvas id="topBottomChart"></canvas>
               </div>
             </div>
           </div>
-
-          <!-- County-Level Overview (shown when a state is selected) -->
-          <div id="countyMetricSelection" class="selection-container county-metrics" style="display: none;">
-            <div class="metric-header">
-              <h3><i class="fas fa-map-marked-alt"></i> County Overview</h3>
-            </div>
-            <div class="selection-group">
-              <label for="countyMetricSelect">
-                <i class="fas fa-filter"></i> Select Metric:
-              </label>
-              <div class="custom-select-wrapper">
-                <select id="countyMetricSelect" class="custom-select"></select>
-                <i class="fas fa-caret-down"></i>
-              </div>
-            </div>
+          
+          <div id="countyTopBottomContainer" class="charts-container" style="display: none;">
             <div class="chart-card">
               <div class="chart-header">
-                <h4><i class="fas fa-trophy"></i> County Rankings</h4>
+                <h4><i class="fas fa-trophy"></i> Top & Bottom Counties</h4>
                 <div class="chart-actions">
-                  <button class="chart-action-btn" id="countyPerformersFullscreen">
-                    <i class="fas fa-expand"></i>
+                  <button class="chart-action-btn">
+                    <i class="fas fa-expand-alt"></i>
                   </button>
-                  <div class="tooltip">View fullscreen</div>
+                  <span class="tooltip">Expand</span>
                 </div>
               </div>
-              <div id="countyTopBottomChartContainer" class="chart-body taller-chart">
+              <div class="chart-body">
                 <canvas id="countyTopBottomChart"></canvas>
               </div>
             </div>
           </div>
         </div>
-      </aside>
-
-      <!-- Show collapsed sidebar buttons -->
-      <div class="show-sidebar-btn left-sidebar-toggle" id="showLeftPanel">
-        <i class="fas fa-chevron-right"></i>
       </div>
-
-      <!-- Central map and visualization area -->
-      <main class="main-content">
-        <!-- View Tabs -->
+      
+      <div class="main-content">
         <div class="view-tabs">
           <button id="mapViewTab" class="view-tab active">
-            <i class="fas fa-map"></i> Geographic Map
+            <i class="fas fa-map-marked-alt"></i> Map View
           </button>
-          <button id="equityComparisonTab" class="view-tab">
+          <% if (locals.isAuthenticated) { %>
+            <button id="compareStatesButton" class="view-tab">
+              <i class="fas fa-chart-bar"></i> Compare States
+            </button>
+          <% } %>
+          <button id="equityComparisonTab" class="view-tab" style="display: none;">
             <i class="fas fa-balance-scale"></i> Equity Comparison
           </button>
         </div>
-
-        <!-- Breadcrumb navigation -->
-        <div class="breadcrumb">
-          <i class="fas fa-map"></i>
-          <span id="mapBreadcrumb">United States</span>
-          <!-- Hidden element for app.js compatibility -->
-          <div id="mapTitle" style="display: none;">United States</div>
-        </div>
-
-        <!-- Map Container -->
-        <div id="mapContent" class="map-content">
+        
+        <div class="map-content">
           <div id="mapView" class="map-container">
-            <!-- Map will be inserted here by D3 -->
-            <div class="map-loading">
+            <!-- Map will be rendered here by D3.js -->
+            <div class="loading">
               <div class="spinner"></div>
-              <span>Loading map data...</span>
+              <p>Loading map data...</p>
             </div>
           </div>
-
+          
           <div id="legend" class="map-legend">
-            <!-- Legend content will be dynamically generated -->
-          </div>
-
-          <!-- Equity Comparison Container -->
-          <div id="equityComparisonContent" class="equity-comparison-container">
-            <div class="equity-controls">
-              <div class="equity-control-group">
-                <label for="equityCategorySelect">
-                  <i class="fas fa-layer-group"></i> Equity Category:
-                </label>
-                <div class="custom-select-wrapper">
-                  <select id="equityCategorySelect" class="custom-select">
-                    <option value="Employment Data">Employment Data</option>
-                    <option value="Housing Data">Housing Data</option>
-                    <option value="Income Data">Income Data</option>
-                    <option value="Race Data">Race Data</option>
-                  </select>
-                  <i class="fas fa-caret-down"></i>
-                </div>
-              </div>
-
-              <div class="equity-control-group">
-                <label for="equityMetricSelect">
-                  <i class="fas fa-balance-scale"></i> Equity Metric:
-                </label>
-                <div class="custom-select-wrapper">
-                  <select id="equityMetricSelect" class="custom-select"></select>
-                  <i class="fas fa-caret-down"></i>
-                </div>
-              </div>
-
-              <div class="equity-control-group">
-                <label for="transitMetricSelect">
-                  <i class="fas fa-bus"></i> Transit Metric:
-                </label>
-                <div class="custom-select-wrapper">
-                  <select id="transitMetricSelect" class="custom-select"></select>
-                  <i class="fas fa-caret-down"></i>
-                </div>
-              </div>
-            </div>
-
-            <div class="comparison-chart-container taller-chart">
-              <canvas id="comparisonChart"></canvas>
-            </div>
+            <!-- Legend will be populated by JavaScript -->
           </div>
         </div>
-      </main>
-
-      <!-- Right Panel - Data Insights -->
-      <aside class="sidebar data-panel" id="dataSidebar">
+        
+        <div id="equityComparisonContent" class="equity-comparison-container">
+          <div class="equity-controls">
+            <div class="equity-control-group">
+              <label for="equityCategorySelect"><i class="fas fa-layer-group"></i> Equity Category</label>
+              <div class="custom-select-wrapper">
+                <select id="equityCategorySelect" class="custom-select">
+                  <option value="Employment_Data">Employment Data</option>
+                  <option value="Income_Data">Income Data</option>
+                  <option value="Race_Data">Race Data</option>
+                  <option value="Housing_Data">Housing Data</option>
+                </select>
+                <i class="fas fa-chevron-down"></i>
+              </div>
+            </div>
+            
+            <div class="equity-control-group">
+              <label for="transitMetricSelect"><i class="fas fa-bus"></i> Transit Metric</label>
+              <div class="custom-select-wrapper">
+                <select id="transitMetricSelect" class="custom-select">
+                  <!-- This will be populated by JavaScript -->
+                </select>
+                <i class="fas fa-chevron-down"></i>
+              </div>
+            </div>
+            
+            <div class="equity-control-group">
+              <label for="equityMetricSelect"><i class="fas fa-balance-scale"></i> Equity Metric</label>
+              <div class="custom-select-wrapper">
+                <select id="equityMetricSelect" class="custom-select">
+                  <!-- This will be populated by JavaScript -->
+                </select>
+                <i class="fas fa-chevron-down"></i>
+              </div>
+            </div>
+          </div>
+          
+          <div class="comparison-chart-container">
+            <canvas id="comparisonChart"></canvas>
+          </div>
+        </div>
+      </div>
+      
+      <div class="sidebar data-panel" id="rightPanel">
         <div class="sidebar-header">
-          <h2><i class="fas fa-database"></i> Data Insights</h2>
-          <button id="toggleSidebar" class="collapse-btn">
+          <h2><i class="fas fa-database"></i> Data</h2>
+          <button class="collapse-btn" id="rightCollapseBtn">
             <i class="fas fa-chevron-right"></i>
           </button>
         </div>
-
-        <div id="dataPanelContent" class="sidebar-content">
-          <!-- This content will be dynamically generated -->
-        </div>
-      </aside>
-
-      <!-- Show collapsed sidebar buttons -->
-      <div class="show-sidebar-btn right-sidebar-toggle" id="showRightPanel">
-        <i class="fas fa-chevron-left"></i>
-      </div>
-    </div>
-
-    <!-- Modal for full-screen charts -->
-    <div id="chartModal" class="modal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3 id="modalTitle"></h3>
-          <button id="closeModal" class="close-btn">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-        <div class="modal-body">
-          <canvas id="modalChart"></canvas>
+        <div class="sidebar-content" id="dataPanelContent">
+          <!-- Content will be dynamically updated by JavaScript -->
+          <h2 class="section-title">United States</h2>
+          <h3>Averages</h3>
+          <div id="countryMetricsGrid" class="metric-grid"></div>
         </div>
       </div>
     </div>
-
-    <!-- Templates -->
-    <!-- State Data Template -->
-    <template id="stateDataTemplate">
-      <div class="state-data-container">
-        <div class="template-header">
-          <button id="backButton" class="back-btn">
-            <i class="fas fa-arrow-left"></i> Back to National View
-          </button>
-          <h2 id="stateName" class="data-title"></h2>
-        </div>
-
-        <div class="data-tabs">
-          <button id="stateAveragesOption" class="data-tab">
-            <i class="fas fa-chart-pie"></i> Averages
-          </button>
-          <button id="stateFrequencyOption" class="data-tab active">
-            <i class="fas fa-chart-bar"></i> Distributions
-          </button>
-        </div>
-
-        <div id="stateAveragesSection" class="data-section">
-          <div class="section-header">
-            <h3><i class="fas fa-calculator"></i> State Averages</h3>
-            <span class="section-subtitle">Key transit metrics compared to national averages</span>
-          </div>
-          <div class="metric-grid" id="stateMetricsGrid"></div>
-        </div>
-
-        <div id="stateFrequencySection" class="data-section">
-          <div class="section-header">
-            <h3><i class="fas fa-chart-bar"></i> Frequency Distributions</h3>
-            <span class="section-subtitle">Statistical distribution of transit metrics</span>
-          </div>
-          <div id="chartsContainer" class="state-charts-container"></div>
-        </div>
-      </div>
-    </template>
-
-    <!-- County Data Template -->
-    <template id="countyDataTemplate">
-      <div class="county-data-container">
-        <div class="template-header">
-          <button id="backToStateButton" class="back-btn">
-            <i class="fas fa-arrow-left"></i> Back to State View
-          </button>
-          <h2 id="countyName" class="data-title"></h2>
-        </div>
-
-        <div class="data-tabs">
-          <button id="averagesOption" class="data-tab active">
-            <i class="fas fa-chart-pie"></i> Averages
-          </button>
-          <button id="frequencyOption" class="data-tab">
-            <i class="fas fa-chart-bar"></i> Distributions
-          </button>
-        </div>
-
-        <div id="averagesSection" class="data-section">
-          <div class="section-header">
-            <h3><i class="fas fa-calculator"></i> County Averages</h3>
-            <span class="section-subtitle">Key transit metrics for this county</span>
-          </div>
-          <div class="metric-grid" id="countyMetricsGrid"></div>
-        </div>
-
-        <div id="frequencySection" class="data-section">
-          <div class="section-header">
-            <h3><i class="fas fa-chart-bar"></i> Frequency Distributions</h3>
-            <span class="section-subtitle">Statistical distribution of transit metrics</span>
-          </div>
-          <div id="countyChartsContainer" class="county-charts-container"></div>
-        </div>
-      </div>
-    </template>
-
-    <!-- Transit Info Card Template (kept for compatibility) -->
-    <template id="transitInfoCardTemplate">
-      <div class="transit-info-card">
-        <h4 class="transit-info-title">
-          <i class="fas fa-info-circle"></i> <span class="location-name"></span>
-        </h4>
-        <div class="transit-info-content">
-          <!-- Content will be dynamically generated -->
-        </div>
-      </div>
-    </template>
   </div>
-
-  <!-- Scripts -->
+  
+  <!-- Templates for rendering data panels -->
+  <template id="stateDataTemplate">
+    <div class="template-header">
+      <button id="backButton" class="back-btn">
+        <i class="fas fa-arrow-left"></i> Back to Map
+      </button>
+      <h2 id="stateName" class="data-title"></h2>
+    </div>
+    
+    <div class="data-tabs">
+      <button id="stateAveragesOption" class="data-tab">
+        <i class="fas fa-chart-line"></i> Averages
+      </button>
+      <button id="stateFrequencyOption" class="data-tab active">
+        <i class="fas fa-chart-bar"></i> Frequency
+      </button>
+    </div>
+    
+    <div id="stateAveragesSection" style="display: none;">
+      <h3 class="section-title">State Averages</h3>
+      <div id="stateMetricsGrid" class="metric-grid"></div>
+    </div>
+    
+    <div id="stateFrequencySection">
+      <h3 class="section-title">Distribution Charts</h3>
+      <div id="chartsContainer" class="state-charts-container"></div>
+    </div>
+  </template>
+  
+  <template id="countyDataTemplate">
+    <div class="template-header">
+      <button id="backToStateButton" class="back-btn">
+        <i class="fas fa-arrow-left"></i> Back to State
+      </button>
+      <h2 id="countyName" class="data-title"></h2>
+    </div>
+    
+    <div class="data-tabs">
+      <button id="averagesOption" class="data-tab active">
+        <i class="fas fa-chart-line"></i> Averages
+      </button>
+      <button id="frequencyOption" class="data-tab">
+        <i class="fas fa-chart-bar"></i> Frequency
+      </button>
+    </div>
+    
+    <div id="averagesSection">
+      <h3 class="section-title">County Averages</h3>
+      <div id="countyMetricsGrid" class="metric-grid"></div>
+    </div>
+    
+    <div id="frequencySection" style="display: none;">
+      <h3 class="section-title">Distribution Charts</h3>
+      <div id="countyChartsContainer" class="county-charts-container"></div>
+    </div>
+  </template>
+  
+  <!-- Auth check modal for guests -->
+<!-- Auth check modal for guests in Views/index.ejs -->
+  <% if (!user) { %>
+  <div id="authRequiredModal" class="modal">
+    <div class="modal-content auth-modal-content">
+      <div class="modal-header">
+        <h3>Login Required</h3>
+        <button class="close-btn" id="closeAuthModal">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="auth-prompt">
+          <i class="fas fa-lock"></i>
+          <h4>Access Restricted</h4>
+          <p>You need to be logged in to view detailed state and county data.</p>
+          
+          <div class="auth-features">
+            <h5>Premium Features Available After Login:</h5>
+            <ul class="feature-list">
+              <li><i class="fas fa-chart-area"></i> <span>Detailed State & County Transit Metrics</span></li>
+              <li><i class="fas fa-chart-bar"></i> <span>Data Comparison Tools</span></li>
+              <li><i class="fas fa-balance-scale"></i> <span>Equity Analysis</span></li>
+              <li><i class="fas fa-download"></i> <span>Data Export Options</span></li>
+            </ul>
+          </div>
+          
+          <div class="auth-actions">
+            <a href="/auth/login" class="btn-primary">
+              <i class="fas fa-sign-in-alt"></i> Login
+            </a>
+            <a href="/auth/signup" class="btn-primary">
+              <i class="fas fa-user-plus"></i> Sign Up
+            </a>
+            <button class="btn-text" id="continueAsGuest">
+              <i class="fas fa-eye"></i> Continue as Guest
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <% } %>
+  
   <script src="/js/app.js"></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", function () {
-      // Initialize UI interactions
-      const leftPanel = document.getElementById("leftPanel");
-      const dataSidebar = document.getElementById("dataSidebar");
-      const modal = document.getElementById("chartModal");
-      const showLeftPanel = document.getElementById("showLeftPanel");
-      const showRightPanel = document.getElementById("showRightPanel");
-
-      // Hide show buttons initially
-      showLeftPanel.style.display = "none";
-      showRightPanel.style.display = "none";
-
-      // Toggle panels
-      document.getElementById("toggleLeftPanel").addEventListener("click", () => {
-        leftPanel.classList.add("collapsed");
-        showLeftPanel.style.display = "flex";
+  <% if (!user) { %>
+    <script>
+      // This script will be included only for non-logged in users
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log("Non-logged in user script running");
       });
-
-      document.getElementById("toggleSidebar").addEventListener("click", () => {
-        dataSidebar.classList.add("collapsed");
-        showRightPanel.style.display = "flex";
+    </script>
+    <% } else { %>
+    <script>
+      // This script will be included only for logged in users
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log("Logged in user script running - user: <%= user.username %>");
       });
+    </script>
+    <% } %>
 
-      // Show panel buttons
-      showLeftPanel.addEventListener("click", () => {
-        leftPanel.classList.remove("collapsed");
-        showLeftPanel.style.display = "none";
-      });
+    <!-- Add this before the closing body tag in Views/index.ejs -->
+<!-- Comparison Modal -->
+<div id="comparisonModal" class="modal">
+  <div class="modal-content comparison-modal-content">
+    <div class="modal-header">
+      <h3 id="comparisonModalTitle">Compare States</h3>
+      <button class="close-btn" id="closeComparisonModal">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="comparison-info">
+        <div class="selected-entities-container">
+          <h4><i class="fas fa-map-marker-alt"></i> Selected Entities</h4>
+          <div id="selectedEntitiesList" class="selected-entities-list">
+            <div class="empty-selection">Select states on the map to compare</div>
+          </div>
+        </div>
+        
+        <div class="chart-options">
+          <div class="chart-type-selector">
+            <h4><i class="fas fa-chart-pie"></i> Chart Type</h4>
+            <select id="comparisonChartType" class="custom-select">
+              <option value="bar">Bar Chart</option>
+              <option value="line">Line Chart</option>
+              <option value="radar">Radar Chart</option>
+              <option value="pie">Pie Chart</option>
+              <option value="doughnut">Doughnut Chart</option>
+            </select>
+          </div>
+          
+          <div class="metric-selector">
+            <h4><i class="fas fa-ruler"></i> Metric</h4>
+            <select id="comparisonMetric" class="custom-select">
+              <!-- This will be populated by JavaScript -->
+            </select>
+          </div>
+        </div>
+        
+        <button id="generateComparisonBtn" class="btn-primary">
+          <i class="fas fa-bolt"></i> Generate Comparison
+        </button>
+      </div>
+      
+      <div class="comparison-chart-wrapper" style="display: none;">
+        <div class="chart-action-bar">
+          <button id="downloadComparisonBtn" class="action-btn">
+            <i class="fas fa-download"></i> Download Chart
+          </button>
+          <button id="backToComparisonOptions" class="action-btn">
+            <i class="fas fa-arrow-left"></i> Back
+          </button>
+        </div>
+        <div class="chart-container">
+          <canvas id="comparisonModalChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-      showRightPanel.addEventListener("click", () => {
-        dataSidebar.classList.remove("collapsed");
-        showRightPanel.style.display = "none";
-      });
-
-      // Dark mode toggle
-      const darkModeToggle = document.getElementById("darkModeToggle");
-      const body = document.body;
-
-      // Check user preference for dark mode
-      if (localStorage.getItem("darkMode") === "enabled") {
-        body.classList.add("dark-mode");
-        darkModeToggle.checked = true;
-      }
-
-      darkModeToggle.addEventListener("change", () => {
-        if (darkModeToggle.checked) {
-          body.classList.add("dark-mode");
-          localStorage.setItem("darkMode", "enabled");
-        } else {
-          body.classList.remove("dark-mode");
-          localStorage.setItem("darkMode", "disabled");
-        }
-      });
-
-      // Modal for fullscreen charts
-      document
-        .getElementById("distributionFullscreen")
-        .addEventListener("click", () => {
-          openChartInModal(
-            "distributionChart",
-            "Distribution of " + document.getElementById("metricSelect").value
-          );
-        });
-
-      document
-        .getElementById("performersFullscreen")
-        .addEventListener("click", () => {
-          openChartInModal(
-            "topBottomChart",
-            "Top/Bottom Performers - " + document.getElementById("metricSelect").value
-          );
-        });
-
-      document.getElementById("countyPerformersFullscreen")?.addEventListener("click", () => {
-        openChartInModal(
-          "countyTopBottomChart",
-          "County Rankings - " + document.getElementById("countyMetricSelect").value
-        );
-      });
-
-      document.getElementById("closeModal").addEventListener("click", () => {
-        modal.style.display = "none";
-      });
-
-      window.addEventListener("click", (event) => {
-        if (event.target === modal) {
-          modal.style.display = "none";
-        }
-      });
-
-      function openChartInModal(chartId, title) {
-        const sourceChart = Chart.getChart(chartId);
-        if (sourceChart) {
-          modal.style.display = "flex";
-          document.getElementById("modalTitle").textContent = title;
-
-          // Clone chart configuration
-          const modalCanvas = document.getElementById("modalChart");
-          const modalCtx = modalCanvas.getContext("2d");
-
-          // Destroy previous chart if exists
-          const existingChart = Chart.getChart(modalCanvas);
-          if (existingChart) {
-            existingChart.destroy();
-          }
-
-          // Create new chart in modal
-          new Chart(modalCtx, {
-            type: sourceChart.config.type,
-            data: JSON.parse(JSON.stringify(sourceChart.data)),
-            options: {
-              ...JSON.parse(JSON.stringify(sourceChart.options)),
-              responsive: true,
-              maintainAspectRatio: false,
-            },
-          });
-        }
-      }
-
-      // Update location indicator
-      const updateLocationIndicator = () => {
-        const mapTitle = document.getElementById("mapTitle")?.textContent || "United States";
-        document.getElementById("currentLocation").textContent = mapTitle;
-        document.getElementById("mapBreadcrumb").textContent = mapTitle;
-      };
-
-      // Check for location updates (observe DOM changes)
-      const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-          if (mutation.type === "childList" || mutation.type === "characterData") {
-            updateLocationIndicator();
-          }
-        });
-      });
-
-      const mapTitleEl = document.getElementById("mapTitle");
-      if (mapTitleEl) {
-        observer.observe(mapTitleEl, {
-          childList: true,
-          characterData: true,
-          subtree: true,
-        });
-      }
-
-      // Initial sync
-      updateLocationIndicator();
-    });
-  </script>
+<!-- Comparison Selection Overlay -->
+<div id="comparisonOverlay" class="comparison-overlay">
+  <div class="comparison-overlay-header">
+    <h3 id="comparisonOverlayTitle">Select States to Compare</h3>
+    <div class="selection-count">
+      <span id="selectionCount">0</span> selected
+    </div>
+    <div class="overlay-actions">
+      <button id="cancelComparisonBtn" class="btn-secondary">
+        <i class="fas fa-times"></i> Cancel
+      </button>
+      <button id="proceedToCompareBtn" class="btn-primary">
+        <i class="fas fa-chart-bar"></i> Compare Now
+      </button>
+    </div>
+  </div>
+  <div class="selected-preview" id="selectedPreview"></div>
+</div>
 </body>
 </html>
