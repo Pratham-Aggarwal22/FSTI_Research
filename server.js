@@ -20,6 +20,15 @@ import { isGuestRoute } from './middleware/auth.js';
 // In server.js, near the top after imports
 import { verifyToken } from './utils/jwt.js';
 
+function getCorrectDatabaseName(stateName) {
+  const corrections = {
+    "Alabama": "Albama",
+    "Michigan": "MIchigan"
+    // Pennsylvania uses correct spelling
+  };
+  return corrections[stateName] || stateName;
+}
+
 // Load environment variables from .env file
 dotenv.config();
 
@@ -31,7 +40,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MongoDB connection configuration from environment variables
-const uri = process.env.MONGODB_URI;
+const uri = process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility";
 const dbName = process.env.DB_NAME || 'StateWiseComputation';
 const client = new MongoClient(uri);
 
@@ -159,12 +168,110 @@ app.get('/api/frequencyDistributions/:stateName', async (req, res) => {
 app.get('/api/countyFullData/:stateName/:countyName', async (req, res) => {
   console.log("County full data endpoint hit:", req.params);
   try {
-    const { stateName, countyName } = req.params;
-    const db = client.db(stateName);
-    const averagesCollection = db.collection('Averages');
-    const averagesData = await averagesCollection.findOne({ title: countyName });
+    let { stateName, countyName } = req.params;
     
-    // Fetch frequency distributions from collections whose names start with "Frequency-"
+    // Decode URI components to get original special characters back
+    stateName = decodeURIComponent(stateName);
+    countyName = decodeURIComponent(countyName);
+    
+    console.log(`Request for state: ${stateName}, county: ${countyName}`);
+    
+    // Check if this is already a formatted database name
+    let dbName;
+    if (stateName.includes('_')) {
+      // Already formatted, use as-is
+      dbName = stateName;
+    } else {
+      // Apply corrections then format
+      const correctedStateName = getCorrectDatabaseName(stateName);
+      dbName = correctedStateName.replace(/\s+/g, '_');
+    }
+    
+    console.log(`Using database: ${dbName}`);
+    
+    let db, averagesCollection;
+    
+    try {
+      db = client.db(dbName);
+      averagesCollection = db.collection('Averages');
+    } catch (dbError) {
+      // For Pennsylvania, try exact database name
+      if (stateName.toLowerCase().includes('pennsylvania')) {
+        console.log('Trying exact "Pennsylvania" database...');
+        db = client.db('Pennsylvania');
+        averagesCollection = db.collection('Averages');
+      } else {
+        throw dbError;
+      }
+    }
+    
+    // Try multiple variations of the county name, preserving special characters
+    const countyVariations = [
+      countyName, // Original with special characters (this should work for "Doña Ana", "O'Brien")
+      countyName.toUpperCase(),
+      countyName.toLowerCase(),
+      // Also try some common variations in case the data is inconsistent
+      countyName.replace(/'/g, "'"), // In case smart quotes were converted
+      countyName.replace(/'/g, "'"),
+      countyName.replace(/ñ/g, 'n'), // In case diacritics were removed in DB
+    ];
+    
+    let averagesData = null;
+    
+    console.log(`Trying county name variations:`, countyVariations);
+    
+    // Try each variation until we find a match
+    for (const variation of countyVariations) {
+      averagesData = await averagesCollection.findOne({ title: variation });
+      if (averagesData) {
+        console.log(`Found county data with variation: "${variation}"`);
+        break;
+      }
+    }
+    
+    // If still not found, try regex search (case-insensitive) with special character handling
+    if (!averagesData) {
+      // Create a flexible regex that handles special characters
+      const flexiblePattern = countyName
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
+        .replace(/'/g, "[''']") // Match any type of apostrophe
+        .replace(/ñ/g, '[nñ]') // Match both n and ñ
+        .replace(/á/g, '[aá]') // Match both a and á
+        .replace(/é/g, '[eé]') // Match both e and é
+        .replace(/í/g, '[ií]') // Match both i and í
+        .replace(/ó/g, '[oó]') // Match both o and ó
+        .replace(/ú/g, '[uú]'); // Match both u and ú
+      
+      const regex = new RegExp(flexiblePattern, 'i');
+      console.log(`Trying flexible regex: ${flexiblePattern}`);
+      
+      averagesData = await averagesCollection.findOne({ title: regex });
+      if (averagesData) {
+        console.log(`Found county data with flexible regex search`);
+      }
+    }
+    
+    if (!averagesData) {
+      console.log(`No county data found for any variation of: "${countyName}"`);
+      // List available counties for debugging
+      const allCounties = await averagesCollection.find({}, { projection: { title: 1 } }).toArray();
+      console.log('Available counties (first 10):', allCounties.slice(0, 10).map(c => `"${c.title}"`));
+      console.log(`Total counties available: ${allCounties.length}`);
+      
+      // Look for counties that might match with special characters
+      const possibleMatches = allCounties.filter(county => {
+        if (!county.title) return false;
+        const normalized1 = county.title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const normalized2 = countyName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return normalized1.includes(normalized2) || normalized2.includes(normalized1);
+      });
+      
+      if (possibleMatches.length > 0) {
+        console.log('Possible matches found:', possibleMatches.map(c => `"${c.title}"`));
+      }
+    }
+    
+    // Fetch frequency distributions
     const collections = await db.listCollections().toArray();
     const frequencyCollections = collections
       .map(col => col.name)
@@ -173,7 +280,29 @@ app.get('/api/countyFullData/:stateName/:countyName', async (req, res) => {
     const frequencies = {};
     for (const collectionName of frequencyCollections) {
       const coll = db.collection(collectionName);
-      const freqData = await coll.findOne({ title: countyName });
+      
+      // Try the same variations for frequency data
+      let freqData = null;
+      for (const variation of countyVariations) {
+        freqData = await coll.findOne({ title: variation });
+        if (freqData) break;
+      }
+      
+      if (!freqData) {
+        const flexiblePattern = countyName
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/'/g, "[''']")
+          .replace(/ñ/g, '[nñ]')
+          .replace(/á/g, '[aá]')
+          .replace(/é/g, '[eé]')
+          .replace(/í/g, '[ií]')
+          .replace(/ó/g, '[oó]')
+          .replace(/ú/g, '[uú]');
+        
+        const regex = new RegExp(flexiblePattern, 'i');
+        freqData = await coll.findOne({ title: regex });
+      }
+      
       if (freqData) {
         frequencies[collectionName] = freqData;
       }
@@ -193,11 +322,62 @@ app.get('/api/countyFullData/:stateName/:countyName', async (req, res) => {
 // (Updated to use the "Averages" collection, since each state's county data is stored there.)
 app.get('/api/countyAverageValues/:stateName', async (req, res) => {
   try {
-    const { stateName } = req.params;
-    const db = client.db(stateName);
-    const collection = db.collection('Averages'); // Changed from 'AverageValues' to 'Averages'
-    const data = await collection.find({}).toArray();
-    res.json(data);
+    let { stateName } = req.params;
+    
+    // Decode URI component
+    stateName = decodeURIComponent(stateName);
+    
+    console.log(`Original state name from request: ${stateName}`);
+    
+    // Check if this is already a corrected database name format
+    let dbName;
+    if (stateName.includes('_')) {
+      // Already formatted, use as-is
+      dbName = stateName;
+    } else {
+      // Apply corrections then format
+      const correctedStateName = getCorrectDatabaseName(stateName);
+      dbName = correctedStateName.replace(/\s+/g, '_');
+    }
+    
+    console.log(`Using database name: ${dbName}`);
+    
+    try {
+      const db = client.db(dbName);
+      const collection = db.collection('Averages');
+      const data = await collection.find({}).toArray();
+      
+      console.log(`Found ${data.length} counties in database: ${dbName}`);
+      
+      // DON'T sanitize county names - keep them exactly as they are in the database
+      // This preserves "Doña Ana" and "O'Brien" as they are stored
+      
+      // Format all numbers in the response
+      const formattedData = formatNumberInObject(data);
+      res.json(formattedData);
+    } catch (dbError) {
+      console.error(`Database access error for ${dbName}:`, dbError.message);
+      
+      // For Pennsylvania, try without formatting (in case database name is exactly "Pennsylvania")
+      if (stateName.toLowerCase().includes('pennsylvania')) {
+        console.log('Trying exact database name "Pennsylvania" for Pennsylvania...');
+        try {
+          const db = client.db('Pennsylvania');
+          const collection = db.collection('Averages');
+          const data = await collection.find({}).toArray();
+          
+          console.log(`Found ${data.length} counties in Pennsylvania database`);
+          
+          const formattedData = formatNumberInObject(data);
+          res.json(formattedData);
+          return;
+        } catch (fallbackError) {
+          console.error('Fallback Pennsylvania database access failed:', fallbackError.message);
+        }
+      }
+      
+      throw dbError;
+    }
   } catch (error) {
     console.error('Error fetching county average values:', error);
     res.status(500).json({ error: error.message });
@@ -207,22 +387,37 @@ app.get('/api/countyAverageValues/:stateName', async (req, res) => {
 // Updated API endpoint for equity county average values
 app.get('/api/equityCountyAverageValues/:category/:state', async (req, res) => {
   try {
-    const { category, state } = req.params;
+    let { category, state } = req.params;
+    
+    // Decode URI components
+    category = decodeURIComponent(category);
+    state = decodeURIComponent(state);
+    
     console.log(`Fetching equity data for category: ${category}, state: ${state}`);
     
-    const dbNameEquity = category.replace(/\s+/g, '_'); // e.g., "Employment Data" -> "Employment_Data"
+    // Check if state is already formatted (contains underscores)
+    let formattedStateName;
+    if (state.includes('_')) {
+      // Already formatted, use as-is
+      formattedStateName = state;
+    } else {
+      // Apply corrections then format
+      const correctedStateName = getCorrectDatabaseName(state);
+      formattedStateName = correctedStateName.replace(/\s+/g, '_');
+    }
+    
+    console.log(`Using state name for equity query: ${formattedStateName}`);
+    
+    const dbNameEquity = category.replace(/\s+/g, '_');
     const dbEquity = client.db(dbNameEquity);
     
-    // For Population_Data, try a different collection name if "County Level" doesn't exist
     let collectionName = "County Level";
     
-    // Check if "County Level" collection exists
     const collections = await dbEquity.listCollections().toArray();
     const collectionNames = collections.map(c => c.name);
     console.log(`Available collections in ${dbNameEquity}:`, collectionNames);
     
     if (!collectionNames.includes("County Level")) {
-      // Try fallback collection names
       if (collectionNames.includes("Counties")) {
         collectionName = "Counties";
       } else if (collectionNames.includes("county_data")) {
@@ -233,23 +428,26 @@ app.get('/api/equityCountyAverageValues/:category/:state', async (req, res) => {
     
     const collection = dbEquity.collection(collectionName);
     
-    // Filter by state field (with flexibility)
-    let query = { state: state };
+    // Try multiple variations of the state name for the query
+    const stateQueries = [
+      { state: formattedStateName },
+      { State: formattedStateName },
+      { state: formattedStateName.replace(/_/g, ' ') },
+      { State: formattedStateName.replace(/_/g, ' ') },
+      { state: new RegExp(formattedStateName.replace(/_/g, '\\s*'), 'i') },
+      { State: new RegExp(formattedStateName.replace(/_/g, '\\s*'), 'i') }
+    ];
     
-    // For Population_Data, try a more flexible query if needed
-    if (category === "Population_Data") {
-      const statePattern = new RegExp(state, 'i'); // Case-insensitive match
-      query = { 
-        $or: [
-          { state: state },
-          { state: statePattern },
-          { State: state },
-          { State: statePattern }
-        ]
-      };
+    let data = [];
+    
+    for (const query of stateQueries) {
+      data = await collection.find(query).toArray();
+      if (data.length > 0) {
+        console.log(`Found ${data.length} records with query:`, query);
+        break;
+      }
     }
     
-    const data = await collection.find(query).toArray();
     console.log(`Found ${data.length} records for ${category} in ${state}`);
     
     res.json(data);

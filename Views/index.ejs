@@ -359,7 +359,7 @@
 <div id="comparisonModal" class="modal">
   <div class="modal-content comparison-modal-content">
     <div class="modal-header">
-      <h3 id="comparisonModalTitle">Compare States</h3>
+      <h3 id="comparisonModalTitle">AI-Powered Comprehensive Analysis</h3>
       <button class="close-btn" id="closeComparisonModal">
         <i class="fas fa-times"></i>
       </button>
@@ -369,47 +369,33 @@
         <div class="selected-entities-container">
           <h4><i class="fas fa-map-marker-alt"></i> Selected Entities</h4>
           <div id="selectedEntitiesList" class="selected-entities-list">
-            <div class="empty-selection">Select states on the map to compare</div>
+            <div class="empty-selection">Select entities on the map to compare</div>
           </div>
         </div>
         
-        <div class="chart-options">
-          <div class="chart-type-selector">
-            <h4><i class="fas fa-chart-pie"></i> Chart Type</h4>
-            <select id="comparisonChartType" class="custom-select">
-              <option value="bar">Bar Chart</option>
-              <option value="line">Line Chart</option>
-              <option value="radar">Radar Chart</option>
-              <option value="pie">Pie Chart</option>
-              <option value="doughnut">Doughnut Chart</option>
-            </select>
+        <div class="ai-analysis-preview">
+          <div class="analysis-features">
+            <h4><i class="fas fa-robot"></i> AI Analysis Features</h4>
+            <ul class="feature-list">
+              <li><i class="fas fa-chart-line"></i> <span>Comprehensive Multi-Metric Analysis</span></li>
+              <li><i class="fas fa-balance-scale"></i> <span>Equity and Accessibility Assessment</span></li>
+              <li><i class="fas fa-chart-bar"></i> <span>Automated Visualizations</span></li>
+              <li><i class="fas fa-lightbulb"></i> <span>Policy Recommendations</span></li>
+              <li><i class="fas fa-file-pdf"></i> <span>Downloadable PDF Report</span></li>
+            </ul>
           </div>
           
-          <div class="metric-selector">
-            <h4><i class="fas fa-ruler"></i> Metric</h4>
-            <select id="comparisonMetric" class="custom-select">
-              <!-- This will be populated by JavaScript -->
-            </select>
+          <div class="analysis-scope">
+            <h5><i class="fas fa-scope"></i> Analysis Scope</h5>
+            <p>Our AI will analyze <strong>all available transit metrics</strong> for your selected entities, 
+            including accessibility, equity indicators, infrastructure quality, and performance benchmarks. 
+            The comprehensive report will include detailed insights, comparative analysis, and actionable recommendations.</p>
           </div>
         </div>
         
-        <button id="generateComparisonBtn" class="btn-primary">
-          <i class="fas fa-bolt"></i> Generate Comparison
+        <button id="generateComprehensiveReportBtn" class="btn-primary comprehensive-btn">
+          <i class="fas fa-robot"></i> Generate Comprehensive AI Report
         </button>
-      </div>
-      
-      <div class="comparison-chart-wrapper" style="display: none;">
-        <div class="chart-action-bar">
-          <button id="downloadComparisonBtn" class="action-btn">
-            <i class="fas fa-download"></i> Download Chart
-          </button>
-          <button id="backToComparisonOptions" class="action-btn">
-            <i class="fas fa-arrow-left"></i> Back
-          </button>
-        </div>
-        <div class="chart-container">
-          <canvas id="comparisonModalChart"></canvas>
-        </div>
       </div>
     </div>
   </div>
@@ -418,7 +404,7 @@
 <!-- Comparison Selection Overlay -->
 <div id="comparisonOverlay" class="comparison-overlay">
   <div class="comparison-overlay-header">
-    <h3 id="comparisonOverlayTitle">Select States to Compare</h3>
+    <h3 id="comparisonOverlayTitle">Select Entities for AI Analysis</h3>
     <div class="selection-count">
       <span id="selectionCount">0</span> selected
     </div>
@@ -427,11 +413,109 @@
         <i class="fas fa-times"></i> Cancel
       </button>
       <button id="proceedToCompareBtn" class="btn-primary">
-        <i class="fas fa-chart-bar"></i> Compare Now
+        <i class="fas fa-robot"></i> Proceed to AI Analysis
       </button>
     </div>
   </div>
   <div class="selected-preview" id="selectedPreview"></div>
 </div>
+<style>
+/* Additional styles for the updated modal */
+.ai-analysis-preview {
+  background-color: var(--bg-light);
+  border-radius: var(--border-radius-md);
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.analysis-features h4,
+.analysis-scope h5 {
+  color: var(--primary);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.feature-list {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 1.5rem;
+}
+
+.feature-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.feature-list li:last-child {
+  border-bottom: none;
+}
+
+.feature-list i {
+  color: var(--primary);
+  font-size: 1.125rem;
+  width: 1.5rem;
+  text-align: center;
+}
+
+.analysis-scope {
+  border-top: 1px solid var(--border-color);
+  padding-top: 1.5rem;
+}
+
+.analysis-scope p {
+  color: var(--text-medium);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.comprehensive-btn {
+  width: 100%;
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  border: none;
+  border-radius: var(--border-radius-md);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.comprehensive-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.comprehensive-btn:active {
+  transform: translateY(0);
+}
+
+.comprehensive-btn i {
+  font-size: 1.25rem;
+}
+
+/* Dark mode adjustments */
+.dark-mode .ai-analysis-preview {
+  background-color: var(--bg-darker);
+}
+
+.dark-mode .feature-list li {
+  border-bottom-color: var(--border-color);
+}
+
+.dark-mode .analysis-scope {
+  border-top-color: var(--border-color);
+}
+</style>
 </body>
 </html>
