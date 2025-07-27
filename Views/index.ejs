@@ -97,51 +97,28 @@
             </div>
           </div>
           
-          <div id="countryChartsContainer" class="charts-container">
-            <div class="chart-card">
-              <div class="chart-header">
-                <h4><i class="fas fa-chart-bar"></i> Distribution</h4>
-                <div class="chart-actions">
-                  <button class="chart-action-btn">
-                    <i class="fas fa-expand-alt"></i>
-                  </button>
-                  <span class="tooltip">Expand</span>
-                </div>
-              </div>
-              <div class="chart-body">
-                <canvas id="distributionChart"></canvas>
-              </div>
+          <!-- Chatbot Section -->
+          <div class="chatbot-section">
+            <div class="chatbot-header">
+              <h3><i class="fas fa-robot"></i> TransitViz Assistant</h3>
+              <button class="chatbot-toggle" id="chatbotToggle">
+                <i class="fas fa-chevron-down"></i>
+              </button>
             </div>
-            
-            <div class="chart-card">
-              <div class="chart-header">
-                <h4><i class="fas fa-trophy"></i> Top & Bottom States</h4>
-                <div class="chart-actions">
-                  <button class="chart-action-btn">
-                    <i class="fas fa-expand-alt"></i>
-                  </button>
-                  <span class="tooltip">Expand</span>
+            <div class="chatbot-container" id="chatbotContainer">
+              <div class="chat-messages" id="chatMessages">
+                <div class="chat-message bot">
+                  <i class="fas fa-robot"></i>
+                  <div class="message-content">
+                    Hi! I can help you explore transit data. Ask me about states, counties, or specific metrics!
+                  </div>
                 </div>
               </div>
-              <div class="chart-body">
-                <canvas id="topBottomChart"></canvas>
-              </div>
-            </div>
-          </div>
-          
-          <div id="countyTopBottomContainer" class="charts-container" style="display: none;">
-            <div class="chart-card">
-              <div class="chart-header">
-                <h4><i class="fas fa-trophy"></i> Top & Bottom Counties</h4>
-                <div class="chart-actions">
-                  <button class="chart-action-btn">
-                    <i class="fas fa-expand-alt"></i>
-                  </button>
-                  <span class="tooltip">Expand</span>
-                </div>
-              </div>
-              <div class="chart-body">
-                <canvas id="countyTopBottomChart"></canvas>
+              <div class="chat-input-container">
+                <input type="text" id="chatInput" placeholder="Ask about transit data...">
+                <button id="sendMessage">
+                  <i class="fas fa-paper-plane"></i>
+                </button>
               </div>
             </div>
           </div>
@@ -338,6 +315,188 @@
   <% } %>
   
   <script src="/js/app.js"></script>
+  
+  <!-- Chatbot JavaScript -->
+  <script>
+    class TransitVizChatbot {
+      constructor() {
+        this.chatMessages = document.getElementById('chatMessages');
+        this.chatInput = document.getElementById('chatInput');
+        this.sendButton = document.getElementById('sendMessage');
+        this.chatbotToggle = document.getElementById('chatbotToggle');
+        this.chatbotContainer = document.getElementById('chatbotContainer');
+        
+        this.setupEventListeners();
+      }
+
+      setupEventListeners() {
+        // Send message on Enter or button click
+        this.chatInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            this.sendMessage();
+          }
+        });
+
+        this.sendButton.addEventListener('click', () => {
+          this.sendMessage();
+        });
+
+        // Toggle chatbot visibility
+        this.chatbotToggle.addEventListener('click', () => {
+          this.chatbotContainer.classList.toggle('collapsed');
+          const icon = this.chatbotToggle.querySelector('i');
+          icon.classList.toggle('fa-chevron-down');
+          icon.classList.toggle('fa-chevron-up');
+        });
+      }
+
+      async sendMessage() {
+        console.log('=== FRONTEND SEND MESSAGE CALLED ===');
+        const message = this.chatInput.value.trim();
+        console.log('Message to send:', message);
+        
+        if (!message) {
+          console.log('Empty message, returning');
+          return;
+        }
+
+        // Add user message to chat
+        this.addMessage(message, 'user');
+        this.chatInput.value = '';
+        this.sendButton.disabled = true;
+
+        // Show typing indicator
+        this.showTypingIndicator();
+
+        try {
+          // Get current context
+          const context = this.getCurrentContext();
+          console.log('Current context:', context);
+          
+          const requestBody = { message, context };
+          console.log('Request body:', requestBody);
+          
+          // Send to backend
+          console.log('Making fetch request to /api/chatbot...');
+          const response = await fetch('/api/chatbot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+          });
+
+          console.log('Response status:', response.status);
+          console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+          
+          const responseText = await response.text();
+          console.log('Raw response text:', responseText);
+          
+          let result;
+          try {
+            result = JSON.parse(responseText);
+            console.log('Parsed JSON result:', result);
+          } catch (parseError) {
+            console.error('JSON parse error:', parseError);
+            console.error('Response was not valid JSON:', responseText);
+            throw new Error('Invalid JSON response from server');
+          }
+          
+          // Hide typing indicator
+          this.hideTypingIndicator();
+          
+          // Add bot response
+          if (result.success) {
+            console.log('Success response, adding bot message');
+            this.addMessage(result.message, 'bot');
+          } else {
+            console.log('Error response, adding error message');
+            this.addMessage(result.message || 'Sorry, I encountered an error.', 'error');
+          }
+          
+        } catch (error) {
+          console.error('=== FRONTEND SEND MESSAGE ERROR ===');
+          console.error('Error type:', error.constructor.name);
+          console.error('Error message:', error.message);
+          console.error('Error stack:', error.stack);
+          
+          this.hideTypingIndicator();
+          this.addMessage('Sorry, I encountered an error. Please try again.', 'error');
+        } finally {
+          this.sendButton.disabled = false;
+        }
+      }
+
+      addMessage(content, type) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${type}`;
+        
+        const icon = type === 'user' ? 'fas fa-user' : 'fas fa-robot';
+        
+        messageDiv.innerHTML = `
+          <i class="${icon}"></i>
+          <div class="message-content">${this.escapeHtml(content)}</div>
+        `;
+        
+        this.chatMessages.appendChild(messageDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+      }
+
+      showTypingIndicator() {
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'chat-message bot typing';
+        typingDiv.id = 'typingIndicator';
+        
+        typingDiv.innerHTML = `
+          <i class="fas fa-robot"></i>
+          <div class="message-content">
+            <div class="typing-indicator">
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+            </div>
+          </div>
+        `;
+        
+        this.chatMessages.appendChild(typingDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+      }
+
+      hideTypingIndicator() {
+        const typingIndicator = document.getElementById('typingIndicator');
+        if (typingIndicator) {
+          typingIndicator.remove();
+        }
+      }
+
+      getCurrentContext() {
+        return {
+          currentView: typeof activeView !== 'undefined' ? activeView : 'map',
+          selectedState: typeof selectedState !== 'undefined' ? selectedState : null,
+          selectedCounty: typeof selectedCounty !== 'undefined' ? selectedCounty : null,
+          selectedMetric: typeof selectedMetric !== 'undefined' ? selectedMetric : null,
+          allStateData: typeof allStateData !== 'undefined' ? allStateData : [],
+          allCountyData: typeof allCountyData !== 'undefined' ? allCountyData : []
+        };
+      }
+
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+    }
+
+    // Initialize chatbot when DOM is loaded
+    document.addEventListener('DOMContentLoaded', () => {
+      // Wait a bit for the page to fully load
+      setTimeout(() => {
+        if (document.getElementById('chatMessages')) {
+          window.transitVizChatbot = new TransitVizChatbot();
+        }
+      }, 1000);
+    });
+  </script>
+  
   <% if (!user) { %>
     <script>
       // This script will be included only for non-logged in users
@@ -356,10 +515,11 @@
 
     <!-- Add this before the closing body tag in Views/index.ejs -->
 <!-- Comparison Modal -->
+<!-- Comparison Modal -->
 <div id="comparisonModal" class="modal">
   <div class="modal-content comparison-modal-content">
     <div class="modal-header">
-      <h3 id="comparisonModalTitle">AI-Powered Comprehensive Analysis</h3>
+      <h3 id="comparisonModalTitle">Chart Comparison Tool</h3>
       <button class="close-btn" id="closeComparisonModal">
         <i class="fas fa-times"></i>
       </button>
@@ -375,26 +535,26 @@
         
         <div class="ai-analysis-preview">
           <div class="analysis-features">
-            <h4><i class="fas fa-robot"></i> AI Analysis Features</h4>
+            <h4><i class="fas fa-chart-line"></i> Chart Comparison Features</h4>
             <ul class="feature-list">
-              <li><i class="fas fa-chart-line"></i> <span>Comprehensive Multi-Metric Analysis</span></li>
-              <li><i class="fas fa-balance-scale"></i> <span>Equity and Accessibility Assessment</span></li>
-              <li><i class="fas fa-chart-bar"></i> <span>Automated Visualizations</span></li>
-              <li><i class="fas fa-lightbulb"></i> <span>Policy Recommendations</span></li>
-              <li><i class="fas fa-file-pdf"></i> <span>Downloadable PDF Report</span></li>
+              <li><i class="fas fa-chart-scatter"></i> <span>Interactive Dot Plot Visualization</span></li>
+              <li><i class="fas fa-balance-scale"></i> <span>Equity and Transit Metrics</span></li>
+              <li><i class="fas fa-eye"></i> <span>Multi-Category Data Analysis</span></li>
+              <li><i class="fas fa-filter"></i> <span>Customizable Legend Selection</span></li>
+              <li><i class="fas fa-expand"></i> <span>Full-Screen Chart Experience</span></li>
             </ul>
           </div>
           
           <div class="analysis-scope">
-            <h5><i class="fas fa-scope"></i> Analysis Scope</h5>
-            <p>Our AI will analyze <strong>all available transit metrics</strong> for your selected entities, 
-            including accessibility, equity indicators, infrastructure quality, and performance benchmarks. 
-            The comprehensive report will include detailed insights, comparative analysis, and actionable recommendations.</p>
+            <h5><i class="fas fa-info-circle"></i> Comparison Scope</h5>
+            <p>The chart will display <strong>all available metrics</strong> for your selected entities, 
+            allowing you to compare performance across transit accessibility and equity indicators 
+            through an interactive visualization interface.</p>
           </div>
         </div>
         
         <button id="generateComprehensiveReportBtn" class="btn-primary comprehensive-btn">
-          <i class="fas fa-robot"></i> Generate Comprehensive AI Report
+          <i class="fas fa-chart-line"></i> Generate Chart Comparison
         </button>
       </div>
     </div>
@@ -404,7 +564,7 @@
 <!-- Comparison Selection Overlay -->
 <div id="comparisonOverlay" class="comparison-overlay">
   <div class="comparison-overlay-header">
-    <h3 id="comparisonOverlayTitle">Select Entities for AI Analysis</h3>
+    <h3 id="comparisonOverlayTitle">Select Entities for Chart Comparison</h3>
     <div class="selection-count">
       <span id="selectionCount">0</span> selected
     </div>
@@ -413,7 +573,7 @@
         <i class="fas fa-times"></i> Cancel
       </button>
       <button id="proceedToCompareBtn" class="btn-primary">
-        <i class="fas fa-robot"></i> Proceed to AI Analysis
+        <i class="fas fa-chart-line"></i> Proceed to Chart Comparison
       </button>
     </div>
   </div>

@@ -1,7 +1,7 @@
 // routes/comparison.js
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import HuggingFaceLlamaService from '../services/huggingFaceService.js';
+import { HuggingFaceLlamaService } from '../services/huggingFaceService.js';
 import { MongoClient } from 'mongodb';
 
 
@@ -105,132 +105,21 @@ router.get('/api/counties/:stateName', async (req, res) => {
   }
 });
 
-router.post('/api/generate-ai-report', authenticate, async (req, res) => {
-  try {
-    const { states, includeEquity = true, reportType = 'comprehensive' } = req.body;
-    
-    if (!states || !Array.isArray(states) || states.length === 0) {
-      return res.status(400).json({ error: 'At least one state must be selected' });
-    }
 
-    console.log(`Generating comprehensive PDF report for states: ${states.join(', ')}`);
-
-    // Fetch ALL transit data
-    const client = new MongoClient(process.env.MONGODB_URI);
-    await client.connect();
-    const db = client.db(process.env.DB_NAME);
-    const collection = db.collection('AverageValues');
-    
-    const metrics = await collection.find({}).toArray();
-    const transitData = metrics.map(metric => {
-      const stateData = {};
-      states.forEach(state => {
-        stateData[state] = metric[state] || null;
-      });
-      return {
-        metric: metric.title,
-        data: stateData
-      };
-    });
-
-    // Fetch ALL equity data from all categories
-    let equityData = {};
-    if (includeEquity) {
-      const equityCategories = ['Employment_Data', 'Income_Data', 'Race_Data', 'Housing_Data'];
-      
-      for (const state of states) {
-        equityData[state] = {
-          employment: [],
-          income: [],
-          race: [],
-          housing: []
-        };
-        
-        for (let i = 0; i < equityCategories.length; i++) {
-          const category = equityCategories[i];
-          const categoryKey = ['employment', 'income', 'race', 'housing'][i];
-          
-          try {
-            const equityDb = client.db(category);
-            const collections = await equityDb.listCollections().toArray();
-            const collectionNames = collections.map(c => c.name);
-            
-            let collectionName = 'County Level';
-            if (!collectionNames.includes('County Level')) {
-              if (collectionNames.includes('Counties')) {
-                collectionName = 'Counties';
-              } else if (collectionNames.includes('county_data')) {
-                collectionName = 'county_data';
-              } else if (collectionNames.length > 0) {
-                collectionName = collectionNames[0];
-              }
-            }
-            
-            const equityCollection = equityDb.collection(collectionName);
-            let stateEquityData = await equityCollection.find({ state: state }).toArray();
-            
-            if (stateEquityData.length === 0) {
-              stateEquityData = await equityCollection.find({ State: state }).toArray();
-            }
-            if (stateEquityData.length === 0) {
-              const statePattern = new RegExp(state, 'i');
-              stateEquityData = await equityCollection.find({ 
-                $or: [
-                  { state: statePattern },
-                  { State: statePattern }
-                ]
-              }).toArray();
-            }
-            
-            equityData[state][categoryKey] = stateEquityData;
-          } catch (error) {
-            console.warn(`Could not fetch ${category} for ${state}:`, error.message);
-          }
-        }
-      }
-    }
-
-    await client.close();
-
-    // Generate comprehensive analysis
-    const metricAnalysis = generateDetailedMetricAnalysis(transitData, states);
-    const chartData = generateComprehensiveChartData(transitData, equityData, states);
-
-    // Generate AI report using Hugging Face Llama
-    const llamaService = new HuggingFaceLlamaService();
-    const report = await llamaService.generateComprehensivePDFReport(states, transitData, equityData, metricAnalysis);
-
-    res.json({
-      success: true,
-      report: report,
-      chartData: chartData,
-      metricAnalysis: metricAnalysis,
-      transitMetrics: transitData.length,
-      equityCategories: includeEquity ? 4 : 0,
-      metadata: {
-        statesAnalyzed: states,
-        totalMetrics: transitData.length,
-        includesEquityData: includeEquity,
-        generatedAt: new Date(),
-        model: 'Hugging Face Llama',
-        reportType: 'comprehensive-pdf',
-        pageCount: Math.max(3, Math.ceil(transitData.length / 15))
-      }
-    });
-
-  } catch (error) {
-    console.error('Error generating comprehensive PDF report:', error);
-    res.status(500).json({ 
-      error: 'Failed to generate comprehensive PDF report',
-      details: error.message 
-    });
-  }
-});
 // Replace the entire section with this updated code:
 
 router.post('/api/generate-direct-pdf-report', authenticate, async (req, res) => {
   try {
     const { entities, entityType, state, includeAllMetrics = true, includeEquity = true } = req.body;
+    
+    // Check if Hugging Face API key is configured
+    const apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
+    if (!apiKey) {
+      return res.status(500).json({ 
+        error: 'AI service is not configured',
+        details: 'Hugging Face API key is missing. Please check your environment configuration.'
+      });
+    }
     
     console.log('=== BACKEND DEBUG ===');
     console.log('Entities:', entities);
@@ -881,5 +770,306 @@ function generateChartColors(count, opacity = 0.8) {
   
   return [...colors, ...additionalColors];
 }
+
+// New endpoint for interactive dot plot chart data
+// New endpoint for interactive dot plot chart data
+// New endpoint for interactive dot plot chart data
+// New endpoint for interactive dot plot chart data
+router.post('/api/comparison-dotplot', async (req, res) => {
+  try {
+    const { states } = req.body;
+    if (!states || !Array.isArray(states) || states.length === 0) {
+      return res.status(400).json({ error: 'At least one state must be selected' });
+    }
+
+    console.log('Fetching dotplot data for states:', states);
+
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+
+    // --- EQUITY SECTION --- (keep existing equity code)
+    const equity = [];
+    
+    // Define equity databases with correct names
+    const equityDatabases = [
+      { name: 'Employment Data', dbName: 'Employment_Data' },
+      { name: 'Income Data', dbName: 'Income_Data' },
+      { name: 'Race Data', dbName: 'Race_Data' },
+      { name: 'Housing Data', dbName: 'Housing_Data' }
+    ];
+
+    for (const equityDb of equityDatabases) {
+      try {
+        console.log(`Processing equity database: ${equityDb.dbName}`);
+        const db = client.db(equityDb.dbName);
+        
+        // Check available collections
+        const collections = await db.listCollections().toArray();
+        const collectionNames = collections.map(c => c.name);
+        console.log(`Available collections in ${equityDb.dbName}:`, collectionNames);
+        
+        // Try different collection names
+        let collectionName = 'State Level';
+        if (!collectionNames.includes('State Level')) {
+          if (collectionNames.includes('States')) {
+            collectionName = 'States';
+          } else if (collectionNames.includes('state_level')) {
+            collectionName = 'state_level';
+          } else if (collectionNames.length > 0) {
+            collectionName = collectionNames[0]; // Use first available
+          }
+        }
+        
+        console.log(`Using collection: ${collectionName} in ${equityDb.dbName}`);
+        const collection = db.collection(collectionName);
+        
+        // Find documents for the selected states
+        const docs = await collection.find({ title: { $in: states } }).toArray();
+        console.log(`Found ${docs.length} documents in ${equityDb.dbName}`);
+        
+        if (docs.length === 0) {
+          // Try case-insensitive search
+          const caseInsensitiveDocs = await collection.find({
+            title: { $in: states.map(s => new RegExp(s, 'i')) }
+          }).toArray();
+          
+          if (caseInsensitiveDocs.length > 0) {
+            docs.push(...caseInsensitiveDocs);
+            console.log(`Found ${caseInsensitiveDocs.length} documents with case-insensitive search`);
+          }
+        }
+        
+        if (docs.length === 0) continue;
+        
+        // Log sample document structure
+        console.log(`Sample document from ${equityDb.dbName}:`, {
+          title: docs[0].title,
+          hasData: !!docs[0].data,
+          dataKeys: docs[0].data ? Object.keys(docs[0].data).slice(0, 5) : 'no data object'
+        });
+        
+        // Extract all unique data fields from documents
+        let allLegends = [];
+        if (docs[0].data) {
+          allLegends = Object.keys(docs[0].data).filter(key => key !== 'NAME');
+        } else {
+          // If no data object, use direct properties
+          allLegends = Object.keys(docs[0]).filter(key => 
+            key !== '_id' && key !== 'title' && typeof docs[0][key] === 'number'
+          );
+        }
+        
+        console.log(`Found ${allLegends.length} legends in ${equityDb.dbName}`);
+        
+        // Create metrics array for this equity category
+        const metrics = allLegends.map(legend => {
+          const values = {};
+          docs.forEach(doc => {
+            const value = doc.data ? doc.data[legend] : doc[legend];
+            if (value !== undefined && value !== null && !isNaN(Number(value))) {
+              values[doc.title] = Number(value);
+            }
+          });
+          return { legend, values };
+        });
+        
+        const validMetrics = metrics.filter(m => Object.keys(m.values).length > 0);
+        
+        if (validMetrics.length > 0) {
+          equity.push({
+            category: equityDb.name,
+            metrics: validMetrics
+          });
+        }
+        
+        console.log(`${equityDb.name}: ${validMetrics.length} valid metrics`);
+        
+      } catch (error) {
+        console.warn(`Error processing ${equityDb.dbName}:`, error.message);
+      }
+    }
+
+    // --- TRANSIT SECTION --- (Updated)
+    const transit = [];
+    
+    try {
+      const transitDb = client.db(process.env.DB_NAME || 'StateWiseComputation');
+      const collections = await transitDb.listCollections().toArray();
+      const collectionNames = collections.map(c => c.name);
+      
+      console.log('Available transit collections:', collectionNames);
+
+      // Process AverageValues collection (special case)
+      if (collectionNames.includes('AverageValues')) {
+        console.log('Processing AverageValues collection');
+        const avgCollection = transitDb.collection('AverageValues');
+        const avgDocs = await avgCollection.find({}).toArray();
+        
+        // For AverageValues: titles become legends, states are values
+        const legends = avgDocs.map(doc => doc.title);
+        const metrics = legends.map(legend => {
+          const values = {};
+          const doc = avgDocs.find(d => d.title === legend);
+          if (doc) {
+            states.forEach(state => {
+              if (doc[state] !== undefined && doc[state] !== null && !isNaN(Number(doc[state]))) {
+                values[state] = Number(doc[state]);
+              }
+            });
+          }
+          return { legend, values };
+        });
+        
+        const validMetrics = metrics.filter(m => Object.keys(m.values).length > 0);
+        
+        if (validMetrics.length > 0) {
+          transit.push({
+            category: 'Average Values',
+            metrics: validMetrics
+          });
+        }
+        
+        console.log(`AverageValues processed: ${validMetrics.length} metrics`);
+      }
+
+      // Process other collections - ENHANCED LOGIC for proper legend updates
+      for (const collectionName of collectionNames) {
+        if (['AverageValues', 'system.indexes'].includes(collectionName)) continue;
+        
+        try {
+          console.log(`Processing transit collection: ${collectionName}`);
+          const collection = transitDb.collection(collectionName);
+          
+          // Get all documents in the collection
+          const allDocs = await collection.find({}).toArray();
+          
+          if (allDocs.length === 0) {
+            console.log(`No documents found in ${collectionName}`);
+            continue;
+          }
+          
+          console.log(`Total documents in ${collectionName}:`, allDocs.length);
+          console.log(`Sample document titles:`, allDocs.slice(0, 5).map(d => d.title));
+          
+          // Create a map of state names to their documents
+          const stateDocMap = {};
+          
+          // For each state, find the best matching document
+          states.forEach(state => {
+            // Try exact match first
+            let stateDoc = allDocs.find(doc => 
+              doc.title && doc.title.toLowerCase().trim() === state.toLowerCase().trim()
+            );
+            
+            // If no exact match, try partial match
+            if (!stateDoc) {
+              stateDoc = allDocs.find(doc => 
+                doc.title && (
+                  doc.title.toLowerCase().includes(state.toLowerCase()) ||
+                  state.toLowerCase().includes(doc.title.toLowerCase())
+                )
+              );
+            }
+            
+            if (stateDoc) {
+              stateDocMap[state] = stateDoc;
+              console.log(`Matched ${state} to document: ${stateDoc.title}`);
+            } else {
+              console.warn(`No document found for state: ${state}`);
+            }
+          });
+          
+          console.log(`Found documents for ${Object.keys(stateDocMap).length} out of ${states.length} states`);
+          
+          if (Object.keys(stateDocMap).length === 0) continue;
+          
+          // Get all unique field names (excluding _id and title) as legends
+          const legendSet = new Set();
+          Object.values(stateDocMap).forEach(doc => {
+            Object.keys(doc).forEach(key => {
+              if (key !== '_id' && key !== 'title' && 
+                  doc[key] !== null && doc[key] !== undefined && 
+                  !isNaN(Number(doc[key]))) {
+                legendSet.add(key);
+              }
+            });
+          });
+          
+          const allLegends = Array.from(legendSet);
+          console.log(`Found ${allLegends.length} valid numeric legends in ${collectionName}:`, allLegends.slice(0, 5));
+          
+          // Create metrics for each legend - FIXED to ensure proper state mapping
+          const metrics = allLegends.map(legend => {
+            const values = {};
+            
+            // For each state, get the value from its matched document
+            states.forEach(state => {
+              const stateDoc = stateDocMap[state];
+              if (stateDoc && stateDoc[legend] !== undefined && stateDoc[legend] !== null) {
+                const value = Number(stateDoc[legend]);
+                if (!isNaN(value)) {
+                  values[state] = value;
+                  console.log(`${collectionName} - ${legend} - ${state}: ${value}`);
+                }
+              }
+            });
+            
+            return { legend, values };
+          });
+          
+          // Only keep metrics that have data for at least one state
+          const validMetrics = metrics.filter(m => Object.keys(m.values).length > 0);
+          
+          console.log(`${collectionName} - Valid metrics: ${validMetrics.length}`);
+          validMetrics.forEach(m => {
+            console.log(`  ${m.legend}: ${Object.keys(m.values).length} states have data`);
+          });
+          
+          if (validMetrics.length > 0) {
+            transit.push({
+              category: collectionName,
+              metrics: validMetrics
+            });
+          }
+          
+          console.log(`${collectionName} processed: ${validMetrics.length} valid metrics`);
+          
+        } catch (error) {
+          console.warn(`Error processing transit collection ${collectionName}:`, error.message);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error processing transit data:', error.message);
+    }
+
+    await client.close();
+
+    console.log('Final result summary:');
+    console.log(`Equity categories: ${equity.length}`);
+    console.log(`Transit categories: ${transit.length}`);
+    
+    // Log sample data for debugging
+    equity.forEach((cat, i) => {
+      console.log(`Equity[${i}] - ${cat.category}: ${cat.metrics.length} metrics`);
+      if (cat.metrics.length > 0) {
+        console.log(`  Sample metric: ${cat.metrics[0].legend}, values:`, Object.keys(cat.metrics[0].values));
+      }
+    });
+    
+    transit.forEach((cat, i) => {
+      console.log(`Transit[${i}] - ${cat.category}: ${cat.metrics.length} metrics`);
+      if (cat.metrics.length > 0) {
+        console.log(`  Sample metric: ${cat.metrics[0].legend}, values:`, Object.keys(cat.metrics[0].values));
+      }
+    });
+
+    res.json({ equity, transit });
+    
+  } catch (error) {
+    console.error('Error generating comparison dotplot data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 export default router;

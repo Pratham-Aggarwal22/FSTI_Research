@@ -8,6 +8,7 @@ import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import fetch from 'node-fetch';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -15,6 +16,9 @@ import comparisonRoutes from './routes/comparison.js';
 
 // Import middleware
 import { isGuestRoute } from './middleware/auth.js';
+
+// Import chatbot service
+import { TransitVizChatbot } from './services/huggingFaceService.js';
 
 
 // In server.js, near the top after imports
@@ -480,4 +484,49 @@ app.get('/auth-debug', (req, res) => {
     user: req.user || null,
     isAuthenticated: !!req.cookies.access_token
   });
+});
+
+// Chatbot endpoint
+app.post('/api/chatbot', async (req, res) => {
+  console.log('=== CHATBOT ENDPOINT CALLED ===');
+  console.log('Request body:', req.body);
+  console.log('Request headers:', req.headers);
+  
+  try {
+    const { message, context } = req.body;
+    
+    console.log('Extracted message:', message);
+    console.log('Extracted context:', context);
+    
+    if (!message || !message.trim()) {
+      console.log('No message provided, returning 400');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Please provide a message' 
+      });
+    }
+
+    console.log('Creating TransitVizChatbot instance...');
+    const chatbot = new TransitVizChatbot();
+    console.log('Chatbot instance created successfully');
+    
+    console.log('Calling chatbot.generateResponse...');
+    const response = await chatbot.generateResponse(message, context);
+    console.log('Chatbot response received:', response);
+    
+    console.log('Sending response to client:', response);
+    res.json(response);
+  } catch (error) {
+    console.error('=== CHATBOT ENDPOINT ERROR ===');
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Full error object:', error);
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Sorry, I encountered an error. Please try again.',
+      error: error.message 
+    });
+  }
 });

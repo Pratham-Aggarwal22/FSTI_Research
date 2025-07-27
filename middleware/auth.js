@@ -116,11 +116,12 @@ export const isGuestRoute = (req, res, next) => {
   // List of routes that don't require authentication
   const publicRoutes = ['/', '/auth/login', '/auth/signup', '/auth/refresh', '/auth-debug'];
   const isApiAverageValues = req.originalUrl.startsWith('/api/averageValues');
+  const isApiChatbot = req.originalUrl.startsWith('/api/chatbot');
   const isPublicAsset = req.originalUrl.startsWith('/css/') || 
                         req.originalUrl.startsWith('/js/') || 
                         req.originalUrl.startsWith('/img/');
   
-  if (publicRoutes.includes(req.originalUrl) || isApiAverageValues || isPublicAsset) {
+  if (publicRoutes.includes(req.originalUrl) || isApiAverageValues || isApiChatbot || isPublicAsset) {
     console.log("Public route, no authentication required");
     return next();
   }

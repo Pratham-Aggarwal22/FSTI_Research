@@ -1,30 +1,214 @@
+import { InferenceClient } from "@huggingface/inference";
+import OpenAI from "openai";
 // Replace your entire services/huggingFaceService.js with this enhanced version:
 
 class HuggingFaceLlamaService {
   constructor() {
-    this.apiUrl = process.env.HUGGINGFACE_API_URL;
-    this.apiKey = process.env.HUGGINGFACE_API_KEY;
+    // Use either HUGGINGFACE_API_KEY or HF_TOKEN for compatibility
+    this.apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
+    this.model = "mistralai/Mixtral-8x7B-Instruct-v0.1";
+    this.provider = "together";
+    
+    // Check if API key is available
+    if (!this.apiKey) {
+      console.error('❌ CRITICAL: Hugging Face API key is missing!');
+      console.error('Please set either HUGGINGFACE_API_KEY or HF_TOKEN environment variable');
+      console.error('AI report generation will not work without this configuration');
+    } else {
+      console.log('✅ Hugging Face API key found');
+    }
+    
+    this.client = new InferenceClient(this.apiKey);
   }
 
+  /**
+   * Generate a comprehensive, natural-language report using the Together provider via HuggingFace SDK.
+   * @param {string[]} entities - List of selected states/cities.
+   * @param {object} allData - All relevant data (transit, equity, etc).
+   * @param {string} entityType - 'state' or 'city'.
+   * @returns {Promise<object>} - LLM-generated report.
+   */
   async generateDataDrivenReport(entities, allData, entityType) {
-    console.log('=== DEBUG: Generating Data-Driven Report ===');
+    // If no API key is available, generate a fallback report
+    if (!this.apiKey) {
+      console.warn('⚠️ No API key available, generating fallback report');
+      return this.generateFallbackReport(entities, allData, entityType);
+    }
+    console.log('=== DEBUG: Generating LLM Data-Driven Report (Together provider) ===');
     console.log('Entities:', entities);
     console.log('All Data Keys:', Object.keys(allData));
-    console.log('Transit Data Sample:', allData.transit?.slice(0, 2));
-    console.log('Employment Data Sample:', allData.employment?.slice(0, 2));
-
-    // Generate comprehensive analysis with detailed rankings and correlations
-    return this.generateComprehensiveDataAnalysis(entities, allData, entityType);
+    const prompt = this.buildLLMReportPrompt(entities, allData, entityType);
+    try {
+      const chatCompletion = await this.client.chatCompletion({
+        provider: this.provider,
+        model: this.model,
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      });
+      const llmText = chatCompletion.choices?.[0]?.message?.content || chatCompletion.choices?.[0]?.text || chatCompletion.generated_text || JSON.stringify(chatCompletion);
+      return {
+        fullReport: llmText,
+        generatedAt: new Date().toISOString(),
+        model: 'LLM Natural Language Analysis (Together)',
+        reportType: 'llm-generated-analysis',
+      };
+    } catch (err) {
+      console.error('❌ LLM API error details:');
+      console.error('Error message:', err.message);
+      console.error('Error stack:', err.stack);
+      console.error('Response data:', err?.response?.data);
+      console.error('Status code:', err?.response?.status);
+      
+      let errorMessage = 'Error: Unable to generate AI report at this time.';
+      
+      // Provide more specific error messages
+      if (!this.apiKey) {
+        errorMessage = 'Error: Hugging Face API key is not configured. Please check your environment variables.';
+      } else if (err?.response?.status === 401) {
+        errorMessage = 'Error: Invalid API key. Please check your Hugging Face API credentials.';
+      } else if (err?.response?.status === 429) {
+        errorMessage = 'Error: API rate limit exceeded. Please try again later.';
+      } else if (err?.response?.status >= 500) {
+        errorMessage = 'Error: Hugging Face service is temporarily unavailable. Please try again later.';
+      }
+      
+      return {
+        fullReport: errorMessage,
+        generatedAt: new Date().toISOString(),
+        model: 'LLM Natural Language Analysis (Together)',
+        reportType: 'llm-generated-analysis',
+        errorDetails: err.message
+      };
+    }
   }
 
-  generateComprehensiveDataAnalysis(entities, allData, entityType) {
+  /**
+   * Build a prompt for the LLM to generate a comprehensive transit and equity analysis.
+   */
+  buildLLMReportPrompt(entities, allData, entityType) {
+    // Helper to format metrics as readable tables
+    function formatMetricsTable(metrics, entities) {
+      if (!metrics || metrics.length === 0) return 'No data.';
+      let table = 'Metric';
+      entities.forEach(e => { table += ` | ${e}`; });
+      table += '\n';
+      table += '-'.repeat(table.length) + '\n';
+      metrics.forEach(metric => {
+        table += `${metric.title}`;
+        entities.forEach(e => {
+          table += ` | ${metric.data[e] !== undefined ? metric.data[e] : 'N/A'}`;
+        });
+        table += '\n';
+      });
+      return table;
+    }
+    // Compose the prompt
+    let prompt = `You are a transportation and equity data analysis expert. Given the following data for ${entityType === 'state' ? 'states' : 'cities'}: ${entities.join(', ')}.\n`;
+    prompt += `\n---\n`;
+    prompt += `Transit Metrics (all values):\n`;
+    prompt += formatMetricsTable(allData.transit, entities) + '\n';
+    prompt += `\nEquity Metrics (Employment):\n`;
+    prompt += formatMetricsTable(allData.employment, entities) + '\n';
+    prompt += `\nEquity Metrics (Income):\n`;
+    prompt += formatMetricsTable(allData.income, entities) + '\n';
+    prompt += `\nEquity Metrics (Race):\n`;
+    prompt += formatMetricsTable(allData.race, entities) + '\n';
+    prompt += `\nEquity Metrics (Housing):\n`;
+    prompt += formatMetricsTable(allData.housing, entities) + '\n';
+    prompt += `\n---\n`;
+    prompt += `Instructions:\n`;
+    prompt += `1. Analyze the overall transportation accessibility and equity for the selected ${entityType === 'state' ? 'states' : 'cities'} using the data above.\n`;
+    prompt += `2. Write a 3-paragraph summary comparing these ${entityType === 'state' ? 'states' : 'cities'} overall, highlighting key differences and similarities.\n`;
+    prompt += `3. For each ${entityType === 'state' ? 'state' : 'city'}, provide a detailed comparison that considers both transit accessibility and equity data together.\n`;
+    prompt += `4. Your analysis should be insightful, data-driven, and written in clear, professional English. Do not simply repeat the raw data; instead, interpret and compare the results.\n`;
+    prompt += `5. If possible, suggest which ${entityType === 'state' ? 'state' : 'city'} is performing best overall and which has the greatest opportunity for improvement.\n`;
+    prompt += `\nBegin your analysis below:\n`;
+    return prompt;
+  }
+
+  /**
+   * Generate a fallback report when AI service is not available
+   */
+  generateFallbackReport(entities, allData, entityType) {
     const totalMetrics = (allData.transit?.length || 0) + 
                         (allData.employment?.length || 0) + 
                         (allData.income?.length || 0) + 
                         (allData.race?.length || 0) + 
                         (allData.housing?.length || 0);
 
+    console.log('=== GENERATING FALLBACK REPORT ===');
+    console.log('Total metrics being analyzed:', totalMetrics);
+
+    // Generate a comprehensive analysis using the existing methods
+    const transitAnalysis = this.analyzeTransitAccessibility(entities, allData.transit);
+    const equityAnalysis = this.analyzeEquityDifferences(entities, allData);
+    const correlationAnalysis = this.analyzeTransitEquityCorrelation(entities, allData);
+    const recommendations = this.generateStateRecommendations(entities, allData, transitAnalysis, equityAnalysis);
+
+    // Compile comprehensive report
+    let report = `COMPREHENSIVE TRANSPORTATION & EQUITY ANALYSIS REPORT\n`;
+    report += `Analysis Date: ${new Date().toLocaleDateString()}\n`;
+    report += `Entities Analyzed: ${entities.join(', ')}\n`;
+    report += `Total Metrics Evaluated: ${totalMetrics}\n`;
+    report += `Report Type: Transit Accessibility & Multi-Dimensional Equity Assessment\n`;
+    report += `Note: This is a fallback report (AI service not available)\n\n`;
+
+    report += `EXECUTIVE SUMMARY\n`;
+    report += `This comprehensive analysis examines ${entities.length} ${entityType === 'state' ? 'states' : 'cities'} across ${totalMetrics} distinct performance metrics. `;
+    report += `The evaluation encompasses transit accessibility infrastructure, employment equity patterns, income disparities, racial equity indicators, and housing-transportation connectivity. `;
+    report += `Analysis reveals significant performance variations requiring targeted policy interventions.\n\n`;
+
+    // Section 1: Transit Accessibility Analysis
+    report += `1. TRANSIT ACCESSIBILITY ANALYSIS\n\n`;
+    report += transitAnalysis;
+    report += `\n\n`;
+
+    // Section 2: Equity Differences Analysis
+    report += `2. EQUITY DIFFERENCES ANALYSIS\n\n`;
+    report += equityAnalysis;
+    report += `\n\n`;
+
+    // Section 3: Transit-Equity Correlation Analysis
+    report += `3. TRANSIT-EQUITY CORRELATION ANALYSIS\n\n`;
+    report += correlationAnalysis;
+    report += `\n\n`;
+
+    // Section 4: State-Specific Recommendations
+    report += `4. STATE-SPECIFIC POLICY RECOMMENDATIONS\n\n`;
+    report += recommendations;
+    report += `\n\n`;
+
+    report += `IMPLEMENTATION PRIORITIES\n`;
+    report += `Priority Level 1 (Immediate - 0-12 months): Establish performance monitoring systems and initiate high-impact infrastructure improvements in lowest-performing regions.\n`;
+    report += `Priority Level 2 (Strategic - 1-3 years): Implement comprehensive equity-focused transportation planning and cross-state coordination mechanisms.\n`;
+    report += `Priority Level 3 (Transformational - 3+ years): Develop integrated transportation-housing-employment networks with standardized accessibility guarantees.\n\n`;
+
+    report += `CONCLUSION\n`;
+    report += `This analysis demonstrates that effective transportation policy requires simultaneous attention to infrastructure performance and equity outcomes. `;
+    report += `${entityType === 'state' ? 'States' : 'Cities'} showing strong transit performance may still face significant equity challenges, while those with lower infrastructure metrics may excel in specific demographic accessibility areas. `;
+    report += `Successful policy interventions must address these complex interdependencies through coordinated, evidence-based approaches.`;
+
+    return {
+      fullReport: report,
+      generatedAt: new Date().toISOString(),
+      model: 'Fallback Analysis (AI Service Unavailable)',
+      reportType: 'fallback-analysis',
+      isFallback: true
+    };
+  }
+
+  generateComprehensiveDataAnalysis(entities, allData, entityType) {
+
     console.log('=== GENERATING COMPREHENSIVE ANALYSIS ===');
+    const totalMetrics = (allData.transit?.length || 0) + 
+                        (allData.employment?.length || 0) + 
+                        (allData.income?.length || 0) + 
+                        (allData.race?.length || 0) + 
+                        (allData.housing?.length || 0);
     console.log('Total metrics being analyzed:', totalMetrics);
 
     // 1. TRANSIT ACCESSIBILITY ANALYSIS
@@ -419,4 +603,264 @@ class HuggingFaceLlamaService {
   }
 }
 
-export default HuggingFaceLlamaService;
+class TransitVizChatbot {
+  constructor() {
+    console.log('=== TRANSITVIZ CHATBOT CONSTRUCTOR ===');
+    this.openaiApiKey = process.env.OPENAI_API_KEY;
+    this.hfApiKey = process.env.HUGGINGFACE_API_KEY;
+    this.baseUrl = 'https://api-inference.huggingface.co/models';
+    this.model = 'mistralai/Mistral-7B-Instruct-v0.2';
+    if (this.openaiApiKey) {
+      this.openai = new OpenAI({ apiKey: this.openaiApiKey });
+      console.log('OpenAI API key found, will use GPT for chatbot responses.');
+    } else {
+      console.log('No OpenAI API key found, will use HuggingFace fallback for chatbot responses.');
+    }
+    console.log('HF API Key exists:', !!this.hfApiKey);
+    console.log('Base URL:', this.baseUrl);
+    console.log('Model:', this.model);
+  }
+
+  async generateResponse(userQuery, context) {
+    console.log('=== GENERATE RESPONSE CALLED ===');
+    console.log('User query:', userQuery);
+    console.log('Context:', context);
+    if (this.openaiApiKey && this.openai) {
+      try {
+        // Compose the prompt for GPT
+        const prompt = this.buildPrompt(userQuery, context);
+        const messages = [
+          { role: 'system', content: 'You are a helpful assistant for TransitViz, a transit data visualization platform. Answer user questions about transit and equity data in a friendly, concise, and data-driven way.' },
+          { role: 'user', content: prompt }
+        ];
+        const completion = await this.openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages,
+          max_tokens: 500,
+          temperature: 0.7,
+        });
+        const gptMessage = completion.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+        return {
+          success: true,
+          message: gptMessage,
+          timestamp: new Date().toISOString(),
+          model: 'OpenAI GPT-3.5-turbo',
+        };
+      } catch (error) {
+        console.error('OpenAI GPT error:', error);
+        return {
+          success: false,
+          message: 'Sorry, I encountered an error with the AI service. Please try again.',
+          error: error.message
+        };
+      }
+    } else {
+      // Fallback to HuggingFace logic as before
+      try {
+        if (!this.hfApiKey || this.hfApiKey === 'your_huggingface_api_key_here') {
+          console.error('No Hugging Face API key found or using placeholder');
+          console.log('Using fallback response mechanism');
+          const fallbackResponse = this.getFallbackResponse(userQuery);
+          return {
+            success: true,
+            message: fallbackResponse,
+            timestamp: new Date().toISOString(),
+            note: 'Using fallback response (API not configured)'
+          };
+        }
+        const prompt = this.buildPrompt(userQuery, context);
+        const requestBody = {
+          inputs: prompt,
+          parameters: {
+            max_new_tokens: 500,
+            temperature: 0.7,
+            top_p: 0.9,
+            do_sample: true
+          }
+        };
+        const response = await fetch(`${this.baseUrl}/${this.model}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.hfApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Hugging Face API error: ${response.status} - ${errorText}`);
+        }
+        const data = await response.json();
+        if (!data || !data[0] || !data[0].generated_text) {
+          throw new Error('Invalid response format from Hugging Face API');
+        }
+        const result = this.parseResponse(data[0].generated_text);
+        return result;
+      } catch (error) {
+        console.error('=== CHATBOT GENERATE RESPONSE ERROR ===');
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        console.error('Full error object:', error);
+        return {
+          success: false,
+          message: 'Sorry, I encountered an error. Please try again.',
+          error: error.message
+        };
+      }
+    }
+  }
+
+  buildPrompt(userQuery, context) {
+    const availableStates = [
+      'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 
+      'Delaware', 'District of Columbia', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 
+      'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 
+      'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 
+      'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 
+      'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota', 
+      'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming'
+    ];
+
+    const prompt = `<s>[INST] You are a helpful assistant for TransitViz, a transit data visualization platform. 
+
+Available data includes:
+- Transit metrics for all 50 US states
+- County-level transit data within each state
+- Equity data (employment, income, race, housing) for states and counties
+
+Available states: ${availableStates.join(', ')}
+
+Current context: ${JSON.stringify(context)}
+
+User question: ${userQuery}
+
+Please provide a helpful, natural language response that:
+1. Answers the user's question using the available data
+2. If the exact data isn't available, suggest the closest match
+3. Be conversational and helpful
+4. Include specific data points when relevant
+5. Suggest related information they might find interesting
+
+If you don't have the specific data requested, acknowledge this and suggest what similar data is available. [/INST]`;
+
+    return prompt;
+  }
+
+  parseResponse(generatedText) {
+    console.log('=== PARSE RESPONSE CALLED ===');
+    console.log('Generated text length:', generatedText.length);
+    console.log('Generated text preview:', generatedText.substring(0, 200) + '...');
+    
+    // Extract the response part after the instruction
+    const responseMatch = generatedText.match(/\[\/INST\](.*)/s);
+    const response = responseMatch ? responseMatch[1].trim() : generatedText.trim();
+    
+    console.log('Parsed response length:', response.length);
+    console.log('Parsed response:', response);
+    
+    const result = {
+      success: true,
+      message: response,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log('Final result:', result);
+    return result;
+  }
+
+  async searchData(query, context) {
+    // This method will search through the available data to find relevant information
+    const searchTerms = this.extractSearchTerms(query);
+    
+    // For now, return a basic search result
+    // In a full implementation, this would search through your MongoDB collections
+    return {
+      found: true,
+      data: null, // This would contain actual data from your database
+      suggestions: this.generateSuggestions(searchTerms)
+    };
+  }
+
+  extractSearchTerms(query) {
+    // Extract key terms from the user query
+    const terms = query.toLowerCase().split(' ');
+    const stateNames = [
+      'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut',
+      'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa',
+      'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan',
+      'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska', 'nevada', 'new hampshire',
+      'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio',
+      'oklahoma', 'oregon', 'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+      'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia',
+      'wisconsin', 'wyoming'
+    ];
+    
+    const foundStates = terms.filter(term => stateNames.includes(term));
+    const metrics = terms.filter(term => 
+      term.includes('transit') || term.includes('accessibility') || term.includes('service') ||
+      term.includes('frequency') || term.includes('coverage') || term.includes('score')
+    );
+    
+    return {
+      states: foundStates,
+      metrics: metrics,
+      originalQuery: query
+    };
+  }
+
+  generateSuggestions(searchTerms) {
+    const suggestions = [];
+    
+    if (searchTerms.states.length > 0) {
+      suggestions.push(`Show me detailed transit data for ${searchTerms.states[0]}`);
+      suggestions.push(`Compare ${searchTerms.states[0]} with other states`);
+    }
+    
+    if (searchTerms.metrics.length > 0) {
+      suggestions.push(`Show ${searchTerms.metrics[0]} across all states`);
+      suggestions.push(`Which states have the best ${searchTerms.metrics[0]}?`);
+    }
+    
+    if (searchTerms.states.length === 0 && searchTerms.metrics.length === 0) {
+      suggestions.push('Show me the best performing states');
+      suggestions.push('What transit metrics are available?');
+      suggestions.push('Show me county-level data');
+    }
+    
+    return suggestions;
+  }
+
+  getFallbackResponse(userQuery) {
+    console.log('=== GETTING FALLBACK RESPONSE ===');
+    console.log('User query:', userQuery);
+    
+    const query = userQuery.toLowerCase();
+    
+    // Basic fallback responses for common queries
+    if (query.includes('hello') || query.includes('hi') || query.includes('hey')) {
+      return "Hello! I'm here to help you explore transit data. You can ask me about states, counties, or specific transit metrics. What would you like to know?";
+    }
+    
+    if (query.includes('help') || query.includes('what can you do')) {
+      return "I can help you explore transit data! You can ask me about:\n• Transit metrics for any US state\n• County-level data within states\n• Comparisons between different areas\n• Specific metrics like accessibility, frequency, or coverage\n\nTry asking something like 'Show me transit data for California' or 'What are the best performing states?'";
+    }
+    
+    if (query.includes('state') || query.includes('states')) {
+      return "I can help you explore transit data for all 50 US states! You can ask me about specific states like California, New York, or Texas, or ask for comparisons between states. What state would you like to know more about?";
+    }
+    
+    if (query.includes('county') || query.includes('counties')) {
+      return "I can provide county-level transit data within each state. Just let me know which state you're interested in, and I can show you detailed information about its counties.";
+    }
+    
+    if (query.includes('metric') || query.includes('data') || query.includes('information')) {
+      return "I have access to comprehensive transit data including accessibility metrics, service frequency, coverage areas, and more. I can also provide equity data related to employment, income, race, and housing. What specific information are you looking for?";
+    }
+    
+    // Default response
+    return "I understand you're asking about transit data. While I'm currently using a basic response system, I can still help guide you to the right information. You can explore the map to see transit data for different states and counties, or ask me specific questions about what data is available. What would you like to know?";
+  }
+}
+
+export { HuggingFaceLlamaService, TransitVizChatbot };

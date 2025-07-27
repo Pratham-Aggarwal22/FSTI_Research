@@ -155,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       if (selectedStates.length === 0) {
         selectedOptionsContainer.innerHTML = '<div class="placeholder">Select states to compare...</div>';
+        window.selectedStates = [];
         return;
       }
       
@@ -192,6 +193,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (selectedStates.length > 0) {
       fetchMetrics();
     }
+    // Set window.selectedStates for global access (AI report/chart)
+    window.selectedStates = selectedStates.slice();
+    console.log('[AI REPORT] Set window.selectedStates:', window.selectedStates);
   }
   
   function renderSelectedCounties() {
@@ -1809,3 +1813,210 @@ document.addEventListener('DOMContentLoaded', () => {
     compareBtn.parentNode.insertBefore(aiReportBtn, compareBtn.nextSibling);
   }
 });
+
+// === Interactive Dot Plot Chart Integration ===
+// Add a container for the new chart below the AI report
+const aiReportContainer = document.getElementById('aiReportContainer') || document.body;
+let dotplotContainer = document.getElementById('dotplotContainer');
+if (!dotplotContainer) {
+  dotplotContainer = document.createElement('div');
+  dotplotContainer.id = 'dotplotContainer';
+  dotplotContainer.style.marginTop = '40px';
+  aiReportContainer.appendChild(dotplotContainer);
+}
+
+// State for dotplot
+let dotplotData = null;
+let dotplotTab = 'equity'; // 'equity' or 'transit'
+let selectedMetricIndexes = {}; // { equity: 0, transit: 0 }
+let selectedLegends = {}; // { equity: [], transit: [] }
+
+// Fetch and render dotplot when states are selected
+async function fetchAndRenderDotplot(states) {
+  if (!states || states.length === 0) {
+    dotplotContainer.innerHTML = '';
+    return;
+  }
+  dotplotContainer.innerHTML = '<div style="text-align:center;padding:2em;">Loading comparison chart...</div>';
+  try {
+    const response = await fetch('/comparison/api/comparison-dotplot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ states })
+    });
+    const data = await response.json();
+    dotplotData = data;
+    // Default to first metric in each tab
+    selectedMetricIndexes = { equity: 0, transit: 0 };
+    selectedLegends = { equity: [], transit: [] };
+    renderDotplotChart();
+  } catch (err) {
+    dotplotContainer.innerHTML = '<div style="color:red;">Failed to load chart data.</div>';
+    console.error('Dotplot chart error:', err);
+  }
+}
+
+// Call fetchAndRenderDotplot when states are selected
+const origRenderSelectedStates = renderSelectedStates;
+renderSelectedStates = function() {
+  origRenderSelectedStates.apply(this, arguments);
+  if (selectedStates.length > 0) {
+    fetchAndRenderDotplot(selectedStates);
+  } else {
+    dotplotContainer.innerHTML = '';
+  }
+};
+
+// Main render function for the dotplot chart
+function renderDotplotChart() {
+  if (!dotplotData) return;
+  const tab = dotplotTab;
+  const tabData = dotplotData[tab] || [];
+  if (tabData.length === 0) {
+    dotplotContainer.innerHTML = '<div style="color:#888;">No data available for this tab.</div>';
+    return;
+  }
+  // UI: Tabs
+  let html = `<div style="display:flex;gap:2em;align-items:center;margin-bottom:1em;">
+    <button id="dotplotTabEquity" class="dotplot-tab${tab==='equity'?' active':''}">Equity</button>
+    <button id="dotplotTabTransit" class="dotplot-tab${tab==='transit'?' active':''}">Transit</button>
+    <span style="margin-left:2em;font-weight:600;">Select Metric/Category:</span>
+    <select id="dotplotMetricSelect">
+      ${tabData.map((cat,i)=>`<option value="${i}"${i===selectedMetricIndexes[tab]?' selected':''}>${cat.category}</option>`).join('')}
+    </select>
+  </div>`;
+  // UI: Legend selector
+  const metric = tabData[selectedMetricIndexes[tab]];
+  const allLegends = metric.metrics.map(m=>m.legend);
+  if (!selectedLegends[tab] || selectedLegends[tab].length === 0) selectedLegends[tab] = allLegends.slice();
+  html += `<div style="margin-bottom:1em;">`;
+  html += allLegends.map(legend=>`<label style="margin-right:1em;"><input type="checkbox" class="dotplot-legend-checkbox" value="${legend}"${selectedLegends[tab].includes(legend)?' checked':''}/> ${legend}</label>`).join('');
+  html += `</div>`;
+  // Chart container
+  html += `<div id="dotplotChartArea" style="width:100%;height:500px;"></div>`;
+  dotplotContainer.innerHTML = html;
+
+  // Event listeners for tabs and selectors
+  document.getElementById('dotplotTabEquity').onclick = ()=>{dotplotTab='equity';renderDotplotChart();};
+  document.getElementById('dotplotTabTransit').onclick = ()=>{dotplotTab='transit';renderDotplotChart();};
+  document.getElementById('dotplotMetricSelect').onchange = e=>{
+    selectedMetricIndexes[tab]=+e.target.value;
+    // Clear selected legends when switching subcategories
+    selectedLegends[tab] = [];
+    renderDotplotChart();
+  };
+  document.querySelectorAll('.dotplot-legend-checkbox').forEach(cb=>{
+    cb.onchange = ()=>{
+      const checked = Array.from(document.querySelectorAll('.dotplot-legend-checkbox')).filter(c=>c.checked).map(c=>c.value);
+      selectedLegends[tab] = checked;
+      renderDotplotChart();
+    };
+  });
+
+  // Render the D3.js dot plot
+  setTimeout(()=>renderD3Dotplot(metric, selectedLegends[tab]), 0);
+}
+
+// D3.js dot plot rendering
+function renderD3Dotplot(metric, legendsToShow) {
+  const container = document.getElementById('dotplotChartArea');
+  container.innerHTML = '';
+  // Prepare data
+  const states = Object.keys(metric.metrics[0].values);
+  const data = [];
+  legendsToShow.forEach((legend, lidx) => {
+    const m = metric.metrics.find(m=>m.legend===legend);
+    if (!m) return;
+    states.forEach((state, sidx) => {
+      if (m.values[state] !== null && m.values[state] !== undefined) {
+        data.push({state, legend, value: m.values[state], lidx, sidx});
+      }
+    });
+  });
+  // D3 setup
+  const width = container.offsetWidth || 900;
+  const height = container.offsetHeight || 500;
+  const margin = {top: 30, right: 40, bottom: 40, left: 120};
+  const svg = d3.select(container).append('svg')
+    .attr('width', width)
+    .attr('height', height);
+  // Scales
+  const y = d3.scaleBand()
+    .domain(states)
+    .range([margin.top, height - margin.bottom])
+    .padding(0.2);
+  const xExtent = d3.extent(data, d=>d.value);
+  const x = d3.scaleLinear()
+    .domain([Math.min(0, xExtent[0]), xExtent[1]]).nice()
+    .range([margin.left, width - margin.right]);
+  // Color scale
+  const color = d3.scaleOrdinal()
+    .domain(legendsToShow)
+    .range(d3.schemeCategory10.concat(d3.schemeSet2, d3.schemeSet3));
+  // Axes
+  svg.append('g')
+    .attr('transform',`translate(0,0)`)
+    .call(d3.axisLeft(y));
+  svg.append('g')
+    .attr('transform',`translate(0,${height-margin.bottom})`)
+    .call(d3.axisBottom(x));
+  // Dots
+  svg.selectAll('circle')
+    .data(data)
+    .enter()
+    .append('circle')
+    .attr('cx',d=>x(d.value))
+    .attr('cy',d=>y(d.state)+(y.bandwidth()/2))
+    .attr('r',7)
+    .attr('fill',d=>color(d.legend))
+    .attr('stroke','#333')
+    .attr('stroke-width',1.2)
+    .on('mouseover',function(e,d){
+      d3.select(this).attr('stroke-width',3);
+      showDotplotTooltip(e,d);
+    })
+    .on('mouseout',function(e,d){
+      d3.select(this).attr('stroke-width',1.2);
+      hideDotplotTooltip();
+    });
+  // Legend (top)
+  const legendG = svg.append('g')
+    .attr('transform',`translate(${margin.left},${margin.top-20})`);
+  legendsToShow.forEach((legend,i)=>{
+    legendG.append('circle')
+      .attr('cx',i*120)
+      .attr('cy',0)
+      .attr('r',7)
+      .attr('fill',color(legend));
+    legendG.append('text')
+      .attr('x',i*120+15)
+      .attr('y',5)
+      .text(legend)
+      .style('font-size','14px');
+  });
+}
+
+// Tooltip helpers
+let dotplotTooltipDiv = null;
+function showDotplotTooltip(e, d) {
+  if (!dotplotTooltipDiv) {
+    dotplotTooltipDiv = document.createElement('div');
+    dotplotTooltipDiv.style.position = 'fixed';
+    dotplotTooltipDiv.style.pointerEvents = 'none';
+    dotplotTooltipDiv.style.background = 'rgba(0,0,0,0.85)';
+    dotplotTooltipDiv.style.color = 'white';
+    dotplotTooltipDiv.style.padding = '7px 12px';
+    dotplotTooltipDiv.style.borderRadius = '6px';
+    dotplotTooltipDiv.style.fontSize = '14px';
+    dotplotTooltipDiv.style.zIndex = 9999;
+    document.body.appendChild(dotplotTooltipDiv);
+  }
+  dotplotTooltipDiv.innerHTML = `<b>${d.state}</b><br/><b>${d.legend}</b>: ${d.value}`;
+  dotplotTooltipDiv.style.left = (e.clientX+15)+'px';
+  dotplotTooltipDiv.style.top = (e.clientY-10)+'px';
+  dotplotTooltipDiv.style.display = 'block';
+}
+function hideDotplotTooltip() {
+  if (dotplotTooltipDiv) dotplotTooltipDiv.style.display = 'none';
+}
+// === End Interactive Dot Plot Chart Integration ===
