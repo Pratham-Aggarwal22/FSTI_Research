@@ -1,5 +1,43 @@
 // public/js/app.js
 
+// Ordered transit metrics list as specified by user
+const ORDERED_TRANSIT_METRICS = [
+  "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)",
+  "Transit: Driving",
+  "Initial Wait Time in Minutes",
+  "Initial Walk Distance in Miles", 
+  "Initial Walk Duration in Minutes",
+  "Total Wait Duration in Minutes",
+  "Total Walk Distance in Miles",
+  "Total Walk Duration in minutes",
+  "Transfers",
+  "In-Vehicle Duration in Minutes",
+  "Out-of-Vehicle Duration in Minutes",
+  "In-Vehicle:Out-of-Vehicle",
+  "Travel Duration in Minutes",
+  "Driving Duration with Traffic in Minutes",
+  "Sample Size"
+];
+
+// Ordered transit metrics with "Average" prefix for database queries
+const ORDERED_TRANSIT_METRICS_WITH_AVERAGE = [
+  "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)",
+  "Transit: Driving", 
+  "Average Initial Wait Time in Minutes",
+  "Average Initial Walk Distance in Miles",
+  "Average Initial Walk Duration in Minutes", 
+  "Average Total Wait Duration in Minutes",
+  "Average Total Walk Distance in Miles",
+  "Average Total Walk Duration in minutes",
+  "Transfers",
+  "Average In-Vehicle Duration in Minutes",
+  "Average Out-of-Vehicle Duration in Minutes",
+  "In-Vehicle:Out-of-Vehicle",
+  "Average Travel Duration in Minutes",
+  "Average Driving Duration with Traffic in Minutes",
+  "Sample Size"
+];
+
 const statesData = {
   "01": { name: "Alabama", abbr: "AL" },
   "02": { name: "Alaska", abbr: "AK" },
@@ -104,6 +142,420 @@ function getChartTextColor() {
   return document.body.classList.contains("dark-mode") ? "#ffffff" : "#2c3e50";
 }
 
+function generateScatterColors(count) {
+  const baseColors = [
+    '#2c41ff', // primary blue
+    '#0984e3', // transit blue
+    '#fd9644', // transit orange
+    '#20bf6b', // transit green
+    '#eb3b5a', // transit red
+    '#f7b731', // transit yellow
+    '#a55eea', // purple
+    '#2980b9', // blue
+    '#27ae60', // green
+    '#e74c3c', // red
+    '#f39c12', // yellow
+    '#8e44ad', // purple
+    '#16a085', // teal
+    '#e67e22', // orange
+    '#9b59b6', // violet
+    '#34495e'  // dark blue-gray
+  ];
+  
+  // If we need more colors than we have, generate them
+  if (count <= baseColors.length) {
+    return baseColors.slice(0, count);
+  }
+  
+  // Generate additional colors by rotating hue
+  const colors = [...baseColors];
+  
+  for (let i = baseColors.length; i < count; i++) {
+    const hue = (i * 137.508) % 360; // Golden angle approximation for good distribution
+    colors.push(`hsl(${hue}, 70%, 60%)`);
+  }
+  
+  return colors;
+}
+
+// Info popup functionality
+let infoPopupOverlay = null;
+
+function createInfoPopup() {
+  if (!infoPopupOverlay) {
+    infoPopupOverlay = document.createElement('div');
+    infoPopupOverlay.className = 'info-popup-overlay';
+    infoPopupOverlay.innerHTML = `
+      <div class="info-popup">
+        <div class="info-popup-header">
+          <h2 class="info-popup-title">Metric Information</h2>
+          <button class="info-popup-close" onclick="closeInfoPopup()">&times;</button>
+        </div>
+        <div class="info-popup-content">
+          <div class="info-popup-loading">Loading information...</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(infoPopupOverlay);
+    
+    // Close on overlay click
+    infoPopupOverlay.addEventListener('click', (e) => {
+      if (e.target === infoPopupOverlay) {
+        closeInfoPopup();
+      }
+    });
+    
+    // Close on escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && infoPopupOverlay.classList.contains('active')) {
+        closeInfoPopup();
+      }
+    });
+  }
+  return infoPopupOverlay;
+}
+
+function showInfoPopup(metricName, mapTypeOrInfoText) {
+  const overlay = createInfoPopup();
+  const content = overlay.querySelector('.info-popup-content');
+  const title = overlay.querySelector('.info-popup-title');
+  
+  title.textContent = metricName;
+  content.innerHTML = '<div class="info-popup-loading">Loading information...</div>';
+  
+  overlay.classList.add('active');
+  document.body.style.overflow = 'hidden';
+  
+  // Check if mapTypeOrInfoText is actually info text (string with spaces and sentences)
+  if (typeof mapTypeOrInfoText === 'string' && mapTypeOrInfoText.includes(' ')) {
+    // This is info text, display it directly
+    content.innerHTML = `<p>${mapTypeOrInfoText}</p>`;
+  } else {
+    // This is a mapType, load from file
+    const infoFile = mapTypeOrInfoText === 'usa' ? 'usa_metrics.txt' : 
+                     mapTypeOrInfoText === 'state' ? 'state_metrics.txt' : 
+                     mapTypeOrInfoText === 'usa_map' ? 'usa_map_metrics.txt' :
+                     mapTypeOrInfoText === 'state_map' ? 'state_map_metrics.txt' :
+                     mapTypeOrInfoText === 'county_map' ? 'county_map_metrics.txt' :
+                     mapTypeOrInfoText === 'frequency' ? 'frequency_metrics.txt' : 
+                     mapTypeOrInfoText === 'county_frequency' ? 'county_frequency_metrics.txt' : 'county_metrics.txt';
+    
+    fetch(`/info/${infoFile}`)
+      .then(response => response.text())
+      .then(text => {
+        const info = extractMetricInfo(text, metricName);
+        content.innerHTML = info;
+      })
+      .catch(error => {
+        console.error('Error loading metric info:', error);
+        content.innerHTML = '<p>Sorry, information for this metric is not available at the moment.</p>';
+      });
+  }
+}
+
+function closeInfoPopup() {
+  if (infoPopupOverlay) {
+    infoPopupOverlay.classList.remove('active');
+    document.body.style.overflow = 'auto';
+  }
+}
+
+function extractMetricInfo(text, metricName) {
+  // Split the text into sections
+  const sections = text.split('## ');
+  
+  // Find the section that matches our metric name
+  for (let i = 1; i < sections.length; i++) {
+    const section = sections[i];
+    const lines = section.split('\n');
+    const title = lines[0].trim();
+    
+    // Check if this section matches our metric name
+    if (title === metricName || title.includes(metricName) || metricName.includes(title)) {
+      // Extract the content after the title
+      const content = lines.slice(1).join('\n').trim();
+      
+      if (content && !content.includes('[Add information')) {
+        // Convert markdown-like formatting to HTML
+        return content
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/\n\n/g, '</p><p>')
+          .replace(/^/, '<p>')
+          .replace(/$/, '</p>')
+          .replace(/<p><\/p>/g, '');
+      } else {
+        return '<p>Information for this metric will be added soon. Please check back later.</p>';
+      }
+    }
+  }
+  
+  return '<p>Information for this metric is not available.</p>';
+}
+
+function createInfoButton(metricName, mapType) {
+  const button = document.createElement('button');
+  button.className = 'info-button';
+  button.innerHTML = 'i';
+  button.title = 'Click for more information';
+  button.onclick = (e) => {
+    e.stopPropagation();
+    showInfoPopup(metricName, mapType);
+  };
+  return button;
+}
+
+// Helper function to format metric names (remove units from headings)
+function formatMetricName(metricName) {
+  return metricName
+    .replace(' in Minutes', '')
+    .replace(' in Miles', '')
+    .replace(' in minutes', '');
+}
+
+// Helper function to format metric values (add units to values)
+function formatMetricValue(metricName, value) {
+  // Special handling for Percent Access metric
+  if (metricName.includes('Percent Access')) {
+    return `${value}%`;
+  }
+  // Handle metrics that are specifically about time in minutes (not just containing the word "minutes")
+  else if ((metricName.includes('Minutes') || metricName.includes('minutes')) && 
+           !metricName.includes('Percent Access')) {
+    return `${value} min`;
+  } else if (metricName.includes('Miles')) {
+    return `${value} miles`;
+  }
+  return value;
+}
+
+// Helper function to get the original metric name for info lookup
+function getOriginalMetricName(displayName, mapType) {
+  // For county maps, we need to add "Average" prefix for lookup
+  if (mapType === 'county') {
+    if (displayName.includes('Initial Wait Time') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Initial Walk Distance') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Initial Walk Duration') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Total Wait Duration') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Total Walk Distance') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Total Walk Duration') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('In-Vehicle Duration') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Out-of-Vehicle Duration') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Travel Duration') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+    if (displayName.includes('Driving Duration with Traffic') && !displayName.includes('Average')) {
+      return `Average ${displayName}`;
+    }
+  }
+  return displayName;
+}
+
+// Natural breaks (Jenks) algorithm implementation
+function naturalBreaks(data, numClasses) {
+  if (data.length === 0 || numClasses <= 0) return [];
+  if (data.length <= numClasses) return [...new Set(data)].sort((a, b) => a - b);
+  
+  const sortedData = [...data].sort((a, b) => a - b);
+  const n = sortedData.length;
+  const k = Math.min(numClasses, n);
+  
+  // Initialize matrices
+  const mat1 = Array(n + 1).fill().map(() => Array(k + 1).fill(0));
+  const mat2 = Array(n + 1).fill().map(() => Array(k + 1).fill(0));
+  
+  // Calculate variance for all possible ranges
+  for (let i = 1; i <= n; i++) {
+    let sum = 0;
+    let sumSquares = 0;
+    let variance = 0;
+    
+    for (let j = 0; j < i; j++) {
+      sum += sortedData[j];
+      sumSquares += sortedData[j] * sortedData[j];
+      variance = sumSquares - (sum * sum) / (j + 1);
+      mat1[i][1] = variance;
+    }
+  }
+  
+  // Fill the matrices using dynamic programming
+  for (let j = 2; j <= k; j++) {
+    for (let i = 1; i <= n; i++) {
+      mat1[i][j] = Infinity;
+      for (let l = 1; l < i; l++) {
+        let sum = 0;
+        let sumSquares = 0;
+        let variance = 0;
+        
+        for (let m = l; m < i; m++) {
+          sum += sortedData[m];
+          sumSquares += sortedData[m] * sortedData[m];
+        }
+        variance = sumSquares - (sum * sum) / (i - l);
+        
+        if (mat1[l][j - 1] + variance < mat1[i][j]) {
+          mat1[i][j] = mat1[l][j - 1] + variance;
+          mat2[i][j] = l;
+        }
+      }
+    }
+  }
+  
+  // Extract the break points
+  const breaks = [];
+  let kk = n;
+  let kclass = k;
+  
+  while (kclass > 1) {
+    breaks.unshift(sortedData[mat2[kk][kclass] - 1]);
+    kk = mat2[kk][kclass];
+    kclass--;
+  }
+  
+  return breaks;
+}
+
+// Define which metrics should have red for high values vs low values
+const METRIC_COLOR_LOGIC = {
+  // Metrics where HIGH values are GOOD (green for high, red for low)
+  'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)': 'high_is_good',
+  'Sample Size': 'high_is_good',
+  
+  // Metrics where HIGH values are BAD (red for high, green for low)
+  'Transit: Driving': 'high_is_bad',
+  'Average Initial Wait Time in Minutes': 'high_is_bad',
+  'Initial Wait Time in Minutes': 'high_is_bad',
+  'Average Initial Walk Distance in Miles': 'high_is_bad',
+  'Initial Walk Distance in Miles': 'high_is_bad',
+  'Average Initial Walk Duration in Minutes': 'high_is_bad',
+  'Initial Walk Duration in Minutes': 'high_is_bad',
+  'Average Total Wait Duration in Minutes': 'high_is_bad',
+  'Total Wait Duration in Minutes': 'high_is_bad',
+  'Average Total Walk Distance in Miles': 'high_is_bad',
+  'Total Walk Distance in Miles': 'high_is_bad',
+  'Average Total Walk Duration in minutes': 'high_is_bad',
+  'Total Walk Duration in minutes': 'high_is_bad',
+  'Transfers': 'high_is_bad',
+  'Average In-Vehicle Duration in Minutes': 'high_is_bad',
+  'In-Vehicle Duration in Minutes': 'high_is_bad',
+  'Average Out-of-Vehicle Duration in Minutes': 'high_is_bad',
+  'Out-of-Vehicle Duration in Minutes': 'high_is_bad',
+  'In-Vehicle:Out-of-Vehicle': 'high_is_bad',
+  'Average Travel Duration in Minutes': 'high_is_bad',
+  'Travel Duration in Minutes': 'high_is_bad',
+  'Average Driving Duration with Traffic in Minutes': 'high_is_bad',
+  'Driving Duration with Traffic in Minutes': 'high_is_bad'
+};
+
+// Get color scheme based on metric type
+function getColorScheme(metricName, isHighGood) {
+  if (isHighGood) {
+    // Green for high values, red for low values
+    return ['#e74c3c', '#e67e22', '#27ae60']; // red, orange, green
+  } else {
+    // Red for high values, green for low values  
+    return ['#27ae60', '#e67e22', '#e74c3c']; // green, orange, red
+  }
+}
+
+// Helper function to create mapping between desired metric names and actual database names
+function createMetricMapping(data) {
+  const mapping = {};
+  const actualTitles = data.map(metric => metric.title);
+  
+  // Create flexible matching for metric names
+  const metricPatterns = {
+    "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)": [
+      "Percent Access", "percent access", "Percent_Access", "percent_access"
+    ],
+    "Transit: Driving": [
+      "Transit: Driving", "transit driving", "Transit_Driving", "transit_driving"
+    ],
+    "Initial Wait Time in Minutes": [
+      "Average Initial Wait Time in Minutes", "Initial Wait Time in Minutes", 
+      "initial wait time", "Initial_Wait_Time", "initial_wait_time"
+    ],
+    "Initial Walk Distance in Miles": [
+      "Average Initial Walk Distance in Miles", "Initial Walk Distance in Miles",
+      "initial walk distance", "Initial_Walk_Distance", "initial_walk_distance"
+    ],
+    "Initial Walk Duration in Minutes": [
+      "Average Initial Walk Duration in Minutes", "Initial Walk Duration in Minutes",
+      "initial walk duration", "Initial_Walk_Duration", "initial_walk_duration"
+    ],
+    "Total Wait Duration in Minutes": [
+      "Average Total Wait Duration in Minutes", "Total Wait Duration in Minutes",
+      "total wait duration", "Total_Wait_Duration", "total_wait_duration"
+    ],
+    "Total Walk Distance in Miles": [
+      "Average Total Walk Distance in Miles", "Total Walk Distance in Miles",
+      "total walk distance", "Total_Walk_Distance", "total_walk_distance"
+    ],
+    "Total Walk Duration in minutes": [
+      "Average Total Walk Duration in minutes", "Total Walk Duration in minutes",
+      "total walk duration", "Total_Walk_Duration", "total_walk_duration"
+    ],
+    "Transfers": [
+      "Transfers", "transfers", "TRANSFERS"
+    ],
+    "In-Vehicle Duration in Minutes": [
+      "Average In-Vehicle Duration in Minutes", "In-Vehicle Duration in Minutes",
+      "in-vehicle duration", "In_Vehicle_Duration", "in_vehicle_duration"
+    ],
+    "Out-of-Vehicle Duration in Minutes": [
+      "Average Out-of-Vehicle Duration in Minutes", "Out-of-Vehicle Duration in Minutes",
+      "out-of-vehicle duration", "Out_of_Vehicle_Duration", "out_of_vehicle_duration"
+    ],
+    "In-Vehicle:Out-of-Vehicle": [
+      "In-Vehicle:Out-of-Vehicle", "in-vehicle:out-of-vehicle", "In_Vehicle_Out_of_Vehicle", "in_vehicle_out_of_vehicle"
+    ],
+    "Travel Duration in Minutes": [
+      "Average Travel Duration in Minutes", "Travel Duration in Minutes",
+      "travel duration", "Travel_Duration", "travel_duration"
+    ],
+    "Driving Duration with Traffic in Minutes": [
+      "Average Driving Duration with Traffic in Minutes", "Driving Duration with Traffic in Minutes",
+      "driving duration with traffic", "Driving_Duration_with_Traffic", "driving_duration_with_traffic"
+    ],
+    "Sample Size": [
+      "Sample Size", "sample size", "Sample_Size", "sample_size"
+    ]
+  };
+  
+  // Try to match each desired name with actual database titles
+  Object.entries(metricPatterns).forEach(([desiredName, patterns]) => {
+    for (const pattern of patterns) {
+      const match = actualTitles.find(title => 
+        title.toLowerCase().includes(pattern.toLowerCase()) ||
+        title === pattern ||
+        title.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === pattern.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+      );
+      if (match) {
+        mapping[desiredName] = match;
+        break;
+      }
+    }
+  });
+  
+  return mapping;
+}
+
 // Add this helper function at the beginning of your app.js file
 function formatNumberToTwoDecimals(value) {
   // Check if value is a number
@@ -123,6 +575,10 @@ document.addEventListener('DOMContentLoaded', () => {
   updateLeftPanel();
   document.getElementById('mapViewTab').addEventListener('click', switchToMapView);
   document.getElementById('equityComparisonTab').addEventListener('click', switchToEquityComparison);
+  
+  // Add event listener for back button in equity comparison
+  document.getElementById('backToMapFromEquity').addEventListener('click', switchToMapView);
+  
   // New event listener: update equity metrics immediately when equity category changes
   document.getElementById('equityCategorySelect').addEventListener('change', () => {
     if (selectedState) {
@@ -236,7 +692,11 @@ function initApp() {
   document.getElementById('mapTitle').textContent = 'United States';
   //document.getElementById('homeButton').addEventListener('click', handleBackToStates);
   fetchAllStateDataForCountryAverage().then(() => {
-    selectedMetric = allStateData[0].title;
+    // Set default metric to "Percent Access" if available, otherwise use first available
+    const percentAccessMetric = allStateData.find(metric => 
+      metric.title === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
+    );
+    selectedMetric = percentAccessMetric ? percentAccessMetric.title : allStateData[0].title;
     createUSMap();
     populateMetricSelect();
     createDistributionChart();
@@ -268,15 +728,16 @@ function populateMetricSelect() {
   defaultOption.textContent = 'Select a metric...';
   select.appendChild(defaultOption);
   
-  // Use a Set to ensure unique metric titles
-  const uniqueMetrics = new Set();
+  // Create a mapping from our desired names to actual database names
+  const metricMapping = createMetricMapping(allStateData);
   
-  allStateData.forEach(metric => {
-    if (metric.title && !uniqueMetrics.has(metric.title)) {
-      uniqueMetrics.add(metric.title);
+  // Use ordered metrics with mapping
+  ORDERED_TRANSIT_METRICS.forEach(desiredName => {
+    const actualName = metricMapping[desiredName];
+    if (actualName) {
       const option = document.createElement('option');
-      option.value = metric.title;
-      option.textContent = metric.title;
+      option.value = actualName; // Use actual database name as value
+      option.textContent = desiredName; // Show desired name to user
       select.appendChild(option);
     }
   });
@@ -284,6 +745,62 @@ function populateMetricSelect() {
   // Remove any existing event listeners to prevent duplicates
   select.removeEventListener('change', handleMetricChange);
   select.addEventListener('change', handleMetricChange);
+  
+  // Add info button for USA map metrics
+  addInfoButtonToMetricSelection('usa_map');
+}
+
+function addInfoButtonToMetricSelection(mapType) {
+  const metricSelection = document.getElementById('metricSelection');
+  if (!metricSelection) return;
+  
+  // Remove existing info button if it exists
+  const existingInfoBtn = metricSelection.querySelector('.metric-info-btn');
+  if (existingInfoBtn) {
+    existingInfoBtn.remove();
+  }
+  
+  // Create info button
+  const infoBtn = document.createElement('button');
+  infoBtn.className = 'metric-info-btn';
+  infoBtn.innerHTML = '<i class="fas fa-info-circle"></i>';
+  infoBtn.title = 'Click for metric information';
+  infoBtn.style.cssText = `
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  `;
+  
+  infoBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const currentMetric = document.getElementById('metricSelect').value;
+    if (currentMetric) {
+      // Find the display name for the current metric
+      const metricMapping = createMetricMapping(allStateData);
+      const displayName = Object.keys(metricMapping).find(key => metricMapping[key] === currentMetric);
+      if (displayName) {
+        showInfoPopup(displayName, mapType);
+      }
+    } else {
+      showInfoPopup('Select a metric first', 'Please select a metric from the dropdown to view its information.');
+    }
+  });
+  
+  // Add the button to the metric selection container
+  metricSelection.style.position = 'relative';
+  metricSelection.appendChild(infoBtn);
 }
 
 function handleMetricChange(event) {
@@ -302,13 +819,23 @@ function updateMapColors() {
     .filter(([key]) => key !== '_id' && key !== 'title')
     .map(([, value]) => formatNumberToTwoDecimals(value));
   
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
+  if (values.length === 0) return;
   
-  // Create color scale with formatted values
-  const colorScale = d3.scaleQuantize()
-    .domain([minVal, maxVal])
-    .range(['#27ae60', '#e67e22', '#e74c3c']);
+  // Use natural breaks for better categorization
+  const breaks = naturalBreaks(values, 3);
+  
+  // Special handling for Percent Access - always green for high values
+  let isHighGood = METRIC_COLOR_LOGIC[selectedMetric] === 'high_is_good';
+  if (selectedMetric && selectedMetric.includes('Percent Access')) {
+    isHighGood = true;
+  }
+  
+  const colors = getColorScheme(selectedMetric, isHighGood);
+  
+  // Create color scale using natural breaks
+  const colorScale = d3.scaleThreshold()
+    .domain(breaks)
+    .range(colors);
   
   usMap.svg.selectAll('.state')
     .attr('fill', d => {
@@ -317,7 +844,72 @@ function updateMapColors() {
     });
   
   usMap.colorScale = colorScale;
-  createLegend(minVal, maxVal);
+  createLegendWithBreaks(breaks, colors, isHighGood, values);
+}
+
+function createLegendWithBreaks(breaks, colors, isHighGood, validValues = []) {
+  console.log('createLegendWithBreaks called with:', { breaks, colors, isHighGood, validValues });
+  const legend = document.getElementById('legend');
+  console.log('Legend element found:', legend);
+  if (!legend) {
+    console.error('Legend element not found!');
+    return;
+  }
+  
+  let legendContent = '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">';
+  
+  if (breaks.length === 0) {
+    // No breaks - single color
+    legendContent += `
+      <div style="display: flex; align-items: center; gap: 5px;">
+        <div style="width: 20px; height: 20px; background: ${colors[0]};"></div> 
+        <span>All values</span>
+      </div>
+    `;
+  } else {
+    // Create legend with natural breaks
+    const ranges = [];
+    
+    // Get actual min and max values for better display
+    const allValues = validValues.length > 0 ? [...validValues] : [];
+    const actualMin = allValues.length > 0 ? Math.min(...allValues) : 0;
+    const actualMax = allValues.length > 0 ? Math.max(...allValues) : 0;
+    
+    // Create ranges based on breaks
+    if (breaks.length === 1) {
+      ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
+      ranges.push({ min: breaks[0], max: actualMax, color: colors[1] });
+    } else if (breaks.length === 2) {
+      ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
+      ranges.push({ min: breaks[0], max: breaks[1], color: colors[1] });
+      ranges.push({ min: breaks[1], max: actualMax, color: colors[2] });
+    } else {
+      // Handle more than 2 breaks
+      ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
+      for (let i = 0; i < breaks.length - 1; i++) {
+        ranges.push({ min: breaks[i], max: breaks[i + 1], color: colors[i + 1] });
+      }
+      ranges.push({ min: breaks[breaks.length - 1], max: actualMax, color: colors[colors.length - 1] });
+    }
+    
+    ranges.forEach(range => {
+      const rangeText = range.max === actualMax ? 
+        `${range.min.toFixed(2)} - ${range.max.toFixed(2)}` : 
+        `${range.min.toFixed(2)} - ${range.max.toFixed(2)}`;
+      
+      legendContent += `
+        <div style="display: flex; align-items: center; gap: 5px;">
+          <div style="width: 20px; height: 20px; background: ${range.color};"></div> 
+          <span>${rangeText}</span>
+        </div>
+      `;
+    });
+  }
+  
+  legendContent += '</div>';
+  console.log('Setting legend content:', legendContent);
+  legend.innerHTML = legendContent;
+  console.log('Legend updated successfully');
 }
 
 function createLegend(minVal, maxVal) {
@@ -505,6 +1097,13 @@ function createTopBottomChart() {
 function createUSMap() {
   const mapContainer = document.getElementById('mapView');
   mapContainer.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  
+  // Clear any existing legend
+  const legend = document.getElementById('legend');
+  if (legend) {
+    legend.innerHTML = '';
+  }
+  
   const width = mapContainer.clientWidth - 30;
   const height = mapContainer.clientHeight - 30;
   const svg = d3.create('svg')
@@ -567,7 +1166,24 @@ function createUSMap() {
         .text(d => statesData[d.id]?.abbr || '');
       mapContainer.appendChild(svg.node());
       usMap = { svg, path, projection, states, colorScale };
-      createLegend(minVal, maxVal);
+      
+      // Use natural breaks for legend
+      console.log('Creating legend with natural breaks for USA map');
+      const breaks = naturalBreaks(values, 3);
+      
+      // Special handling for Percent Access - always green for high values
+      let isHighGood = METRIC_COLOR_LOGIC[selectedMetric] === 'high_is_good';
+      if (selectedMetric && selectedMetric.includes('Percent Access')) {
+        isHighGood = true;
+      }
+      
+      const colors = getColorScheme(selectedMetric, isHighGood);
+      console.log('Natural breaks:', breaks);
+      console.log('Colors:', colors);
+      console.log('Is high good:', isHighGood);
+      console.log('Selected metric:', selectedMetric);
+      console.log('Metric color logic result:', METRIC_COLOR_LOGIC[selectedMetric]);
+      createLegendWithBreaks(breaks, colors, isHighGood, values);
     })
     .catch(err => console.error('Error loading US map:', err));
 }
@@ -638,6 +1254,12 @@ function handleStateClick(stateId) {
   createCountyMap(stateId);
   updateDataPanel();
   fetchStateData(stateId);
+  
+  // Fix scrollbar issue: Restore scrollbar functionality after state selection
+  console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from handleStateClick (delayed)');
+  setTimeout(() => {
+    restoreScrollbarFunctionality();
+  }, 100);
   
   // Apply database name correction and fetch county data
   const stateName = statesData[stateId].name;
@@ -770,8 +1392,8 @@ function createCountyMap(stateId) {
           .attr('data-county-name', d => d.properties.name)
           .attr('d', path)
           .attr('fill', '#d5d8dc')
-          .attr('stroke', '#fff')
-          .attr('stroke-width', 0.5)
+          .attr('stroke', '#666')
+          .attr('stroke-width', 1)
           .attr('data-clickable', 'true')
           .style('cursor', 'pointer')
           .on('click', function(event, d) {
@@ -879,12 +1501,12 @@ function handleCountyClick(countyName) {
   // Use original county name
   selectedCounty = originalCountyName;
   
-  // Fade out and disable non-selected counties
+  // Add boundary highlight to selected county and keep all counties clickable
   if (countyMap && countyMap.svg) {
     countyMap.svg.selectAll('.county')
       .transition()
       .duration(300)
-      .attr('fill', function() {
+      .attr('stroke', function() {
         const mapCountyName = d3.select(this).attr('data-county-name');
         
         // Compare using normalized versions but keep originals for display
@@ -892,12 +1514,25 @@ function handleCountyClick(countyName) {
         const normalizedSelectedName = normalizeCountyNameForComparison(originalCountyName);
         
         if (normalizedMapName === normalizedSelectedName) {
+          // Selected county gets a prominent boundary
           d3.select(this).attr('data-clickable', 'true');
-          return d3.select(this).attr('fill');
+          return '#2c41ff'; // Blue boundary for selected county
         } else {
-          d3.select(this).attr('data-clickable', 'false')
-                         .attr('cursor', 'default');
-          return d3.color(d3.select(this).attr('fill')).copy({opacity: 0.3});
+          // Other counties remain clickable with normal boundary
+          d3.select(this).attr('data-clickable', 'true')
+                         .attr('cursor', 'pointer');
+          return '#666'; // Gray boundary for other counties
+        }
+      })
+      .attr('stroke-width', function() {
+        const mapCountyName = d3.select(this).attr('data-county-name');
+        const normalizedMapName = normalizeCountyNameForComparison(mapCountyName);
+        const normalizedSelectedName = normalizeCountyNameForComparison(originalCountyName);
+        
+        if (normalizedMapName === normalizedSelectedName) {
+          return 3; // Thicker boundary for selected county
+        } else {
+          return 1; // Normal boundary for other counties
         }
       });
   }
@@ -917,6 +1552,7 @@ function handleCountyClick(countyName) {
 }
 
 function handleBackToStates() {
+  console.log('🏠 [NAV] handleBackToStates called - returning to homepage');
   selectedState = null;
   selectedCounty = null;
   activeView = 'state';
@@ -929,6 +1565,18 @@ function handleBackToStates() {
   countyCharts = [];
   switchToMapView();
   updateLeftPanel();
+  
+  // Fix Bug 2: Reset the compare button text to "Compare States" when returning to USA map
+  const compareBtn = document.getElementById('compareStatesButton');
+  if (compareBtn) {
+    compareBtn.textContent = 'Compare States';
+  }
+  
+  // Fix scrollbar issue: Ensure scrollbar is restored when returning to homepage
+  console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from handleBackToStates (delayed)');
+  setTimeout(() => {
+    restoreScrollbarFunctionality();
+  }, 100);
 }
 
 function handleBackToState() {
@@ -939,13 +1587,15 @@ function handleBackToState() {
     // Clear any existing tooltips
     d3.selectAll('.county-tooltip').remove();
     
-    // Restore all counties to normal opacity and make them clickable again
+    // Restore all counties to normal appearance and make them clickable again
     if (countyMap && countyMap.svg) {
-      countyMap.svg.selectAll('.county-path')
+      countyMap.svg.selectAll('.county')
         .transition()
         .duration(300)
         .attr('opacity', 1)
         .attr('data-clickable', 'true')
+        .attr('stroke', '#666') // Reset to normal boundary color
+        .attr('stroke-width', 1) // Reset to normal boundary width
         .style('cursor', 'pointer');
       
       // Update colors to show the current metric
@@ -979,26 +1629,48 @@ function handleBackToState() {
     stateCharts = [];
     switchToMapView();
     updateLeftPanel();
+    
+    // Fix scrollbar issue: Ensure scrollbar is restored when returning to state view
+    setTimeout(() => {
+      restoreScrollbarFunctionality();
+    }, 100);
   }
 }
 
 function updateDataPanel() {
+  console.log('📊 [DATA] updateDataPanel called - selectedState:', selectedState, 'selectedCounty:', selectedCounty);
   const dataPanelContent = document.getElementById('dataPanelContent');
   if (!selectedState) {
+    console.log('📊 [DATA] Updating for USA view (no selected state)');
     dataPanelContent.innerHTML = `
       <h2 class="section-title">United States</h2>
       <h3>Averages</h3>
       <div id="countryMetricsGrid" class="metric-grid"></div>
     `;
     displayCountryMetrics(allStateData);
+    
+    // Fix Bug 1: Ensure scrollbar functionality is restored by removing any inline styles
+    // that might interfere with the CSS-defined scrollbar behavior
+    dataPanelContent.style.overflowY = '';
+    dataPanelContent.style.scrollbarWidth = '';
+    dataPanelContent.style.scrollbarColor = '';
+    console.log('📊 [DATA] Cleared inline styles for USA view');
+    
     return;
   }
   if (selectedCounty) {
+    console.log('📊 [DATA] Updating for county view:', selectedCounty);
     const template = document.getElementById('countyDataTemplate');
     const countyPanel = template.content.cloneNode(true);
     dataPanelContent.innerHTML = '';
     dataPanelContent.appendChild(countyPanel);
     document.getElementById('backToStateButton').addEventListener('click', handleBackToState);
+    
+    // Fix Bug 1: Ensure scrollbar functionality is maintained by removing any inline styles
+    dataPanelContent.style.overflowY = '';
+    dataPanelContent.style.scrollbarWidth = '';
+    dataPanelContent.style.scrollbarColor = '';
+    console.log('📊 [DATA] Cleared inline styles for county view');
     
     // Toggle functionality for county view
     const averagesOption = document.getElementById('averagesOption');
@@ -1021,12 +1693,19 @@ function updateDataPanel() {
       });
     }
   } else {
+    console.log('📊 [DATA] Updating for state view:', statesData[selectedState]?.name);
     const template = document.getElementById('stateDataTemplate');
     const statePanel = template.content.cloneNode(true);
     dataPanelContent.innerHTML = '';
     dataPanelContent.appendChild(statePanel);
     document.getElementById('backButton').addEventListener('click', handleBackToStates);
     document.getElementById('stateName').textContent = statesData[selectedState].name;
+    
+    // Fix Bug 1: Ensure scrollbar functionality is maintained by removing any inline styles
+    dataPanelContent.style.overflowY = '';
+    dataPanelContent.style.scrollbarWidth = '';
+    dataPanelContent.style.scrollbarColor = '';
+    console.log('📊 [DATA] Cleared inline styles for state view');
     
     // Toggle functionality for state view (default view: Frequency Charts)
     const stateAveragesOption = document.getElementById('stateAveragesOption');
@@ -1074,11 +1753,34 @@ function displayCountryMetrics(data) {
   });
   
   grid.innerHTML = '';
-  Object.entries(metrics).forEach(([title, value]) => {
-    const card = document.createElement('div');
-    card.className = 'metric-card';
-    card.innerHTML = `<span class="metric-label">${title}</span><span class="metric-value">${value}</span>`;
-    grid.appendChild(card);
+  
+  // Create a mapping from our desired names to actual database names
+  const metricMapping = createMetricMapping(data);
+  
+  // Display metrics in the specified order using the mapping
+  ORDERED_TRANSIT_METRICS.forEach(desiredName => {
+    const actualName = metricMapping[desiredName];
+    if (actualName && metrics[actualName]) {
+      const card = document.createElement('div');
+      card.className = 'metric-card';
+      
+      const label = document.createElement('span');
+      label.className = 'metric-label';
+      const displayName = formatMetricName(desiredName);
+      label.textContent = displayName;
+      
+      const infoButton = createInfoButton(desiredName, 'usa');
+      label.appendChild(infoButton);
+      
+      const value = document.createElement('span');
+      value.className = 'metric-value';
+      const formattedValue = formatMetricValue(desiredName, metrics[actualName]);
+      value.textContent = formattedValue;
+      
+      card.appendChild(label);
+      card.appendChild(value);
+      grid.appendChild(card);
+    }
   });
 }
 
@@ -1100,15 +1802,42 @@ function displayStateMetrics(data, stateName) {
   if (!grid) return;
   grid.innerHTML = '';
   
+  // Create a map of metric titles to their data for easy lookup
+  const metricMap = {};
   data.forEach(metric => {
     if (metric[stateName] !== undefined) {
+      metricMap[metric.title] = metric[stateName];
+    }
+  });
+  
+  // Create a mapping from our desired names to actual database names
+  const metricMapping = createMetricMapping(data);
+  
+  // Display metrics in the specified order WITHOUT Average prefix for side panel
+  ORDERED_TRANSIT_METRICS.forEach(desiredName => {
+    const actualName = metricMapping[desiredName];
+    if (actualName && metricMap[actualName] !== undefined) {
       const card = document.createElement('div');
       card.className = 'metric-card';
-      const value = typeof metric[stateName] === 'number' ? 
-        formatNumberToTwoDecimals(metric[stateName]).toFixed(2) : 
-        metric[stateName];
       
-      card.innerHTML = `<span class="metric-label">${metric.title}</span><span class="metric-value">${value}</span>`;
+      const label = document.createElement('span');
+      label.className = 'metric-label';
+      const displayName = formatMetricName(desiredName);
+      label.textContent = displayName;
+      
+      const infoButton = createInfoButton(desiredName, 'state');
+      label.appendChild(infoButton);
+      
+      const value = document.createElement('span');
+      value.className = 'metric-value';
+      const valueText = typeof metricMap[actualName] === 'number' ? 
+        formatNumberToTwoDecimals(metricMap[actualName]).toFixed(2) : 
+        metricMap[actualName];
+      const formattedValue = formatMetricValue(desiredName, valueText);
+      value.textContent = formattedValue;
+      
+      card.appendChild(label);
+      card.appendChild(value);
       grid.appendChild(card);
     }
   });
@@ -1122,18 +1851,115 @@ function displayFrequencyDistributions(data) {
   stateCharts = [];
   if (Object.keys(data).length === 0) return;
   const chartTextColor = getChartTextColor();
-  Object.entries(data).forEach(([collectionName, stateData]) => {
+  
+  // Define color palette for different bars
+  const colorPalette = [
+    '#2c41ff', '#e67e22', '#20bf6b', '#f7b731', '#26de81', '#a55eea', 
+    '#0984e3', '#fd9644', '#eb3b5a', '#6c5ce7', '#00b894', '#fdcb6e'
+  ];
+  
+  // Define the frequency chart mappings with info text
+  const frequencyChartInfo = {
+    'Travel Duration in Minutes': 'This chart shows the distribution of travel durations across different time ranges. It helps identify the most common travel times and patterns in the selected area.',
+    'Initial Walk Duration in Minutes': 'This chart displays the distribution of initial walking durations before boarding transit. It shows how long people typically walk to reach their first transit stop.',
+    'Transit to Driving Ratio': 'This chart illustrates the ratio between transit travel time and driving time. Values closer to 1 indicate similar travel times, while higher values suggest transit takes longer.',
+    'Transfers': 'This chart shows the distribution of transfer counts during transit journeys. It helps understand the complexity of transit routes and the number of connections required.',
+    'Initial Walk Distance in Miles': 'This chart displays the distribution of initial walking distances to reach transit stops. It shows how far people typically walk to access public transportation.',
+    'Initial Wait Time in Minutes': 'This chart shows the distribution of waiting times at the first transit stop. It indicates how long passengers typically wait for their initial transit connection.',
+    'Out-Of-Vehicle Duration In Minutes': 'This chart displays the distribution of time spent outside of vehicles during transit journeys, including walking and waiting times.',
+    'In-Vehicle Duration in Minutes': 'This chart shows the distribution of time spent inside transit vehicles during journeys. It represents the actual riding time on buses, trains, or other transit modes.',
+    'Total Walk Duration in Minutes': 'This chart displays the distribution of total walking time throughout the entire journey, including initial and transfer walks.',
+    'Total Walk Distance in Miles': 'This chart shows the distribution of total walking distance for complete transit journeys, including all walking segments.',
+    'In-Vehicle To Out-Of-Vehicle Ratio': 'This chart illustrates the ratio between time spent in vehicles versus time spent walking and waiting. It helps understand the efficiency of transit journeys.',
+    'Total Wait Duration In Minutes': 'This chart displays the distribution of total waiting time across all transit stops during a journey, including initial and transfer waits.'
+  };
+  
+  // Create ordered frequency chart names based on the same order as average values
+  const orderedFrequencyCharts = [
+    'Travel Duration in Minutes',
+    'Initial Walk Duration in Minutes', 
+    'Transit to Driving Ratio',
+    'Transfers',
+    'Initial Walk Distance in Miles',
+    'Initial Wait Time in Minutes',
+    'Out-Of-Vehicle Duration In Minutes',
+    'In-Vehicle Duration in Minutes',
+    'Total Walk Duration in Minutes',
+    'Total Walk Distance in Miles',
+    'In-Vehicle To Out-Of-Vehicle Ratio',
+    'Total Wait Duration In Minutes'
+  ];
+  
+  // Filter and sort the data according to the ordered list
+  const orderedData = orderedFrequencyCharts
+    .map(chartName => {
+      // Look for collections that contain the chart name
+      const matchingCollection = Object.keys(data).find(collectionName => {
+        // Try different variations of the collection name
+        const variations = [
+          chartName,
+          `Frequency-${chartName}`,
+          `Frequency ${chartName}`,
+          chartName.replace(/\s+/g, ' ').trim()
+        ];
+        
+        return variations.some(variation => 
+          collectionName === variation || 
+          collectionName.includes(variation) ||
+          variation.includes(collectionName.replace(/^Frequency[- ]*/, ''))
+        );
+      });
+      
+      if (matchingCollection && data[matchingCollection]) {
+        return [matchingCollection, data[matchingCollection]];
+      }
+      return null;
+    })
+    .filter(item => item !== null);
+  
+  // If no ordered data found, fall back to original data
+  const dataToProcess = orderedData.length > 0 ? orderedData : Object.entries(data);
+  
+  dataToProcess.forEach(([collectionName, stateData]) => {
     const wrapper = document.createElement('div');
     wrapper.className = 'chart-wrapper';
+    wrapper.style.marginBottom = '2rem'; // Add gap between charts
+    
+    // Create title with info button
+    const titleContainer = document.createElement('div');
+    titleContainer.style.display = 'flex';
+    titleContainer.style.alignItems = 'center';
+    titleContainer.style.gap = '0.5rem';
+    
     const title = document.createElement('h4');
-    title.textContent = collectionName;
-    wrapper.appendChild(title);
+    // Remove "Frequency-" prefix from title
+    const cleanTitle = collectionName.replace(/^Frequency-\s*/, '');
+    title.textContent = cleanTitle;
+    title.style.margin = '0';
+    
+    // Create info button
+    const infoButton = document.createElement('button');
+    infoButton.className = 'info-button';
+    infoButton.innerHTML = 'i';
+    infoButton.title = 'Click for more information';
+    
+    // Add click handler for info button
+    infoButton.addEventListener('click', () => {
+      // Try to load from frequency_metrics.txt file first, fallback to hardcoded text
+      showInfoPopup(cleanTitle, 'frequency');
+    });
+    
+    titleContainer.appendChild(title);
+    titleContainer.appendChild(infoButton);
+    wrapper.appendChild(titleContainer);
+    
     const chartContainer = document.createElement('div');
     chartContainer.className = 'chart-container';
     const canvas = document.createElement('canvas');
     chartContainer.appendChild(canvas);
     wrapper.appendChild(chartContainer);
     chartsContainer.appendChild(wrapper);
+    
     const chartData = Object.entries(stateData)
       .filter(([key]) => key !== 'title' && key !== '_id')
       .map(([key, value]) => ({
@@ -1145,19 +1971,28 @@ function displayFrequencyDistributions(data) {
       const bNum = parseInt(b.range.match(/\d+/)?.[0] || '0', 10);
       return aNum - bNum;
     });
-    let barColor = '#27ae60';
-    if (collectionName.includes('Transit')) barColor = '#e67e22';
-    else if (collectionName.includes('Population')) barColor = '#2980b9';
-    else if (collectionName.includes('Economic')) barColor = '#e67e22';
+    
+    // Create different colors for each bar
+    const backgroundColor = chartData.map((_, index) => colorPalette[index % colorPalette.length]);
+    const borderColor = backgroundColor;
+    
+    // Determine units for x-axis title
+    let xAxisTitle = 'Range';
+    if (cleanTitle.includes('Minutes') || cleanTitle.includes('Duration')) {
+      xAxisTitle = 'Range (in min)';
+    } else if (cleanTitle.includes('Miles') || cleanTitle.includes('Distance')) {
+      xAxisTitle = 'Range (in miles)';
+    }
+    
     const chart = new Chart(canvas, {
       type: 'bar',
       data: {
         labels: chartData.map(d => d.range),
         datasets: [{
-          label: collectionName,
+          label: cleanTitle,
           data: chartData.map(d => d.count),
-          backgroundColor: barColor,
-          borderColor: barColor,
+          backgroundColor: backgroundColor,
+          borderColor: borderColor,
           borderWidth: 1,
           borderRadius: 4,
           barPercentage: 0.8,
@@ -1168,7 +2003,7 @@ function displayFrequencyDistributions(data) {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'top', labels: { color: chartTextColor } },
+          legend: { display: false }, // Remove legend
           tooltip: {
             callbacks: {
               title: (tooltipItems) => `Range: ${tooltipItems[0].label}`,
@@ -1177,8 +2012,15 @@ function displayFrequencyDistributions(data) {
           }
         },
         scales: {
-          y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: chartTextColor }, ticks: { color: chartTextColor } },
-          x: { title: { display: true, text: 'Range', color: chartTextColor }, ticks: { color: chartTextColor } }
+          y: { 
+            beginAtZero: true, 
+            title: { display: true, text: 'Frequency (Number of addresses)', color: chartTextColor }, 
+            ticks: { color: chartTextColor } 
+          },
+          x: { 
+            title: { display: true, text: xAxisTitle, color: chartTextColor }, 
+            ticks: { color: chartTextColor } 
+          }
         },
         animation: { duration: 1000 }
       }
@@ -1210,6 +2052,12 @@ function fetchCountyData(countyName) {
     .then(data => {
       updateDataPanel();
       displayCountyData(data, originalCountyName);
+      
+      // Fix scrollbar issue: Restore scrollbar functionality after county data is loaded
+      console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from fetchCountyData (delayed)');
+      setTimeout(() => {
+        restoreScrollbarFunctionality();
+      }, 100);
     })
     .catch(err => console.error("Error fetching county data:", err));
 }
@@ -1249,30 +2097,140 @@ function displayCountyData(data, countyName) {
   document.getElementById('countyName').textContent = countyName;
   grid.innerHTML = '';
   if (data.averages) {
-    Object.entries(data.averages).forEach(([key, value]) => {
-      if (key === '_id' || key === 'title') return;
-      const card = document.createElement('div');
-      card.className = 'metric-card';
-      card.innerHTML = `<span class="metric-label">${key}</span><span class="metric-value">${value}</span>`;
-      grid.appendChild(card);
+    // Display metrics in the specified order with Average prefix
+    ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
+      if (data.averages[metricName] !== undefined) {
+        const card = document.createElement('div');
+        card.className = 'metric-card';
+        
+        const label = document.createElement('span');
+        label.className = 'metric-label';
+        // For county, remove "Average" from display but keep it for info lookup
+        const displayName = formatMetricName(metricName.replace('Average ', ''));
+        label.textContent = displayName;
+        
+        const infoButton = createInfoButton(metricName, 'county');
+        label.appendChild(infoButton);
+        
+        const value = document.createElement('span');
+        value.className = 'metric-value';
+        
+        // Check if the value is null, undefined, or empty and replace with NO ACCESS
+        const rawValue = data.averages[metricName];
+        if (rawValue === null || rawValue === undefined || rawValue === '') {
+          value.textContent = 'NO ACCESS';
+        } else {
+          // Special handling for Percent Access in county view - multiply by 100
+          let valueToFormat = rawValue;
+          if (metricName.includes('Percent Access')) {
+            valueToFormat = valueToFormat * 100;
+          }
+          
+          const formattedValue = formatMetricValue(metricName, valueToFormat);
+          value.textContent = formattedValue;
+        }
+        
+        card.appendChild(label);
+        card.appendChild(value);
+        grid.appendChild(card);
+      }
     });
   }
   chartsContainer.innerHTML = '';
   countyCharts.forEach(chart => { if (chart.destroy) chart.destroy(); });
   countyCharts = [];
   if (data.frequencies && Object.keys(data.frequencies).length > 0) {
-    Object.entries(data.frequencies).forEach(([collectionName, freqData]) => {
+    const chartTextColor = getChartTextColor();
+    
+    // Define color palette for different bars
+    const colorPalette = [
+      '#2c41ff', '#e67e22', '#20bf6b', '#f7b731', '#26de81', '#a55eea', 
+      '#0984e3', '#fd9644', '#eb3b5a', '#6c5ce7', '#00b894', '#fdcb6e'
+    ];
+    
+    // Create ordered frequency chart names for county
+    const orderedFrequencyCharts = [
+      'Travel Duration in Minutes',
+      'Initial Walk Duration in Minutes', 
+      'Transit to Driving Ratio',
+      'Transfers',
+      'Initial Walk Distance in Miles',
+      'Initial Wait Time in Minutes',
+      'Out-Of-Vehicle Duration In Minutes',
+      'In-Vehicle Duration in Minutes',
+      'Total Walk Duration in Minutes',
+      'Total Walk Distance in Miles',
+      'In-Vehicle To Out-Of-Vehicle Ratio',
+      'Total Wait Duration In Minutes'
+    ];
+    
+    // Filter and sort the data according to the ordered list
+    const orderedData = orderedFrequencyCharts
+      .map(chartName => {
+        const matchingCollection = Object.keys(data.frequencies).find(collectionName => {
+          const variations = [
+            chartName,
+            `Frequency-${chartName}`,
+            `Frequency ${chartName}`,
+            chartName.replace(/\s+/g, ' ').trim()
+          ];
+          
+          return variations.some(variation => 
+            collectionName === variation || 
+            collectionName.includes(variation) ||
+            variation.includes(collectionName.replace(/^Frequency[- ]*/, ''))
+          );
+        });
+        
+        if (matchingCollection && data.frequencies[matchingCollection]) {
+          return [matchingCollection, data.frequencies[matchingCollection]];
+        }
+        return null;
+      })
+      .filter(item => item !== null);
+    
+    // If no ordered data found, fall back to original data
+    const dataToProcess = orderedData.length > 0 ? orderedData : Object.entries(data.frequencies);
+    
+    dataToProcess.forEach(([collectionName, freqData]) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'chart-wrapper';
+      wrapper.style.marginBottom = '2rem'; // Add gap between charts
+      
+      // Create title with info button
+      const titleContainer = document.createElement('div');
+      titleContainer.style.display = 'flex';
+      titleContainer.style.alignItems = 'center';
+      titleContainer.style.gap = '0.5rem';
+      
       const title = document.createElement('h4');
-      title.textContent = collectionName;
-      wrapper.appendChild(title);
+      // Remove "Frequency-" prefix from title
+      const cleanTitle = collectionName.replace(/^Frequency-\s*/, '');
+      title.textContent = cleanTitle;
+      title.style.margin = '0';
+      
+      // Create info button
+      const infoButton = document.createElement('button');
+      infoButton.className = 'info-button';
+      infoButton.innerHTML = 'i';
+      infoButton.title = 'Click for more information';
+      
+      // Add click handler for info button
+      infoButton.addEventListener('click', () => {
+        showInfoPopup(cleanTitle, 'county_frequency');
+      });
+      
+      titleContainer.appendChild(title);
+      titleContainer.appendChild(infoButton);
+      wrapper.appendChild(titleContainer);
+      
       const chartContainer = document.createElement('div');
       chartContainer.className = 'chart-container';
       const canvas = document.createElement('canvas');
       chartContainer.appendChild(canvas);
       wrapper.appendChild(chartContainer);
       chartsContainer.appendChild(wrapper);
+      
       const chartData = Object.entries(freqData)
         .filter(([key]) => key !== 'title' && key !== '_id')
         .map(([key, value]) => ({
@@ -1284,20 +2242,28 @@ function displayCountyData(data, countyName) {
         const bNum = parseInt(b.range.match(/\d+/)?.[0] || '0', 10);
         return aNum - bNum;
       });
-      const chartTextColor = getChartTextColor();
-      let barColor = '#27ae60';
-      if (collectionName.includes('Transit')) barColor = '#e67e22';
-      else if (collectionName.includes('Population')) barColor = '#2980b9';
-      else if (collectionName.includes('Economic')) barColor = '#e67e22';
+      
+      // Create different colors for each bar
+      const backgroundColor = chartData.map((_, index) => colorPalette[index % colorPalette.length]);
+      const borderColor = backgroundColor;
+      
+      // Determine units for x-axis title
+      let xAxisTitle = 'Range';
+      if (cleanTitle.includes('Minutes') || cleanTitle.includes('Duration')) {
+        xAxisTitle = 'Range (in min)';
+      } else if (cleanTitle.includes('Miles') || cleanTitle.includes('Distance')) {
+        xAxisTitle = 'Range (in miles)';
+      }
+      
       const chart = new Chart(canvas, {
         type: 'bar',
         data: {
           labels: chartData.map(d => d.range),
           datasets: [{
-            label: collectionName,
+            label: cleanTitle,
             data: chartData.map(d => d.count),
-            backgroundColor: barColor,
-            borderColor: barColor,
+            backgroundColor: backgroundColor,
+            borderColor: borderColor,
             borderWidth: 1,
             borderRadius: 4,
             barPercentage: 0.8,
@@ -1308,7 +2274,7 @@ function displayCountyData(data, countyName) {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'top', labels: { color: chartTextColor } },
+            legend: { display: false }, // Remove legend
             tooltip: {
               callbacks: {
                 title: (tooltipItems) => `Range: ${tooltipItems[0].label}`,
@@ -1317,8 +2283,15 @@ function displayCountyData(data, countyName) {
             }
           },
           scales: {
-            y: { beginAtZero: true, title: { display: true, text: 'Frequency', color: chartTextColor }, ticks: { color: chartTextColor } },
-            x: { title: { display: true, text: 'Range', color: chartTextColor }, ticks: { color: chartTextColor } }
+            y: { 
+              beginAtZero: true, 
+              title: { display: true, text: 'Frequency (Number of addresses)', color: chartTextColor }, 
+              ticks: { color: chartTextColor } 
+            },
+            x: { 
+              title: { display: true, text: xAxisTitle, color: chartTextColor }, 
+              ticks: { color: chartTextColor } 
+            }
           },
           animation: { duration: 1000 }
         }
@@ -1381,14 +2354,87 @@ function createCountyTopBottomChart() {
 function populateCountyMetricSelect(availableMetrics) {
   const select = document.getElementById('countyMetricSelect');
   select.innerHTML = '';
-  availableMetrics.forEach(metric => {
-    const option = document.createElement('option');
-    option.value = metric;
-    option.textContent = metric;
-    select.appendChild(option);
+  
+  // Use ordered metrics with Average prefix for county data
+  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
+    // Check if this metric exists in the available metrics
+    if (availableMetrics.includes(metricName)) {
+      const option = document.createElement('option');
+      option.value = metricName;
+      option.textContent = metricName;
+      select.appendChild(option);
+    }
   });
+  
+  // Set default to "Percent Access" if available, otherwise first option
+  if (select.options.length > 0) {
+    const percentAccessOption = Array.from(select.options).find(option => 
+      option.value === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
+    );
+    if (percentAccessOption) {
+      select.value = percentAccessOption.value;
+      selectedCountyMetric = percentAccessOption.value;
+    } else {
+      select.value = select.options[0].value;
+      selectedCountyMetric = select.options[0].value;
+    }
+  }
+  
   select.removeEventListener('change', countyHandleMetricChange);
   select.addEventListener('change', countyHandleMetricChange);
+  
+  // Add info button for county map metrics
+  addInfoButtonToCountyMetricSelection('county_map');
+}
+
+function addInfoButtonToCountyMetricSelection(mapType) {
+  const countyMetricSelection = document.getElementById('countyMetricSelection');
+  if (!countyMetricSelection) return;
+  
+  // Remove existing info button if it exists
+  const existingInfoBtn = countyMetricSelection.querySelector('.county-metric-info-btn');
+  if (existingInfoBtn) {
+    existingInfoBtn.remove();
+  }
+  
+  // Create info button
+  const infoBtn = document.createElement('button');
+  infoBtn.className = 'county-metric-info-btn';
+  infoBtn.innerHTML = '<i class="fas fa-info-circle"></i>';
+  infoBtn.title = 'Click for metric information';
+  infoBtn.style.cssText = `
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  `;
+  
+  infoBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const currentMetric = document.getElementById('countyMetricSelect').value;
+    if (currentMetric) {
+      // For county metrics, we need to remove "Average" prefix for display
+      const displayName = currentMetric.replace('Average ', '');
+      showInfoPopup(displayName, mapType);
+    } else {
+      showInfoPopup('Select a metric first', 'Please select a metric from the dropdown to view its information.');
+    }
+  });
+  
+  // Add the button to the county metric selection container
+  countyMetricSelection.style.position = 'relative';
+  countyMetricSelection.appendChild(infoBtn);
 }
 
 function countyHandleMetricChange(event) {
@@ -1437,7 +2483,13 @@ function updateCountyMapColors() {
           nullCount++;
           console.log(`${countyName}: NULL (zero value indicates null)`);
         } else {
-          const formattedValue = formatNumberToTwoDecimals(rawValue);
+          // Special handling for Percent Access in county data - multiply by 100
+          let valueToProcess = rawValue;
+          if (selectedCountyMetric.includes('Percent Access')) {
+            valueToProcess = valueToProcess * 100;
+          }
+          
+          const formattedValue = formatNumberToTwoDecimals(valueToProcess);
           metricValues[normalizedCountyName] = formattedValue;
           validValues.push(formattedValue);
           console.log(`${countyName}: ${formattedValue}`);
@@ -1453,7 +2505,13 @@ function updateCountyMapColors() {
           nullCount++;
           console.log(`${countyName}: NULL (zero string value)`);
         } else {
-          const formattedValue = formatNumberToTwoDecimals(parsed);
+          // Special handling for Percent Access in county data - multiply by 100
+          let valueToProcess = parsed;
+          if (selectedCountyMetric.includes('Percent Access')) {
+            valueToProcess = valueToProcess * 100;
+          }
+          
+          const formattedValue = formatNumberToTwoDecimals(valueToProcess);
           metricValues[normalizedCountyName] = formattedValue;
           validValues.push(formattedValue);
           console.log(`${countyName}: ${formattedValue}`);
@@ -1477,11 +2535,14 @@ function updateCountyMapColors() {
     // All valid values are the same
     colorScale = () => '#27ae60';
   } else {
-    const minVal = Math.min(...validValues);
-    const maxVal = Math.max(...validValues);
-    colorScale = d3.scaleQuantize()
-      .domain([minVal, maxVal])
-      .range(['#27ae60', '#e67e22', '#e74c3c']);
+    // Use natural breaks for better categorization
+    const breaks = naturalBreaks(validValues, 3);
+    const isHighGood = METRIC_COLOR_LOGIC[selectedCountyMetric] === 'high_is_good';
+    const colors = getColorScheme(selectedCountyMetric, isHighGood);
+    
+    colorScale = d3.scaleThreshold()
+      .domain(breaks)
+      .range(colors);
   }
   
   // Update county colors
@@ -1558,11 +2619,14 @@ function updateCountyMapColors() {
 }
 
 function createCountyLegendForMap() {
+  console.log('createCountyLegendForMap called');
   const legend = document.getElementById('legend');
+  console.log('County legend element found:', legend);
   const colorScale = countyMap?.colorScale;
   const validValues = countyMap?.validValues || [];
   const hasNullValues = countyMap?.hasNullValues || false;
   const hasNAValues = countyMap?.hasNAValues || false;
+  console.log('County legend data:', { validValues: validValues.length, hasNullValues, hasNAValues });
   
   if (!selectedCountyMetric) {
     legend.innerHTML = `<h3>Select a metric</h3>`;
@@ -1595,45 +2659,67 @@ function createCountyLegendForMap() {
     
     legendContent += `</div>`;
   } else {
-    // Has valid numeric data
-    const minVal = Math.min(...validValues);
-    const maxVal = Math.max(...validValues);
+    // Use natural breaks for county legend
+    const breaks = naturalBreaks(validValues, 3);
+    const isHighGood = METRIC_COLOR_LOGIC[selectedCountyMetric] === 'high_is_good';
+    const colors = getColorScheme(selectedCountyMetric, isHighGood);
     
     legendContent += `<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">`;
     
-    if (minVal === maxVal) {
+    if (breaks.length === 0 || validValues.length === 1) {
       // All valid values are the same
       legendContent += `
         <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: #27ae60;"></div> 
-          <span>${minVal.toFixed(2)}</span>
+          <div style="width: 20px; height: 20px; background: ${colors[0]};"></div> 
+          <span>${validValues[0].toFixed(2)}</span>
         </div>
       `;
     } else {
-      // Range of values
-      const midVal = (minVal + maxVal) / 2;
-      legendContent += `
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: ${colorScale(minVal)};"></div> 
-          <span>${minVal.toFixed(2)}</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: ${colorScale(midVal)};"></div> 
-          <span>${midVal.toFixed(2)}</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: ${colorScale(maxVal)};"></div> 
-          <span>${maxVal.toFixed(2)}</span>
-        </div>
-      `;
+      // Create ranges based on natural breaks
+      const ranges = [];
+      
+      // Get actual min and max values for better display
+      const allValues = [...validValues];
+      const actualMin = Math.min(...allValues);
+      const actualMax = Math.max(...allValues);
+      
+      // Create ranges based on breaks
+      if (breaks.length === 1) {
+        ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
+        ranges.push({ min: breaks[0], max: actualMax, color: colors[1] });
+      } else if (breaks.length === 2) {
+        ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
+        ranges.push({ min: breaks[0], max: breaks[1], color: colors[1] });
+        ranges.push({ min: breaks[1], max: actualMax, color: colors[2] });
+      } else {
+        // Handle more than 2 breaks
+        ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
+        for (let i = 0; i < breaks.length - 1; i++) {
+          ranges.push({ min: breaks[i], max: breaks[i + 1], color: colors[i + 1] });
+        }
+        ranges.push({ min: breaks[breaks.length - 1], max: actualMax, color: colors[colors.length - 1] });
+      }
+      
+      ranges.forEach(range => {
+        const rangeText = range.max === actualMax ? 
+          `${range.min.toFixed(2)} - ${range.max.toFixed(2)}` : 
+          `${range.min.toFixed(2)} - ${range.max.toFixed(2)}`;
+        
+        legendContent += `
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <div style="width: 20px; height: 20px; background: ${range.color};"></div> 
+            <span>${rangeText}</span>
+          </div>
+        `;
+      });
     }
     
-    // Add NULL legend if present
+    // Add No Access legend if present
     if (hasNullValues) {
       legendContent += `
         <div style="display: flex; align-items: center; gap: 5px;">
           <div style="width: 20px; height: 20px; background: #000000; border: 1px solid #ccc;"></div> 
-          <span>NULL</span>
+          <span>No Access</span>
         </div>
       `;
     }
@@ -1651,16 +2737,116 @@ function createCountyLegendForMap() {
     legendContent += `</div>`;
   }
   
+  console.log('Setting county legend content:', legendContent);
   legend.innerHTML = legendContent;
+  console.log('County legend updated successfully');
 }
+// -----------------------------------------------------------------------------
+// SCROLLBAR RESTORATION FUNCTION
+function restoreScrollbarFunctionality() {
+  console.log('🔧 [SCROLLBAR] Starting scrollbar restoration...');
+  
+  // Get the right panel (data panel) content
+  const dataPanelContent = document.getElementById('dataPanelContent');
+  if (!dataPanelContent) {
+    console.log('❌ [SCROLLBAR] dataPanelContent not found!');
+    return;
+  }
+  
+  console.log('✅ [SCROLLBAR] dataPanelContent found:', dataPanelContent);
+  console.log('📊 [SCROLLBAR] Current scrollHeight:', dataPanelContent.scrollHeight);
+  console.log('📊 [SCROLLBAR] Current clientHeight:', dataPanelContent.clientHeight);
+  console.log('📊 [SCROLLBAR] Current overflowY:', dataPanelContent.style.overflowY);
+  console.log('📊 [SCROLLBAR] Current computed overflowY:', getComputedStyle(dataPanelContent).overflowY);
+  
+  // Get the parent sidebar container
+  const rightPanel = document.getElementById('rightPanel');
+  if (rightPanel) {
+    console.log('📊 [SCROLLBAR] rightPanel scrollHeight:', rightPanel.scrollHeight);
+    console.log('📊 [SCROLLBAR] rightPanel clientHeight:', rightPanel.clientHeight);
+    console.log('📊 [SCROLLBAR] rightPanel computed height:', getComputedStyle(rightPanel).height);
+  }
+  
+  // Force the sidebar content to have a constrained height
+  const viewportHeight = window.innerHeight;
+  const navbarHeight = 80; // Approximate navbar height
+  const availableHeight = viewportHeight - navbarHeight;
+  
+  console.log('📏 [SCROLLBAR] Viewport height:', viewportHeight);
+  console.log('📏 [SCROLLBAR] Available height for sidebar:', availableHeight);
+  
+  // Set explicit height constraint on the sidebar content
+  dataPanelContent.style.maxHeight = `${availableHeight - 100}px`; // Leave some padding
+  dataPanelContent.style.overflowY = 'auto';
+  dataPanelContent.style.scrollbarWidth = 'thin';
+  dataPanelContent.style.scrollbarColor = 'var(--text-light) transparent';
+  
+  console.log('🔧 [SCROLLBAR] Set maxHeight to:', dataPanelContent.style.maxHeight);
+  console.log('🔧 [SCROLLBAR] Set overflowY to:', dataPanelContent.style.overflowY);
+  
+  // Force a reflow to ensure the scrollbar is properly rendered
+  const height = dataPanelContent.offsetHeight;
+  console.log('🔄 [SCROLLBAR] Forced reflow, height:', height);
+  
+  // Also ensure the sidebar container has proper scrollbar settings
+  if (rightPanel) {
+    console.log('✅ [SCROLLBAR] rightPanel found:', rightPanel);
+    rightPanel.style.overflowY = '';
+    rightPanel.style.scrollbarWidth = '';
+    rightPanel.style.scrollbarColor = '';
+    console.log('🧹 [SCROLLBAR] Cleared rightPanel inline styles');
+  } else {
+    console.log('❌ [SCROLLBAR] rightPanel not found!');
+  }
+  
+  // Small delay to ensure DOM is fully updated
+  setTimeout(() => {
+    console.log('⏰ [SCROLLBAR] Delayed restoration (10ms later)...');
+    // Trigger a reflow again to ensure scrollbar is rendered
+    const finalHeight = dataPanelContent.offsetHeight;
+    console.log('🔄 [SCROLLBAR] Final reflow, height:', finalHeight);
+    console.log('📊 [SCROLLBAR] Final scrollHeight:', dataPanelContent.scrollHeight);
+    console.log('📊 [SCROLLBAR] Final clientHeight:', dataPanelContent.clientHeight);
+    console.log('📊 [SCROLLBAR] Final computed overflowY:', getComputedStyle(dataPanelContent).overflowY);
+    console.log('📊 [SCROLLBAR] Can scroll?', dataPanelContent.scrollHeight > dataPanelContent.clientHeight);
+    console.log('📊 [SCROLLBAR] Max height set to:', dataPanelContent.style.maxHeight);
+    console.log('✅ [SCROLLBAR] Scrollbar restoration completed');
+  }, 10);
+}
+
 // -----------------------------------------------------------------------------
 // EQUITY COMPARISON FUNCTIONS
 function switchToMapView() {
+  console.log('🗺️ [NAV] switchToMapView called');
   document.getElementById('mapView').style.display = 'block';
   document.getElementById('legend').style.display = 'block';
   document.getElementById('equityComparisonContent').style.display = 'none';
   document.getElementById('mapViewTab').classList.add('active');
   document.getElementById('equityComparisonTab').classList.remove('active');
+  
+  // Restore both sidebars
+  document.getElementById('leftPanel').style.display = 'block';
+  document.getElementById('rightPanel').style.display = 'block';
+  console.log('📱 [NAV] Sidebars restored to display: block');
+  
+  // Show compare counties tab
+  const compareBtn = document.getElementById('compareStatesButton');
+  if (compareBtn) {
+    compareBtn.style.display = 'block';
+  }
+  
+  // Restore main content layout
+  const mainContent = document.querySelector('.main-content');
+  if (mainContent) {
+    mainContent.style.marginLeft = '';
+    mainContent.style.marginRight = '';
+    mainContent.style.width = '';
+    mainContent.classList.remove('equity-comparison-active');
+  }
+  
+  // Fix scrollbar issue: Restore scrollbar functionality after sidebar visibility changes
+  console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from switchToMapView');
+  restoreScrollbarFunctionality();
 }
 
 function switchToEquityComparison() {
@@ -1668,11 +2854,41 @@ function switchToEquityComparison() {
     return;
   }
   loadComparisonData();
+  
+  // Hide map and legend
   document.getElementById('mapView').style.display = 'none';
   document.getElementById('legend').style.display = 'none';
+  
+  // Show equity comparison content
   document.getElementById('equityComparisonContent').style.display = 'block';
   document.getElementById('equityComparisonTab').classList.add('active');
   document.getElementById('mapViewTab').classList.remove('active');
+  
+  // Update state title
+  const stateTitle = document.getElementById('equityStateTitle');
+  if (stateTitle && statesData[selectedState]) {
+    stateTitle.textContent = `Equity Analysis - ${statesData[selectedState].name}`;
+  }
+  
+  // Hide both sidebars
+  document.getElementById('leftPanel').style.display = 'none';
+  document.getElementById('rightPanel').style.display = 'none';
+  
+  // Hide compare counties tab
+  const compareBtn = document.getElementById('compareStatesButton');
+  if (compareBtn) {
+    compareBtn.style.display = 'none';
+  }
+  
+  // Expand main content to full width and add viewport constraint
+  const mainContent = document.querySelector('.main-content');
+  if (mainContent) {
+    mainContent.style.marginLeft = '0';
+    mainContent.style.marginRight = '0';
+    mainContent.style.width = '100%';
+    mainContent.classList.add('equity-comparison-active');
+  }
+  
   setTimeout(createComparisonScatterPlotFull, 500);
 }
 
@@ -1793,15 +3009,23 @@ function populateTransitMetricDropdown() {
   
   console.log("Populating transit metrics:", transitMetricKeys);
   
-  transitMetricKeys.forEach(metric => {
-    const option = document.createElement('option');
-    option.value = metric;
-    option.textContent = metric;
-    select.appendChild(option);
+  // Use ordered metrics with Average prefix for equity comparison
+  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
+    // Check if this metric exists in the available metrics
+    if (transitMetricKeys.includes(metricName)) {
+      const option = document.createElement('option');
+      option.value = metricName;
+      option.textContent = metricName;
+      select.appendChild(option);
+    }
   });
   
   if (select.options.length > 0) {
-    select.value = select.options[0].value;
+    // Set default to "Percent Access" if available, otherwise first option
+    const percentAccessOption = Array.from(select.options).find(option => 
+      option.value === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
+    );
+    select.value = percentAccessOption ? percentAccessOption.value : select.options[0].value;
     selectedCountyMetric = select.value;
     
     console.log("Default transit metric selected:", selectedCountyMetric);
@@ -1949,15 +3173,26 @@ function createComparisonScatterPlotFull() {
     ];
   }
   
+  // Generate colors for each data point
+  const colors = generateScatterColors(dataPoints.length);
+  
   comparisonChart = new Chart(ctx, {
     type: 'scatter',
     data: {
       datasets: [
         {
           label: 'Data Points',
-          data: dataPoints,
-          backgroundColor: '#2980b9',
-          pointRadius: 5
+          data: dataPoints.map((point, index) => ({
+            ...point,
+            backgroundColor: colors[index % colors.length],
+            borderColor: colors[index % colors.length]
+          })),
+          backgroundColor: colors,
+          borderColor: colors,
+          pointRadius: 8,
+          pointHoverRadius: 12,
+          pointBorderWidth: 2,
+          pointBorderColor: '#fff'
         },
         {
           type: 'line',
@@ -1965,7 +3200,7 @@ function createComparisonScatterPlotFull() {
           data: regressionData,
           fill: false,
           borderColor: '#e74c3c',
-          borderWidth: 2,
+          borderWidth: 3,
           pointRadius: 0
         }
       ]
@@ -1973,24 +3208,48 @@ function createComparisonScatterPlotFull() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: {
+        padding: {
+          top: 10,
+          bottom: 10,
+          left: 10,
+          right: 10
+        }
+      },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            title: function(context) {
+              const point = context[0].raw;
+              return point.label || 'County';
+            },
+            label: function(context) {
+              const point = context.raw;
+              return `${point.label || 'County'} (${point.x.toFixed(2)}, ${point.y.toFixed(2)})`;
+            }
+          }
+        }
+      },
       scales: {
         x: { 
           title: { 
             display: true, 
             text: `Equity: ${equityMetric}`, 
-            color: getChartTextColor() 
+            color: getChartTextColor(),
+            font: { size: 14, weight: 'bold' }
           }, 
           beginAtZero: true, 
-          ticks: { color: getChartTextColor() } 
+          ticks: { color: getChartTextColor(), font: { size: 12 } }
         },
         y: { 
           title: { 
             display: true, 
             text: `Transit: ${transitMetric}`, 
-            color: getChartTextColor() 
+            color: getChartTextColor(),
+            font: { size: 14, weight: 'bold' }
           }, 
           beginAtZero: true, 
-          ticks: { color: getChartTextColor() } 
+          ticks: { color: getChartTextColor(), font: { size: 12 } }
         }
       }
     }
@@ -2660,7 +3919,7 @@ function renderDotplotChartInModal(container) {
   let html = `
     <div style="display: flex; height: 100vh; width: 100vw; background: white;">
       <!-- Left Sidebar for Categories -->
-      <div style="width: 280px; background: #f8f9fa; border-right: 1px solid #ddd; overflow-y: auto; flex-shrink: 0;">
+      <div style="width: 280px; background: #f8f9fa; border-right: 1px solid #ddd; overflow: hidden; flex-shrink: 0;">
         <div style="padding: 20px; border-bottom: 1px solid #ddd; background: #e9ecef;">
           <h3 style="margin: 0; font-weight: bold; color: #333;">Chart Comparison</h3>
           <button onclick="document.getElementById('fullScreenChartContainer').remove(); document.body.style.overflow = 'auto';" 
@@ -2694,15 +3953,6 @@ function renderDotplotChartInModal(container) {
           `).join('')}
         </div>
         
-        <!-- Legend Section -->
-        <div style="padding: 15px; border-top: 1px solid #ddd; margin-top: 15px;">
-          <div style="font-size: 12px; font-weight: bold; color: #666; margin-bottom: 12px; text-transform: uppercase;">
-            Metrics (${tabData[selectedMetricIndexes[dotplotTab]]?.metrics?.length || 0})
-          </div>
-          <div id="legendContainer" style="max-height: 400px; overflow-y: auto;">
-            <!-- Legends will be populated here -->
-          </div>
-        </div>
       </div>
       
       <!-- Main Chart Area - FULL SIZE -->
@@ -2803,79 +4053,18 @@ function renderDotplotChartInModal(container) {
     });
   });
 
-  // Populate legends and render chart
-  populateLegendsAndRenderChart();
+  // Initialize selected legends and render chart
+  const metric = dotplotData[dotplotTab][selectedMetricIndexes[dotplotTab]];
+  if (metric && metric.metrics) {
+    const allLegends = metric.metrics.map(m => m.legend);
+    if (!selectedLegends[dotplotTab] || selectedLegends[dotplotTab].length === 0) {
+      selectedLegends[dotplotTab] = [...allLegends]; // Select ALL legends by default
+    }
+    // Render the chart
+    setTimeout(() => renderD3DotplotInModal(metric, selectedLegends[dotplotTab]), 100);
+  }
 }
 
-function populateLegendsAndRenderChart() {
-  const metric = dotplotData[dotplotTab][selectedMetricIndexes[dotplotTab]];
-  if (!metric || !metric.metrics) return;
-  
-  const legendContainer = document.getElementById('legendContainer');
-  const allLegends = metric.metrics.map(m => m.legend);
-  
-  // Initialize selected legends - SELECT ALL BY DEFAULT
-  if (!selectedLegends[dotplotTab] || selectedLegends[dotplotTab].length === 0) {
-    selectedLegends[dotplotTab] = [...allLegends]; // Select ALL legends by default
-  }
-  
-  // Generate different shapes for legends
-  const shapes = ['square', 'circle', 'triangle', 'diamond', 'star'];
-  const colors = d3.schemeCategory10;
-  
-  let legendHtml = '';
-  allLegends.forEach((legend, i) => {
-    const isSelected = selectedLegends[dotplotTab].includes(legend);
-    const color = colors[i % colors.length];
-    const shape = shapes[i % shapes.length];
-    
-    let shapeIcon = '';
-    switch(shape) {
-      case 'circle':
-        shapeIcon = '●';
-        break;
-      case 'triangle':
-        shapeIcon = '▲';
-        break;
-      case 'diamond':
-        shapeIcon = '♦';
-        break;
-      case 'star':
-        shapeIcon = '★';
-        break;
-      default:
-        shapeIcon = '■';
-    }
-    
-    legendHtml += `
-      <div class="legend-item${isSelected ? ' selected' : ''}" data-legend="${legend}">
-        <span style="color: ${color}; font-size: 16px; margin-right: 10px; font-weight: bold;">${shapeIcon}</span>
-        <span style="flex: 1; line-height: 1.4; font-weight: 600;" title="${legend}">${legend}</span>
-      </div>
-    `;
-  });
-  
-  legendContainer.innerHTML = legendHtml;
-  
-  // Legend selection handlers
-  document.querySelectorAll('.legend-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const legend = item.dataset.legend;
-      const index = selectedLegends[dotplotTab].indexOf(legend);
-      
-      if (index > -1) {
-        selectedLegends[dotplotTab].splice(index, 1);
-      } else {
-        selectedLegends[dotplotTab].push(legend);
-      }
-      
-      populateLegendsAndRenderChart(); // Re-render
-    });
-  });
-  
-  // Render the chart
-  setTimeout(() => renderD3DotplotInModal(metric, selectedLegends[dotplotTab]), 100);
-}
 // D3.js rendering for modal (simplified version)
 // D3.js rendering for modal (simplified version)
 // D3.js rendering for modal (simplified version)
@@ -2926,77 +4115,81 @@ function renderD3DotplotInModal(metric, legendsToShow) {
   const validLegends = legendsToShow && legendsToShow.length > 0 ? 
     legendsToShow : metricsArray.map(m => m.legend).filter(Boolean);
   
-  // Collect all values for analysis
+  // Collect all values for analysis and calculate percentiles
   let allValues = [];
+  const percentileData = [];
+  
   validLegends.forEach((legend) => {
+    // Skip "state" metric
+    if (legend.toLowerCase() === 'state') return;
+    
     const metricData = metricsArray.find(m => m.legend === legend);
     if (!metricData || !metricData.values) return;
     
+    // Get values for this legend
+    const legendValues = [];
     validStates.forEach((state) => {
       const value = metricData.values[state];
       if (value !== null && value !== undefined && !isNaN(Number(value))) {
         const numValue = Number(value);
+        legendValues.push(numValue);
         allValues.push(numValue);
-        data.push({
-          state, 
-          legend, 
-          value: numValue, 
-          lidx: validLegends.indexOf(legend), 
-          sidx: validStates.indexOf(state)
-        });
       }
     });
+    
+    // Calculate percentiles for this legend
+    if (legendValues.length > 0) {
+      const sortedValues = [...legendValues].sort((a, b) => a - b);
+      const min = sortedValues[0];
+      const max = sortedValues[sortedValues.length - 1];
+      
+      validStates.forEach((state) => {
+        const value = metricData.values[state];
+        if (value !== null && value !== undefined && !isNaN(Number(value))) {
+          const numValue = Number(value);
+          const percentile = ((numValue - min) / (max - min)) * 100;
+          
+          percentileData.push({
+            state, 
+            legend, 
+            value: percentile, // Use percentile value instead of actual value
+            originalValue: numValue, // Keep original for tooltip
+            min: min,
+            max: max,
+            lidx: validLegends.indexOf(legend), 
+            sidx: validStates.indexOf(state)
+          });
+        }
+      });
+    }
   });
   
-  if (data.length === 0 || allValues.length === 0) {
+  if (percentileData.length === 0) {
     container.innerHTML = '<div style="text-align: center; padding: 40px; color: #666; font-size: 18px;">No data points for selected legends</div>';
     return;
   }
   
-  // SMART DATA ANALYSIS - Handle extreme outliers
-  allValues.sort((a, b) => a - b);
-  const dataMin = allValues[0];
-  const dataMax = allValues[allValues.length - 1];
+  // Use percentile data instead of absolute values
+  const chartData = percentileData;
   
-  // Calculate percentiles to detect extreme outliers
-  const q25 = d3.quantile(allValues, 0.25);
-  const q75 = d3.quantile(allValues, 0.75);
-  const q95 = d3.quantile(allValues, 0.95);
-  const iqr = q75 - q25;
+  // For percentile scale, we always use 0-100%
+  const displayMin = 0;
+  const displayMax = 100;
   
-  console.log(`[CHART] Data analysis: Min=${dataMin}, Q25=${q25}, Q75=${q75}, Q95=${q95}, Max=${dataMax}`);
+  console.log(`[CHART] Using actual values scale`);
   
-  // If max is way larger than 95th percentile, focus on the main data range
-  const extremeOutlierThreshold = q95 + (iqr * 3);
-  const hasExtremeOutliers = dataMax > extremeOutlierThreshold;
-  
-  let displayMin, displayMax;
-  
-  if (hasExtremeOutliers) {
-    // Focus on the main data range (up to 95th percentile) + some padding
-    displayMin = Math.min(dataMin, q25 - iqr * 0.5);
-    displayMax = q95 + (iqr * 0.5);
-    console.log(`[CHART] Extreme outliers detected. Focusing on range: ${displayMin} to ${displayMax}`);
-  } else {
-    // Normal case: use full range with 10% padding
-    const range = dataMax - dataMin;
-    const padding = range * 0.1;
-    displayMin = dataMin - padding;
-    displayMax = dataMax + padding;
-  }
-  
-  // Calculate chart dimensions - FIX: Use container dimensions properly
+  // Calculate chart dimensions - More adaptive sizing
   const containerRect = container.getBoundingClientRect();
-  const containerWidth = containerRect.width || 900;
-  const containerHeight = containerRect.height || 600;
+  const chartContainerWidth = Math.max(containerRect.width || 900, 800); // Minimum width
+  const chartContainerHeight = Math.max(containerRect.height || 600, 400); // Minimum height
   
-  // Use container dimensions directly instead of calculating extreme width
-  const chartWidth = containerWidth - 40; // Small margin
-  const chartHeight = containerHeight - 120; // Leave space for HTML legend
+  // Use container dimensions with better margins and centering
+  const chartWidth = Math.min(chartContainerWidth - 100, 1000); // More margin for centering
+  const chartHeight = Math.min(chartContainerHeight - 160, 600); // More margin for centering
   
-  console.log(`[CHART] Chart dimensions: ${chartWidth}x${chartHeight} (container: ${containerWidth}x${containerHeight})`);
+  console.log(`[CHART] Chart dimensions: ${chartWidth}x${chartHeight} (container: ${chartContainerWidth}x${chartContainerHeight})`);
   
-  const margin = {top: 60, right: 80, bottom: 80, left: 200};
+  const chartMargin = {top: 60, right: 80, bottom: 80, left: 200};
   
   // Color scale - Using more distinct colors
   const colors = ['#2c41ff', '#e74c3c', '#27ae60', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e', '#e91e63', '#00bcd4'];
@@ -3004,11 +4197,12 @@ function renderD3DotplotInModal(metric, legendsToShow) {
     .domain(validLegends)
     .range(colors);
   
-  // CREATE HTML LEGEND FIRST - FIXED WIDTH CONTAINER
+  // CREATE LEGEND FIRST
   const legendContainer = document.createElement('div');
+  legendContainer.className = 'legend-container';
   legendContainer.style.cssText = `
     width: 100%;
-    max-width: ${containerWidth}px;
+    max-width: ${chartContainerWidth}px;
     height: 100px;
     overflow-x: auto;
     overflow-y: hidden;
@@ -3021,27 +4215,31 @@ function renderD3DotplotInModal(metric, legendsToShow) {
     -webkit-overflow-scrolling: touch;
   `;
   
+  // Get ALL legends (not just selected ones) for the legend display
+  const allLegends = metric.metrics.map(m => m.legend).filter(legend => legend.toLowerCase() !== 'state');
+  
   // Calculate total width needed for all legend items
   const estimatedItemWidth = 250;
-  const totalContentWidth = validLegends.length * estimatedItemWidth;
+  const totalContentWidth = allLegends.length * estimatedItemWidth;
   
   const legendContent = document.createElement('div');
   legendContent.style.cssText = `
     display: flex;
     flex-wrap: nowrap;
     align-items: flex-start;
-    width: ${Math.max(totalContentWidth, containerWidth)}px;
+    width: ${Math.max(totalContentWidth, chartContainerWidth)}px;
     height: 80px;
     gap: 15px;
   `;
   
-  // Add legend items in a single row
-  validLegends.forEach((legend, i) => {
+  // Add legend items
+  allLegends.forEach((legend, i) => {
     const legendIndex = i;
     const useTriangle = legendIndex % 2 === 1;
     const legendColor = color(legend);
     
     const legendItem = document.createElement('div');
+    const isSelected = selectedLegends[dotplotTab] && selectedLegends[dotplotTab].includes(legend);
     legendItem.style.cssText = `
       display: flex;
       align-items: center;
@@ -3051,9 +4249,13 @@ function renderD3DotplotInModal(metric, legendsToShow) {
       max-width: 300px;
       padding: 5px 10px;
       background: #f9f9f9;
+      color: #333;
       border-radius: 15px;
-      border: 1px solid #e0e0e0;
+      border: 2px solid ${isSelected ? '#007bff' : '#e0e0e0'};
+      cursor: pointer;
+      transition: all 0.2s ease;
     `;
+    legendItem.dataset.legend = legend;
     
     // Create SVG for the symbol
     const symbolSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -3097,229 +4299,291 @@ function renderD3DotplotInModal(metric, legendsToShow) {
     
     legendItem.appendChild(symbolSvg);
     legendItem.appendChild(textSpan);
+    
+    // Add click handler for legend item
+    legendItem.addEventListener('click', function() {
+      const legend = this.dataset.legend;
+      const index = selectedLegends[dotplotTab].indexOf(legend);
+      
+      if (index > -1) {
+        // Remove from selected
+        selectedLegends[dotplotTab].splice(index, 1);
+        this.style.border = '2px solid #e0e0e0';
+      } else {
+        // Add to selected
+        selectedLegends[dotplotTab].push(legend);
+        this.style.border = '2px solid #007bff';
+      }
+      
+      // Preserve scroll position and re-render chart
+      const scrollTop = legendContainer.scrollTop;
+      setTimeout(() => {
+        renderD3DotplotInModal(metric, selectedLegends[dotplotTab]);
+        setTimeout(() => {
+          const newLegendContainer = document.querySelector('.legend-container');
+          if (newLegendContainer) {
+            newLegendContainer.scrollTop = scrollTop;
+          }
+        }, 50);
+      }, 100);
+    });
+    
     legendContent.appendChild(legendItem);
   });
   
   legendContainer.appendChild(legendContent);
   container.appendChild(legendContainer);
   
-  // Create chart container that fits within the available space
-  const chartContainer = d3.select(container)
-    .append('div')
-    .style('width', '100%')
-    .style('height', `${chartHeight}px`)
-    .style('overflow', 'hidden') // NO scrolling for chart container
-    .style('border', '1px solid #ddd')
-    .style('border-radius', '8px');
+  // CREATE MULTIPLE GRAPHS BASED ON PERCENTILE RANGES
+  const selectedLegendsList = selectedLegends[dotplotTab] || [];
+  if (selectedLegendsList.length === 0) {
+    container.innerHTML = '<div style="text-align: center; padding: 40px; color: #666; font-size: 18px;">No metrics selected</div>';
+    return;
+  }
   
-  // Create SVG that fits exactly in the container
-  const svg = chartContainer
+  // Calculate percentile ranges for multiple graphs
+  const percentileRanges = [
+    { min: 0, max: 33, label: 'Low Percentile (0-33%)', color: '#e74c3c' },
+    { min: 33, max: 66, label: 'Medium Percentile (33-66%)', color: '#f39c12' },
+    { min: 66, max: 100, label: 'High Percentile (66-100%)', color: '#27ae60' }
+  ];
+  
+  // Create single chart container
+  const chartContainer = document.createElement('div');
+  chartContainer.style.cssText = `
+    width: 95vw;
+    height: 70vh;
+    max-width: 1200px;
+    max-height: 500px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    position: relative;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin: 20px auto;
+    display: block;
+    overflow: hidden;
+  `;
+  
+  // Create chart area with proper boundaries
+  const chartArea = document.createElement('div');
+  chartArea.style.cssText = `
+    width: 100%;
+    height: 100%;
+    padding: 15px;
+    box-sizing: border-box;
+    background: white;
+    position: absolute;
+    top: 0;
+    left: 0;
+  `;
+  chartContainer.appendChild(chartArea);
+    
+  // Create SVG for this graph with responsive dimensions
+  const svg = d3.select(chartArea)
     .append('svg')
-    .attr('width', chartWidth)
-    .attr('height', chartHeight)
-    .style('background', '#ffffff')
+    .attr('width', '100%')
+    .attr('height', '100%')
     .style('display', 'block');
   
-  // Rest of the chart code remains the same...
-  // [Continue with tooltip, scales, grid lines, etc. as in original function]
+  // Calculate dimensions for this graph - ensure it fits within the container
+  const containerWidth = chartArea.offsetWidth || 1000;
+  const containerHeight = chartArea.offsetHeight || 400;
+  const graphWidth = Math.min(containerWidth, 1100);
+  const graphHeight = Math.min(containerHeight, 400);
+  const graphMargin = { top: 25, right: 40, bottom: 50, left: 120 };
   
-  // Create tooltip
-  const tooltip = d3.select('body').append('div')
-    .attr('class', 'chart-tooltip')
-    .style('position', 'fixed')
-    .style('visibility', 'hidden')
-    .style('background', 'rgba(0,0,0,0.9)')
-    .style('color', 'white')
-    .style('padding', '12px 16px')
-    .style('border-radius', '8px')
-    .style('font-size', '14px')
-    .style('font-weight', 'bold')
-    .style('pointer-events', 'none')
-    .style('z-index', '10001')
-    .style('box-shadow', '0 4px 15px rgba(0,0,0,0.3)')
-    .style('max-width', '250px');
+  // Use all data for the single chart
+  const graphData = chartData;
   
-  // SCALES using focused range
-  const y = d3.scaleBand()
-    .domain(validStates)
-    .range([margin.top, chartHeight - margin.bottom])
+  // Get unique states for this graph
+  const graphStates = [...new Set(graphData.map(d => d.state))];
+  
+  // Create scales for this graph - use actual values with padding
+  const actualValues = graphData.map(d => d.originalValue);
+  const minValue = d3.min(actualValues);
+  const maxValue = d3.max(actualValues);
+  
+  // Add padding to x-axis (only positive padding, no negative values)
+  const valueRange = maxValue - minValue;
+  const paddingAmount = valueRange * 0.05; // 5% padding
+  const paddedMin = Math.max(0, minValue - paddingAmount); // Ensure no negative values
+  const paddedMax = maxValue + paddingAmount;
+  
+  const xScale = d3.scaleLinear()
+    .domain([paddedMin, paddedMax])
+    .range([0, graphWidth - graphMargin.left - graphMargin.right]);
+    
+  const yScale = d3.scaleBand()
+    .domain(graphStates)
+    .range([0, graphHeight - graphMargin.top - graphMargin.bottom])
     .padding(0.3);
   
-  const x = d3.scaleLinear()
-    .domain([displayMin, displayMax])
-    .range([margin.left, chartWidth - margin.right]);
-  
-  // Grid lines
-  const gridGroup = svg.append('g').attr('class', 'grid-group');
-  const numGridLines = Math.min(12, Math.max(6, Math.floor(chartWidth / 120)));
-  const xTicks = x.ticks(numGridLines);
-  
-  gridGroup.selectAll('.grid-line-vertical')
-    .data(xTicks)
-    .enter()
-    .append('line')
-    .attr('x1', d => x(d))
-    .attr('x2', d => x(d))
-    .attr('y1', margin.top)
-    .attr('y2', chartHeight - margin.bottom)
-    .attr('stroke', '#f0f0f0')
-    .attr('stroke-width', 1)
-    .style('opacity', 0.7);
-  
-  // State range lines
-  const stateGroup = svg.append('g').attr('class', 'state-lines-group');
-  
-  validStates.forEach(state => {
-    const stateData = data.filter(d => d.state === state);
-    if (stateData.length === 0) return;
-    
-    const stateValues = stateData.map(d => d.value).filter(v => v >= displayMin && v <= displayMax);
-    if (stateValues.length === 0) return;
-    
-    const stateMin = Math.min(...stateValues);
-    const stateMax = Math.max(...stateValues);
-    
-    stateGroup.append('line')
-      .attr('x1', x(stateMin))
-      .attr('x2', x(stateMax))
-      .attr('y1', y(state) + y.bandwidth()/2)
-      .attr('y2', y(state) + y.bandwidth()/2)
-      .attr('stroke', '#666666')
-      .attr('stroke-width', 8)
-      .style('opacity', 0.6);
-  });
-  
-  // Axes
-  const axesGroup = svg.append('g').attr('class', 'axes-group');
-  
-  const yAxis = axesGroup.append('g')
-    .attr('class', 'y-axis')
-    .attr('transform', 'translate(' + margin.left + ',0)')
-    .call(d3.axisLeft(y));
-  
-  yAxis.selectAll('text')
-    .style('font-size', '14px')
-    .style('font-weight', 'bold')
-    .style('fill', '#333');
-  
-  yAxis.select('.domain').remove();
-  yAxis.selectAll('.tick line').remove();
-  
-  const xAxis = axesGroup.append('g')
-    .attr('class', 'x-axis')
-    .attr('transform', `translate(0,${chartHeight-margin.bottom})`)
-    .call(d3.axisBottom(x).ticks(numGridLines));
-  
-  xAxis.selectAll('text')
-    .style('font-size', '12px')
-    .style('font-weight', '600')
-    .style('fill', '#666');
-  
-  // Axis labels
-  axesGroup.append('text')
-    .attr('transform', 'rotate(-90)')
-    .attr('y', 40)
-    .attr('x', 0 - (chartHeight / 2))
-    .style('text-anchor', 'middle')
-    .style('font-size', '16px')
-    .style('font-weight', 'bold')
-    .style('fill', '#333')
-    .text('States');
-    
-  axesGroup.append('text')
-    .attr('transform', `translate(${chartWidth/2}, ${chartHeight - 25})`)
-    .style('text-anchor', 'middle')
-    .style('font-size', '16px')
-    .style('font-weight', 'bold')
-    .style('fill', '#333')
-    .text('Metric Values');
-  
-  // Data points
-  const dataGroup = svg.append('g').attr('class', 'data-group');
-  
-  let visiblePoints = 0;
-  let hiddenPoints = 0;
-  
-  data.forEach((d) => {
-    if (d.value < displayMin || d.value > displayMax) {
-      hiddenPoints++;
-      return;
+  // Create the main graph group
+  const graph = svg.append('g')
+    .attr('class', 'graph')
+    .attr('transform', `translate(${graphMargin.left}, ${graphMargin.top})`);
+
+  // Add thick gray lines for each state (min to max)
+  graphStates.forEach(state => {
+    const stateData = graphData.filter(d => d.state === state);
+    if (stateData.length > 0) {
+      const stateValues = stateData.map(d => d.originalValue);
+      const stateMin = Math.min(...stateValues);
+      const stateMax = Math.max(...stateValues);
+      
+      graph.append('line')
+        .attr('x1', xScale(stateMin))
+        .attr('x2', xScale(stateMax))
+        .attr('y1', yScale(state) + yScale.bandwidth()/2)
+        .attr('y2', yScale(state) + yScale.bandwidth()/2)
+        .attr('stroke', '#cccccc')
+        .attr('stroke-width', 8)
+        .style('opacity', 0.8);
     }
+  });
     
-    visiblePoints++;
-    
-    const legendIndex = validLegends.indexOf(d.legend);
-    const fillColor = color(d.legend);
-    const pointSize = 8;
-    
+  // Create tooltip with better sizing and overflow protection
+  const tooltip = d3.select('body').append('div')
+    .attr('class', 'chart-tooltip')
+    .style('position', 'absolute')
+    .style('background', 'rgba(0, 0, 0, 0.9)')
+    .style('color', 'white')
+    .style('padding', '8px')
+    .style('border-radius', '4px')
+    .style('font-size', '11px')
+    .style('font-weight', 'bold')
+    .style('pointer-events', 'none')
+    .style('opacity', 0)
+    .style('z-index', 10000)
+    .style('box-shadow', '0 2px 6px rgba(0,0,0,0.3)')
+    .style('max-width', '200px')
+    .style('word-wrap', 'break-word')
+    .style('overflow', 'hidden');
+
+  // Add data points with better visibility and tooltips
+  graphData.forEach(d => {
+    const legendIndex = selectedLegendsList.indexOf(d.legend);
     const useTriangle = legendIndex % 2 === 1;
+    const pointColor = color(d.legend);
     
     let symbol;
-    
     if (useTriangle) {
-      symbol = dataGroup.append('polygon')
-        .attr('points', `${x(d.value)},${y(d.state) + y.bandwidth()/2 - pointSize} ${x(d.value) - pointSize},${y(d.state) + y.bandwidth()/2 + pointSize} ${x(d.value) + pointSize},${y(d.state) + y.bandwidth()/2 + pointSize}`);
+      symbol = graph.append('polygon')
+        .attr('points', `${xScale(d.originalValue)},${yScale(d.state) + yScale.bandwidth()/2 - 8} ${xScale(d.originalValue) - 8},${yScale(d.state) + yScale.bandwidth()/2 + 8} ${xScale(d.originalValue) + 8},${yScale(d.state) + yScale.bandwidth()/2 + 8}`);
     } else {
-      symbol = dataGroup.append('circle')
-        .attr('cx', x(d.value))
-        .attr('cy', y(d.state) + y.bandwidth()/2)
-        .attr('r', pointSize);
+      symbol = graph.append('circle')
+        .attr('cx', xScale(d.originalValue))
+        .attr('cy', yScale(d.state) + yScale.bandwidth()/2)
+        .attr('r', 8);
     }
     
     symbol
-      .attr('fill', fillColor)
+      .attr('fill', pointColor)
       .attr('stroke', '#fff')
-      .attr('stroke-width', 2)
-      .style('opacity', 0.8)
+      .attr('stroke-width', 3)
+      .style('opacity', 0.9)
       .style('cursor', 'pointer')
       .on('mouseover', function(event) {
-        d3.select(this)
-          .transition()
-          .duration(200)
-          .style('opacity', 1)
-          .attr('stroke-width', 3);
+        tooltip.transition().duration(200).style('opacity', 1);
+        tooltip.html(`
+          <div style="font-size: 16px; margin-bottom: 5px;">State: ${d.state}</div>
+          <div style="font-size: 14px; margin-bottom: 3px;">Metric: ${d.legend}</div>
+          <div style="font-size: 14px; color: #4CAF50;">Value: ${d.originalValue.toLocaleString()}</div>
+        `);
         
-        const tooltipContent = `
-          <div style="font-weight: bold; margin-bottom: 4px; color: #4CAF50;">${d.state}</div>
-          <div style="margin-bottom: 4px; font-size: 12px; opacity: 0.9;">${d.legend}</div>
-          <div style="font-weight: bold;">Value: ${d.value.toLocaleString()}</div>
-        `;
+        // Smart positioning to keep tooltip on screen with better margins
+        const tooltipWidth = 280;
+        const tooltipHeight = 120;
+        let left = event.pageX + 20;
+        let top = event.pageY - 20;
         
-        tooltip.html(tooltipContent)
-          .style('visibility', 'visible')
-          .style('left', (event.clientX + 15) + 'px')
-          .style('top', (event.clientY - 15) + 'px');
-      })
-      .on('mousemove', function(event) {
-        const tooltip = d3.select('.chart-tooltip');
-        if (!tooltip.empty()) {
-          tooltip
-            .style('left', (event.clientX + 15) + 'px')
-            .style('top', (event.clientY - 15) + 'px');
+        // Adjust if tooltip would go off right edge
+        if (left + tooltipWidth > window.innerWidth - 20) {
+          left = event.pageX - tooltipWidth - 20;
         }
+        
+        // Adjust if tooltip would go off bottom edge
+        if (top + tooltipHeight > window.innerHeight - 20) {
+          top = event.pageY - tooltipHeight - 20;
+        }
+        
+        tooltip.style('left', left + 'px').style('top', top + 'px');
       })
       .on('mouseout', function() {
-        d3.select(this)
-          .transition()
-          .duration(200)
-          .style('opacity', 0.8)
-          .attr('stroke-width', 2);
-        
-        tooltip.style('visibility', 'hidden');
+        tooltip.transition().duration(200).style('opacity', 0);
       });
   });
+
+  // Add gridlines for better readability
+  const xTicks = xScale.ticks(8);
+  const yTicks = yScale.domain();
   
-  // Info messages
-  if (hiddenPoints > 0) {
-    axesGroup.append('text')
-      .attr('x', margin.left)
-      .attr('y', margin.top - 10)
-      .style('font-size', '12px')
-      .style('fill', '#666')
-      .text(`Showing ${visiblePoints} data points. ${hiddenPoints} extreme values hidden for better visibility.`);
-  }
+  // Vertical gridlines
+  graph.selectAll('.grid-line-vertical')
+    .data(xTicks)
+    .enter().append('line')
+    .attr('class', 'grid-line-vertical')
+    .attr('x1', d => xScale(d))
+    .attr('x2', d => xScale(d))
+    .attr('y1', 0)
+    .attr('y2', graphHeight - graphMargin.top - graphMargin.bottom)
+    .attr('stroke', '#b0b0b0')
+    .attr('stroke-width', 1)
+    .attr('stroke-dasharray', '2,2')
+    .style('opacity', 0.9);
+
+  // Horizontal gridlines
+  graph.selectAll('.grid-line-horizontal')
+    .data(yTicks)
+    .enter().append('line')
+    .attr('class', 'grid-line-horizontal')
+    .attr('x1', 0)
+    .attr('x2', graphWidth - graphMargin.left - graphMargin.right)
+    .attr('y1', d => yScale(d) + yScale.bandwidth()/2)
+    .attr('y2', d => yScale(d) + yScale.bandwidth()/2)
+    .attr('stroke', '#b0b0b0')
+    .attr('stroke-width', 1)
+    .attr('stroke-dasharray', '2,2')
+    .style('opacity', 0.9);
+    
+  // Add axes with proper alignment - make them touch at origin
+  svg.append('g')
+    .attr('class', 'y-axis')
+    .attr('transform', `translate(${graphMargin.left},${graphMargin.top})`)
+    .call(d3.axisLeft(yScale))
+    .style('font-size', '10px')
+    .style('color', '#333');
   
-  console.log(`[CHART] Chart rendered: ${visiblePoints} visible points, ${hiddenPoints} hidden extreme values`);
+  svg.append('g')
+    .attr('class', 'x-axis')
+    .attr('transform', `translate(${graphMargin.left},${graphHeight - graphMargin.bottom})`)
+    .call(d3.axisBottom(xScale).tickFormat(d3.format('.2s')))
+    .style('font-size', '10px')
+    .style('color', '#333');
+  
+  // Add axis labels with proper positioning
+  svg.append('text')
+    .attr('transform', 'rotate(-90)')
+    .attr('y', 3)
+    .attr('x', 0 - (graphHeight / 2))
+    .style('text-anchor', 'middle')
+    .style('font-size', '10px')
+    .style('font-weight', 'bold')
+    .style('fill', '#333')
+    .text('States');
+  
+  svg.append('text')
+    .attr('transform', `translate(${graphWidth/2}, ${graphHeight - 3})`)
+    .style('text-anchor', 'middle')
+    .style('font-size', '10px')
+    .style('font-weight', 'bold')
+    .style('fill', '#333')
+    .text('Actual Values');
+  
+  container.appendChild(chartContainer);
+  
+  console.log(`[CHART] Single chart rendered with actual values`);
 }
 // Also add the event listener to handle the button click
 document.addEventListener('DOMContentLoaded', () => {
@@ -4268,13 +5532,15 @@ function populateComparisonMetricDropdown() {
   metricSelect.innerHTML = '';
   
   if (selectedState) {
-    // County metrics
+    // County metrics - use ordered metrics with Average prefix
     if (transitMetricKeys && transitMetricKeys.length > 0) {
-      transitMetricKeys.forEach(metric => {
-        const option = document.createElement('option');
-        option.value = metric;
-        option.textContent = metric;
-        metricSelect.appendChild(option);
+      ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
+        if (transitMetricKeys.includes(metricName)) {
+          const option = document.createElement('option');
+          option.value = metricName;
+          option.textContent = metricName;
+          metricSelect.appendChild(option);
+        }
       });
     } else {
       const option = document.createElement('option');
@@ -4284,13 +5550,16 @@ function populateComparisonMetricDropdown() {
       metricSelect.appendChild(option);
     }
   } else {
-    // State metrics
+    // State metrics - use ordered metrics without Average prefix
     if (allStateData && allStateData.length > 0) {
-      allStateData.forEach(metricData => {
-        const option = document.createElement('option');
-        option.value = metricData.title;
-        option.textContent = metricData.title;
-        metricSelect.appendChild(option);
+      ORDERED_TRANSIT_METRICS.forEach(metricName => {
+        const metricExists = allStateData.some(metric => metric.title === metricName);
+        if (metricExists) {
+          const option = document.createElement('option');
+          option.value = metricName;
+          option.textContent = metricName;
+          metricSelect.appendChild(option);
+        }
       });
     } else {
       const option = document.createElement('option');

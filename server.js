@@ -100,6 +100,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'Public')));
+
+// Serve info files
+app.use('/info', express.static(path.join(__dirname, 'Public/info')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'Views'));
 

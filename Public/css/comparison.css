@@ -14,6 +14,7 @@
     display: flex;
     flex-direction: column;
     transition: background-color var(--transition-medium);
+    overflow: hidden;
   }
   
   .comparison-content {
@@ -1208,7 +1209,190 @@
   color: white;
 }
 
-.btn-secondary {
-  background-color: #6c757d;
-  color: white;
-}
+  .btn-secondary {
+    background-color: #6c757d;
+    color: white;
+  }
+
+  /* Metrics Selection Area Styles */
+  .metrics-selection-area {
+    background-color: var(--bg-white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-md);
+    margin-bottom: 2rem;
+    padding: 2rem;
+    transition: background-color var(--transition-medium);
+  }
+
+  .metrics-header {
+    margin-bottom: 2rem;
+    text-align: center;
+  }
+
+  .metrics-header h3 {
+    color: var(--primary);
+    margin-bottom: 0.5rem;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+
+  .metrics-header p {
+    color: var(--text-medium);
+    margin: 0;
+    transition: color var(--transition-medium);
+  }
+
+  .metrics-categories {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  .metrics-category {
+    background-color: var(--bg-light);
+    border-radius: var(--border-radius-md);
+    padding: 1.5rem;
+    transition: background-color var(--transition-medium);
+  }
+
+  .metrics-category h4 {
+    color: var(--primary);
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .metric-item {
+    background-color: var(--bg-white);
+    border: 2px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    padding: 1rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .metric-item:hover {
+    border-color: var(--primary-light);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .metric-item.selected {
+    border-color: var(--primary);
+    background-color: var(--primary-light);
+    color: white;
+    box-shadow: 0 0 0 3px rgba(44, 65, 255, 0.1);
+  }
+
+  .metric-item.selected .metric-checkbox {
+    background-color: white;
+    color: var(--primary);
+  }
+
+  .metric-checkbox {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+  }
+
+  .metric-item.selected .metric-checkbox {
+    border-color: white;
+  }
+
+  .metric-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.4;
+    flex: 1;
+  }
+
+  .metric-item.selected .metric-label {
+    color: white;
+  }
+
+  /* Responsive design for metrics grid */
+  @media (max-width: 768px) {
+    .metrics-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .metrics-selection-area {
+      padding: 1rem;
+    }
+    
+    .metrics-category {
+      padding: 1rem;
+    }
+  }
+
+  /* Dark mode adjustments for metrics selection */
+  .dark-mode .metrics-selection-area {
+    background-color: var(--bg-dark);
+  }
+
+  .dark-mode .metrics-category {
+    background-color: var(--bg-darker);
+  }
+
+  .dark-mode .metric-item {
+    background-color: var(--bg-dark);
+    border-color: var(--border-color);
+  }
+
+  .dark-mode .metric-item:hover {
+    border-color: var(--primary-light);
+  }
+
+  .dark-mode .metric-item.selected {
+    background-color: var(--primary);
+    border-color: var(--primary);
+  }
+
+  /* Metrics Actions */
+  .metrics-actions {
+    margin-top: 2rem;
+    text-align: center;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .metrics-actions .compare-btn {
+    margin-top: 0;
+    min-width: 250px;
+  }
+
+  .metrics-actions .compare-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: var(--text-light);
+  }
+
+  .metrics-actions .compare-btn:disabled:hover {
+    background-color: var(--text-light);
+    transform: none;
+  }

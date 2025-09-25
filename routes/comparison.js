@@ -21,7 +21,7 @@ router.get('/', (req, res) => {
 // Get available states for comparison
 router.get('/api/states', async (req, res) => {
   try {
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
     await client.connect();
     const db = client.db(process.env.DB_NAME);
     const collection = db.collection('AverageValues');
@@ -51,7 +51,7 @@ router.post('/api/metrics', async (req, res) => {
       return res.status(400).json({ error: 'At least one state must be selected' });
     }
     
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
     await client.connect();
     const db = client.db(process.env.DB_NAME);
     const collection = db.collection('AverageValues');
@@ -87,7 +87,7 @@ router.get('/api/counties/:stateName', async (req, res) => {
     const { stateName } = req.params;
     const formattedStateName = stateName.replace(/\s+/g, '_');
     
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
     await client.connect();
     const db = client.db(formattedStateName);
     const collection = db.collection('Averages');
@@ -125,7 +125,7 @@ router.post('/api/generate-direct-pdf-report', authenticate, async (req, res) =>
     console.log('Entities:', entities);
     console.log('EntityType:', entityType);
 
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
     await client.connect();
     
     const allData = {};
@@ -431,7 +431,7 @@ router.post('/api/county-metrics', async (req, res) => {
     
     const formattedStateName = state.replace(/\s+/g, '_');
     
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
     await client.connect();
     const db = client.db(formattedStateName);
     const collection = db.collection('Averages');
@@ -490,7 +490,7 @@ router.post('/api/generate-comprehensive-ai-report', authenticate, async (req, r
 
     console.log(`Generating comprehensive AI report for ${entityType}: ${entities.join(', ')}`);
 
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
     await client.connect();
 
     let transitData = [];
@@ -784,7 +784,7 @@ router.post('/api/comparison-dotplot', async (req, res) => {
 
     console.log('Fetching dotplot data for states:', states);
 
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
     await client.connect();
 
     // --- EQUITY SECTION --- (keep existing equity code)

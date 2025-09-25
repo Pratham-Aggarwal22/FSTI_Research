@@ -1,0 +1,46 @@
+# County Map Transit Metrics Information
+
+## Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)
+[Average val for county selected ]
+
+## Transit: Driving
+[Test info]
+
+## Average Initial Wait Time in Minutes
+[Add information about average initial wait time metric here]
+
+## Average Initial Walk Distance in Miles
+[This is a test info]
+
+## Average Initial Walk Duration in Minutes
+[Add information about average initial walk duration metric here]
+
+## Average Total Wait Duration in Minutes
+[Add information about average total wait duration metric here]
+
+## Average Total Walk Distance in Miles
+[Add information about average total walk distance metric here]
+
+## Average Total Walk Duration in minutes
+[Add information about average total walk duration metric here]
+
+## Transfers
+[Add information about transfers metric here]
+
+## Average In-Vehicle Duration in Minutes
+[Add information about average in-vehicle duration metric here]
+
+## Average Out-of-Vehicle Duration in Minutes
+[Add information about average out-of-vehicle duration metric here]
+
+## In-Vehicle:Out-of-Vehicle
+[Add information about in-vehicle out-of-vehicle ratio metric here]
+
+## Average Travel Duration in Minutes
+[Add information about average travel duration metric here]
+
+## Average Driving Duration with Traffic in Minutes
+[Add information about average driving duration with traffic metric here]
+
+## Sample Size
+[Add information about sample size metric here]

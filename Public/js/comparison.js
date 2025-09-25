@@ -1,4 +1,43 @@
 // Public/js/comparison.js
+
+// Ordered transit metrics list as specified by user
+const ORDERED_TRANSIT_METRICS = [
+  "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)",
+  "Transit: Driving",
+  "Initial Wait Time in Minutes",
+  "Initial Walk Distance in Miles", 
+  "Initial Walk Duration in Minutes",
+  "Total Wait Duration in Minutes",
+  "Total Walk Distance in Miles",
+  "Total Walk Duration in minutes",
+  "Transfers",
+  "In-Vehicle Duration in Minutes",
+  "Out-of-Vehicle Duration in Minutes",
+  "In-Vehicle:Out-of-Vehicle",
+  "Travel Duration in Minutes",
+  "Driving Duration with Traffic in Minutes",
+  "Sample Size"
+];
+
+// Ordered transit metrics with "Average" prefix for database queries
+const ORDERED_TRANSIT_METRICS_WITH_AVERAGE = [
+  "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)",
+  "Transit: Driving", 
+  "Average Initial Wait Time in Minutes",
+  "Average Initial Walk Distance in Miles",
+  "Average Initial Walk Duration in Minutes", 
+  "Average Total Wait Duration in Minutes",
+  "Average Total Walk Distance in Miles",
+  "Average Total Walk Duration in minutes",
+  "Transfers",
+  "Average In-Vehicle Duration in Minutes",
+  "Average Out-of-Vehicle Duration in Minutes",
+  "In-Vehicle:Out-of-Vehicle",
+  "Average Travel Duration in Minutes",
+  "Average Driving Duration with Traffic in Minutes",
+  "Sample Size"
+];
+
 document.addEventListener('DOMContentLoaded', () => {
     // DOM elements
     const comparisonLevelRadios = document.querySelectorAll('input[name="comparisonLevel"]');
@@ -282,12 +321,12 @@ document.addEventListener('DOMContentLoaded', () => {
     compareBtn.addEventListener('click', () => {
       const comparisonLevel = document.querySelector('input[name="comparisonLevel"]:checked').value;
       
-      if (comparisonLevel === 'state' && selectedStates.length > 0 && selectedMetric) {
-        generateComparison();
-      } else if (comparisonLevel === 'county' && selectedCounties.length > 0 && selectedMetric) {
-        generateCountyComparison();
+      if (comparisonLevel === 'state' && selectedStates.length > 0) {
+        showMetricsSelection();
+      } else if (comparisonLevel === 'county' && selectedCounties.length > 0) {
+        showMetricsSelection();
       } else {
-        alert('Please select entities and a metric to compare.');
+        alert('Please select entities to compare.');
       }
     });
     
@@ -376,6 +415,12 @@ document.addEventListener('DOMContentLoaded', () => {
         requestAnimationFrame(animateChart);
       }, 300);
     });
+    
+    // Generate chart button
+    const generateChartBtn = document.getElementById('generateChartBtn');
+    if (generateChartBtn) {
+      generateChartBtn.addEventListener('click', generateChartWithSelectedMetrics);
+    }
   }
   
   function populateCountyOptions() {
@@ -460,19 +505,31 @@ document.addEventListener('DOMContentLoaded', () => {
       // Extract metric names
       availableMetrics = data.map(item => item.metric);
       
-      // Populate metric select
+      // Populate metric select using ordered metrics
       metricSelect.innerHTML = '<option value="">Select metric...</option>';
-      availableMetrics.forEach(metric => {
-        const option = document.createElement('option');
-        option.value = metric;
-        option.textContent = metric;
-        metricSelect.appendChild(option);
+      
+      // Use ordered metrics for county data (with Average prefix)
+      ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
+        if (availableMetrics.includes(metricName)) {
+          const option = document.createElement('option');
+          option.value = metricName;
+          option.textContent = metricName;
+          metricSelect.appendChild(option);
+        }
       });
       
-      // Select first metric by default
-      if (availableMetrics.length > 0 && !selectedMetric) {
-        metricSelect.value = availableMetrics[0];
-        selectedMetric = availableMetrics[0];
+      // Set default to "Percent Access" if available, otherwise first option
+      if (metricSelect.options.length > 1 && !selectedMetric) {
+        const percentAccessOption = Array.from(metricSelect.options).find(option => 
+          option.value === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
+        );
+        if (percentAccessOption) {
+          metricSelect.value = percentAccessOption.value;
+          selectedMetric = percentAccessOption.value;
+        } else {
+          metricSelect.value = metricSelect.options[1].value;
+          selectedMetric = metricSelect.options[1].value;
+        }
       } else if (selectedMetric) {
         metricSelect.value = selectedMetric;
       }
@@ -491,8 +548,8 @@ document.addEventListener('DOMContentLoaded', () => {
     emptyState.style.display = 'none';
     comparisonResults.style.display = 'block';
     
-    // Create chart
-    createChart(metricData.data);
+    // Create percentile chart instead of regular chart
+    createPercentileChart([metricData]);
     
     // Populate data table
     populateDataTable(metricData.data);
@@ -508,8 +565,8 @@ document.addEventListener('DOMContentLoaded', () => {
     emptyState.style.display = 'none';
     comparisonResults.style.display = 'block';
     
-    // Create chart
-    createChart(metricData.data);
+    // Create percentile chart instead of regular chart
+    createPercentileChart([metricData]);
     
     // Populate data table
     populateDataTable(metricData.data);
@@ -770,6 +827,330 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     return colors;
+  }
+
+  // New function to show metrics selection area
+  function showMetricsSelection() {
+    const metricsSelectionArea = document.getElementById('metricsSelectionArea');
+    const emptyState = document.getElementById('emptyState');
+    const comparisonResults = document.getElementById('comparisonResults');
+    
+    // Hide other sections
+    if (emptyState) emptyState.style.display = 'none';
+    if (comparisonResults) comparisonResults.style.display = 'none';
+    
+    // Show metrics selection
+    if (metricsSelectionArea) {
+      metricsSelectionArea.style.display = 'block';
+      loadMetricsForSelection();
+    }
+  }
+
+  // Load metrics for selection
+  async function loadMetricsForSelection() {
+    try {
+      const comparisonLevel = document.querySelector('input[name="comparisonLevel"]:checked').value;
+      let response;
+      
+      if (comparisonLevel === 'state') {
+        response = await fetch('/comparison/api/metrics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ states: selectedStates })
+        });
+      } else {
+        response = await fetch('/comparison/api/county-metrics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            state: selectedState,
+            counties: selectedCounties 
+          })
+        });
+      }
+      
+      const data = await response.json();
+      populateMetricsSelection(data);
+    } catch (error) {
+      console.error('Error loading metrics for selection:', error);
+    }
+  }
+
+  // Populate metrics selection UI
+  function populateMetricsSelection(metricsData) {
+    const equityGrid = document.getElementById('equityMetricsGrid');
+    const accessibilityGrid = document.getElementById('accessibilityMetricsGrid');
+    
+    if (!equityGrid || !accessibilityGrid) return;
+    
+    // Clear existing content
+    equityGrid.innerHTML = '';
+    accessibilityGrid.innerHTML = '';
+    
+    // Categorize metrics
+    const equityMetrics = [];
+    const accessibilityMetrics = [];
+    
+    metricsData.forEach(metric => {
+      const metricName = metric.metric || metric.title;
+      if (isEquityMetric(metricName)) {
+        equityMetrics.push(metricName);
+      } else {
+        accessibilityMetrics.push(metricName);
+      }
+    });
+    
+    // Populate equity metrics
+    equityMetrics.forEach(metricName => {
+      const metricItem = createMetricItem(metricName, 'equity');
+      equityGrid.appendChild(metricItem);
+    });
+    
+    // Populate accessibility metrics
+    accessibilityMetrics.forEach(metricName => {
+      const metricItem = createMetricItem(metricName, 'accessibility');
+      accessibilityGrid.appendChild(metricItem);
+    });
+  }
+
+  // Create metric item element
+  function createMetricItem(metricName, category) {
+    const item = document.createElement('div');
+    item.className = 'metric-item';
+    item.dataset.metric = metricName;
+    item.dataset.category = category;
+    
+    item.innerHTML = `
+      <div class="metric-checkbox">✓</div>
+      <div class="metric-label">${metricName}</div>
+    `;
+    
+    item.addEventListener('click', () => {
+      item.classList.toggle('selected');
+      updateSelectedMetrics();
+    });
+    
+    return item;
+  }
+
+  // Check if metric is equity-related
+  function isEquityMetric(metricName) {
+    const equityKeywords = ['employment', 'income', 'race', 'housing', 'demographic', 'equity', 'disparity'];
+    return equityKeywords.some(keyword => 
+      metricName.toLowerCase().includes(keyword)
+    );
+  }
+
+  // Update selected metrics
+  function updateSelectedMetrics() {
+    const selectedMetrics = [];
+    document.querySelectorAll('.metric-item.selected').forEach(item => {
+      selectedMetrics.push(item.dataset.metric);
+    });
+    
+    // Store selected metrics globally
+    window.selectedMetrics = selectedMetrics;
+    
+    // Enable/disable generate chart button
+    const generateChartBtn = document.getElementById('generateChartBtn');
+    if (generateChartBtn) {
+      generateChartBtn.disabled = selectedMetrics.length === 0;
+    }
+  }
+
+  // Generate chart with selected metrics
+  function generateChartWithSelectedMetrics() {
+    const selectedMetrics = window.selectedMetrics || [];
+    if (selectedMetrics.length === 0) {
+      alert('Please select at least one metric to compare.');
+      return;
+    }
+    
+    // Hide metrics selection and show chart
+    const metricsSelectionArea = document.getElementById('metricsSelectionArea');
+    const comparisonResults = document.getElementById('comparisonResults');
+    
+    if (metricsSelectionArea) metricsSelectionArea.style.display = 'none';
+    if (comparisonResults) comparisonResults.style.display = 'block';
+    
+    // Generate chart with percentile data
+    generatePercentileChart(selectedMetrics);
+  }
+
+  // Generate percentile chart
+  async function generatePercentileChart(selectedMetrics) {
+    try {
+      const comparisonLevel = document.querySelector('input[name="comparisonLevel"]:checked').value;
+      let response;
+      
+      if (comparisonLevel === 'state') {
+        response = await fetch('/comparison/api/metrics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ states: selectedStates })
+        });
+      } else {
+        response = await fetch('/comparison/api/county-metrics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            state: selectedState,
+            counties: selectedCounties 
+          })
+        });
+      }
+      
+      const data = await response.json();
+      const filteredData = data.filter(item => selectedMetrics.includes(item.metric));
+      
+      if (filteredData.length === 0) {
+        alert('No data available for selected metrics.');
+        return;
+      }
+      
+      // Create percentile chart
+      createPercentileChart(filteredData);
+      
+    } catch (error) {
+      console.error('Error generating percentile chart:', error);
+    }
+  }
+
+  // Create percentile chart
+  function createPercentileChart(data) {
+    if (currentChart) {
+      currentChart.destroy();
+    }
+    
+    // Calculate percentiles for each metric
+    const percentileData = data.map(metric => {
+      const values = Object.values(metric.data).filter(v => v !== null && !isNaN(v));
+      if (values.length === 0) return null;
+      
+      const sortedValues = [...values].sort((a, b) => a - b);
+      const min = sortedValues[0];
+      const max = sortedValues[sortedValues.length - 1];
+      
+      const percentileValues = {};
+      Object.entries(metric.data).forEach(([entity, value]) => {
+        if (value !== null && !isNaN(value)) {
+          const percentile = ((value - min) / (max - min)) * 100;
+          percentileValues[entity] = percentile;
+        }
+      });
+      
+      return {
+        metric: metric.metric,
+        data: percentileValues,
+        min: min,
+        max: max
+      };
+    }).filter(item => item !== null);
+    
+    if (percentileData.length === 0) {
+      alert('No valid data available for chart generation.');
+      return;
+    }
+    
+    // Create chart with percentile data
+    const entities = Object.keys(percentileData[0].data);
+    const labels = percentileData.map(item => item.metric);
+    
+    const datasets = entities.map((entity, index) => ({
+      label: entity,
+      data: percentileData.map(item => item.data[entity] || 0),
+      backgroundColor: generateColors(entities.length)[index],
+      borderColor: generateColors(entities.length, 1)[index],
+      borderWidth: 2
+    }));
+    
+    const ctx = comparisonChart.getContext('2d');
+    currentChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Transit Metrics Comparison (Percentile Scale)',
+            font: {
+              size: 16,
+              weight: 'bold'
+            }
+          },
+          legend: {
+            position: 'top'
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const entity = context.dataset.label;
+                const metric = context.label;
+                const percentile = context.parsed.y.toFixed(1);
+                const metricData = percentileData.find(m => m.metric === metric);
+                const actualValue = Object.values(metricData.data).find((_, i) => 
+                  Object.keys(metricData.data)[i] === entity
+                );
+                return `${entity}: ${percentile}% (Actual: ${metricData.min.toFixed(2)} - ${metricData.max.toFixed(2)})`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: 100,
+            title: {
+              display: true,
+              text: 'Percentile (%)'
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Metrics'
+            }
+          }
+        }
+      }
+    });
+    
+    // Add legend with min/max values
+    addMinMaxLegend(percentileData);
+  }
+
+  // Add min/max legend to chart
+  function addMinMaxLegend(percentileData) {
+    const chartContainer = document.querySelector('.chart-container');
+    let legendDiv = chartContainer.querySelector('.min-max-legend');
+    
+    if (!legendDiv) {
+      legendDiv = document.createElement('div');
+      legendDiv.className = 'min-max-legend';
+      legendDiv.style.cssText = `
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      `;
+      chartContainer.appendChild(legendDiv);
+    }
+    
+    let legendHTML = '<strong>Value Ranges:</strong><br>';
+    percentileData.forEach(item => {
+      legendHTML += `${item.metric}: ${item.min.toFixed(2)} - ${item.max.toFixed(2)}<br>`;
+    });
+    
+    legendDiv.innerHTML = legendHTML;
   }
 });
 // Public/js/comparison.js - ADD THESE FUNCTIONS (add to existing file)
@@ -1933,6 +2314,29 @@ function renderD3Dotplot(metric, legendsToShow) {
       }
     });
   });
+  
+  // Calculate percentiles for each legend
+  const percentileData = [];
+  legendsToShow.forEach(legend => {
+    const legendData = data.filter(d => d.legend === legend);
+    if (legendData.length === 0) return;
+    
+    const values = legendData.map(d => d.value).sort((a, b) => a - b);
+    const min = values[0];
+    const max = values[values.length - 1];
+    
+    legendData.forEach(d => {
+      const percentile = ((d.value - min) / (max - min)) * 100;
+      percentileData.push({
+        ...d,
+        percentile: percentile,
+        originalValue: d.value,
+        min: min,
+        max: max
+      });
+    });
+  });
+  
   // D3 setup
   const width = container.offsetWidth || 900;
   const height = container.offsetHeight || 500;
@@ -1945,9 +2349,8 @@ function renderD3Dotplot(metric, legendsToShow) {
     .domain(states)
     .range([margin.top, height - margin.bottom])
     .padding(0.2);
-  const xExtent = d3.extent(data, d=>d.value);
   const x = d3.scaleLinear()
-    .domain([Math.min(0, xExtent[0]), xExtent[1]]).nice()
+    .domain([0, 100]) // Percentile scale
     .range([margin.left, width - margin.right]);
   // Color scale
   const color = d3.scaleOrdinal()
@@ -1959,13 +2362,21 @@ function renderD3Dotplot(metric, legendsToShow) {
     .call(d3.axisLeft(y));
   svg.append('g')
     .attr('transform',`translate(0,${height-margin.bottom})`)
-    .call(d3.axisBottom(x));
+    .call(d3.axisBottom(x).tickFormat(d => d + '%'));
+  
+  // Add x-axis label
+  svg.append('text')
+    .attr('transform', `translate(${width/2}, ${height - 10})`)
+    .style('text-anchor', 'middle')
+    .style('font-size', '14px')
+    .text('Percentile (%)');
+  
   // Dots
   svg.selectAll('circle')
-    .data(data)
+    .data(percentileData)
     .enter()
     .append('circle')
-    .attr('cx',d=>x(d.value))
+    .attr('cx',d=>x(d.percentile))
     .attr('cy',d=>y(d.state)+(y.bandwidth()/2))
     .attr('r',7)
     .attr('fill',d=>color(d.legend))
@@ -1994,6 +2405,30 @@ function renderD3Dotplot(metric, legendsToShow) {
       .text(legend)
       .style('font-size','14px');
   });
+  
+  // Add value ranges legend
+  const rangeLegend = svg.append('g')
+    .attr('transform',`translate(${width - 200},${margin.top})`)
+    .style('font-size','12px');
+  
+  rangeLegend.append('text')
+    .attr('y',0)
+    .text('Value Ranges:')
+    .style('font-weight','bold');
+  
+  let yOffset = 15;
+  legendsToShow.forEach(legend => {
+    const legendData = percentileData.filter(d => d.legend === legend);
+    if (legendData.length > 0) {
+      const min = legendData[0].min;
+      const max = legendData[0].max;
+      rangeLegend.append('text')
+        .attr('y', yOffset)
+        .text(`${legend}: ${min.toLocaleString()} - ${max.toLocaleString()}`)
+        .style('font-size','10px');
+      yOffset += 12;
+    }
+  });
 }
 
 // Tooltip helpers
@@ -2011,7 +2446,18 @@ function showDotplotTooltip(e, d) {
     dotplotTooltipDiv.style.zIndex = 9999;
     document.body.appendChild(dotplotTooltipDiv);
   }
-  dotplotTooltipDiv.innerHTML = `<b>${d.state}</b><br/><b>${d.legend}</b>: ${d.value}`;
+  
+  const percentile = d.percentile ? d.percentile.toFixed(1) : 'N/A';
+  const actualValue = d.originalValue ? d.originalValue.toLocaleString() : d.value.toLocaleString();
+  const range = d.min && d.max ? `Range: ${d.min.toLocaleString()} - ${d.max.toLocaleString()}` : '';
+  
+  dotplotTooltipDiv.innerHTML = `
+    <b>${d.state}</b><br/>
+    <b>${d.legend}</b><br/>
+    Percentile: ${percentile}%<br/>
+    Actual Value: ${actualValue}<br/>
+    ${range ? `<small>${range}</small>` : ''}
+  `;
   dotplotTooltipDiv.style.left = (e.clientX+15)+'px';
   dotplotTooltipDiv.style.top = (e.clientY-10)+'px';
   dotplotTooltipDiv.style.display = 'block';

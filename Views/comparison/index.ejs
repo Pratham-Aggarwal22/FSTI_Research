@@ -122,16 +122,8 @@
               </select>
             </div>
             
-            <div class="control-group">
-              <label><i class="fas fa-analytics"></i> Metrics</label>
-              <select id="metricSelect" class="custom-select">
-                <option value="">Select metric...</option>
-                <!-- Metrics will be populated by JavaScript -->
-              </select>
-            </div>
-            
             <button id="compareBtn" class="compare-btn">
-              <i class="fas fa-bolt"></i> Generate Chart Comparison
+              <i class="fas fa-bolt"></i> Proceed to Chart Comparison
             </button>
           </div>
         </div>
@@ -141,6 +133,36 @@
         <div class="comparison-header">
           <h1>Transit Data Comparison</h1>
           <p class="subtitle">Compare transit metrics across states or counties</p>
+        </div>
+        
+        <!-- Metrics Selection Area -->
+        <div class="metrics-selection-area" id="metricsSelectionArea" style="display: none;">
+          <div class="metrics-header">
+            <h3><i class="fas fa-sliders-h"></i> Select Metrics to Compare</h3>
+            <p>Choose which metrics to include in your comparison chart</p>
+          </div>
+          
+          <div class="metrics-categories">
+            <div class="metrics-category">
+              <h4><i class="fas fa-balance-scale"></i> Equity Metrics</h4>
+              <div class="metrics-grid" id="equityMetricsGrid">
+                <!-- Equity metrics will be populated by JavaScript -->
+              </div>
+            </div>
+            
+            <div class="metrics-category">
+              <h4><i class="fas fa-bus"></i> Accessibility Metrics</h4>
+              <div class="metrics-grid" id="accessibilityMetricsGrid">
+                <!-- Accessibility metrics will be populated by JavaScript -->
+              </div>
+            </div>
+          </div>
+          
+          <div class="metrics-actions">
+            <button id="generateChartBtn" class="compare-btn" disabled>
+              <i class="fas fa-chart-bar"></i> Generate Comparison Chart
+            </button>
+          </div>
         </div>
         
         <div class="empty-state" id="emptyState">

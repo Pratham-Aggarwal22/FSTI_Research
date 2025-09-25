@@ -1,0 +1,46 @@
+# State Map Transit Metrics Information
+
+## Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)
+Average value for state maps.
+
+## Transit: Driving
+[This is a test info1]
+
+## Initial Wait Time in Minutes
+[Add information about initial wait time metric here]
+
+## Initial Walk Distance in Miles
+[Add information about initial walk distance metric here]
+
+## Initial Walk Duration in Minutes
+[Add information about initial walk duration metric here]
+
+## Total Wait Duration in Minutes
+[Add information about total wait duration metric here]
+
+## Total Walk Distance in Miles
+[Add information about total walk distance metric here]
+
+## Total Walk Duration in minutes
+[Add information about total walk duration metric here]
+
+## Transfers
+[Add information about transfers metric here]
+
+## In-Vehicle Duration in Minutes
+[Add information about in-vehicle duration metric here]
+
+## Out-of-Vehicle Duration in Minutes
+[Add information about out-of-vehicle duration metric here]
+
+## In-Vehicle:Out-of-Vehicle
+[Add information about in-vehicle out-of-vehicle ratio metric here]
+
+## Travel Duration in Minutes
+[Add information about travel duration metric here]
+
+## Driving Duration with Traffic in Minutes
+[Add information about driving duration with traffic metric here]
+
+## Sample Size
+[Add information about sample size metric here]
