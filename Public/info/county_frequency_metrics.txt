@@ -1,37 +1,37 @@
 # County Frequency Distribution Metrics Information
 
-## Travel Duration in Minutes
-Average values for county selected
+## Travel Time by Transit in Minutes
+Average values for county selected - This chart displays the distribution of travel durations by public transit within this county. It shows how long people typically spend traveling from origin to destination using public transportation in this specific area.
 
-## Initial Walk Duration in Minutes
-This chart displays the distribution of initial walking durations before boarding transit within this county. It shows how long people typically walk to reach their first transit stop in this specific area. This metric is crucial for understanding local accessibility to public transportation.
+## Transit to Car Travel Time Ratio
+This chart illustrates the ratio between transit travel time and car travel time within this county. Values closer to 1 indicate similar travel times, while higher values suggest transit takes longer than driving in this area. This helps assess the competitiveness of public transit at the county level.
 
-## Transit to Driving Ratio
-This chart illustrates the ratio between transit travel time and driving time within this county. Values closer to 1 indicate similar travel times, while higher values suggest transit takes longer than driving in this area. This helps assess the competitiveness of public transit at the county level.
-
-## Transfers
+## Number of Transfers
 This chart shows the distribution of transfer counts during transit journeys within this county. It helps understand the complexity of local transit routes and the number of connections required. Fewer transfers generally indicate more direct and convenient routes within the county.
 
 ## Initial Walk Distance in Miles
 This chart displays the distribution of initial walking distances to reach transit stops within this county. It shows how far people typically walk to access public transportation in this specific area. This metric is important for assessing the walkability of the county's transit system.
 
+## Initial Walk Time in Minutes
+This chart displays the distribution of initial walking durations before boarding transit within this county. It shows how long people typically walk to reach their first transit stop in this specific area. This metric is crucial for understanding local accessibility to public transportation.
+
 ## Initial Wait Time in Minutes
 This chart shows the distribution of waiting times at the first transit stop within this county. It indicates how long passengers typically wait for their initial transit connection in this area. Shorter wait times generally indicate better service frequency at the county level.
-
-## Out-Of-Vehicle Duration In Minutes
-This chart displays the distribution of time spent outside of vehicles during transit journeys within this county, including walking and waiting times. This represents the non-riding portion of the total journey time for county residents.
-
-## In-Vehicle Duration in Minutes
-This chart shows the distribution of time spent inside transit vehicles during journeys within this county. It represents the actual riding time on buses, trains, or other transit modes for county residents. This is the core travel time component for local transit.
-
-## Total Walk Duration in Minutes
-This chart displays the distribution of total walking time throughout the entire journey within this county, including initial and transfer walks. This metric helps assess the pedestrian accessibility of the county's transit system.
 
 ## Total Walk Distance in Miles
 This chart shows the distribution of total walking distance for complete transit journeys within this county, including all walking segments. This helps evaluate the walkability and accessibility of the county's transit network.
 
-## In-Vehicle To Out-Of-Vehicle Ratio
-This chart illustrates the ratio between time spent in vehicles versus time spent walking and waiting within this county. It helps understand the efficiency of transit journeys for county residents. Higher ratios indicate more time spent riding relative to walking/waiting.
+## Total Walk Time
+This chart displays the distribution of total walking time throughout the entire journey within this county, including initial and transfer walks. This metric helps assess the pedestrian accessibility of the county's transit system.
 
-## Total Wait Duration In Minutes
+## Total Wait Time in Minutes
 This chart displays the distribution of total waiting time across all transit stops during a journey within this county, including initial and transfer waits. This metric helps assess the efficiency of transit scheduling and connections at the county level.
+
+## In-Vehicle Travel Time in Minutes
+This chart shows the distribution of time spent inside transit vehicles during journeys within this county. It represents the actual riding time on buses, trains, or other transit modes for county residents. This is the core travel time component for local transit.
+
+## Out-of-Vehicle Travel Time in Minutes
+This chart displays the distribution of time spent outside of vehicles during transit journeys within this county, including walking and waiting times. This represents the non-riding portion of the total journey time for county residents.
+
+## In-Vehicle to Out-of-Vehicle Time Ratio
+This chart illustrates the ratio between time spent in vehicles versus time spent walking and waiting within this county. It helps understand the efficiency of transit journeys for county residents. Higher ratios indicate more time spent riding relative to walking/waiting.

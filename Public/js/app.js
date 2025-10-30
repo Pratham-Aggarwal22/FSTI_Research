@@ -1,42 +1,79 @@
 // public/js/app.js
 
+// Metric groups with colors for visual organization
+const METRIC_GROUPS = {
+  'Access': { color: '#9b59b6', metrics: [] },
+  'Travel Times': { color: '#3498db', metrics: [] },
+  'Transfers': { color: '#e67e22', metrics: [] },
+  'Initial Journey': { color: '#1abc9c', metrics: [] },
+  'Total Journey': { color: '#f39c12', metrics: [] },
+  'Vehicle Times': { color: '#e74c3c', metrics: [] },
+  'Sample Data': { color: '#95a5a6', metrics: [] }
+};
+
 // Ordered transit metrics list as specified by user
 const ORDERED_TRANSIT_METRICS = [
   "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)",
-  "Transit: Driving",
+  "",  // Visual break
+  "Travel Time by Transit in Minutes",
+  "Travel Time by Car in Minutes",
+  "Transit to Car Travel Time Ratio",
+  "",  // Visual break
+  "Number of Transfers",
+  "",  // Visual break
+  "Initial Walk Distance in Miles",
+  "Initial Walk Time in Minutes",
   "Initial Wait Time in Minutes",
-  "Initial Walk Distance in Miles", 
-  "Initial Walk Duration in Minutes",
-  "Total Wait Duration in Minutes",
+  "",  // Visual break
   "Total Walk Distance in Miles",
-  "Total Walk Duration in minutes",
-  "Transfers",
-  "In-Vehicle Duration in Minutes",
-  "Out-of-Vehicle Duration in Minutes",
-  "In-Vehicle:Out-of-Vehicle",
-  "Travel Duration in Minutes",
-  "Driving Duration with Traffic in Minutes",
+  "Total Walk Time",
+  "Total Wait Time in Minutes",
+  "",  // Visual break
+  "In-Vehicle Travel Time in Minutes",
+  "Out-of-Vehicle Travel Time in Minutes",
+  "In-Vehicle to Out-of-Vehicle Time Ratio",
+  "",  // Visual break
   "Sample Size"
 ];
 
 // Ordered transit metrics with "Average" prefix for database queries
 const ORDERED_TRANSIT_METRICS_WITH_AVERAGE = [
   "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)",
-  "Transit: Driving", 
-  "Average Initial Wait Time in Minutes",
+  "",  // Visual break
+  "Average Travel Duration in Minutes",
+  "Average Driving Duration with Traffic in Minutes",
+  "Transit: Driving",
+  "",  // Visual break
+  "Transfers",
+  "",  // Visual break
   "Average Initial Walk Distance in Miles",
-  "Average Initial Walk Duration in Minutes", 
-  "Average Total Wait Duration in Minutes",
+  "Average Initial Walk Duration in Minutes",
+  "Average Initial Wait Time in Minutes",
+  "",  // Visual break
   "Average Total Walk Distance in Miles",
   "Average Total Walk Duration in minutes",
-  "Transfers",
+  "Average Total Wait Duration in Minutes",
+  "",  // Visual break
   "Average In-Vehicle Duration in Minutes",
   "Average Out-of-Vehicle Duration in Minutes",
   "In-Vehicle:Out-of-Vehicle",
-  "Average Travel Duration in Minutes",
-  "Average Driving Duration with Traffic in Minutes",
+  "",  // Visual break
   "Sample Size"
 ];
+
+// Helper function to get metric group
+function getMetricGroup(metricName) {
+  if (metricName.includes('Percent Access')) return 'Access';
+  if (metricName.includes('Travel Time') || metricName.includes('Travel Duration') || 
+      metricName.includes('Driving Duration') || metricName.includes('Transit to Car') ||
+      metricName.includes('Transit: Driving') || metricName.includes('Transit to Driving')) return 'Travel Times';
+  if (metricName.includes('Transfer')) return 'Transfers';
+  if (metricName.includes('Initial')) return 'Initial Journey';
+  if (metricName.includes('Total')) return 'Total Journey';
+  if (metricName.includes('Vehicle')) return 'Vehicle Times';
+  if (metricName.includes('Sample Size')) return 'Sample Data';
+  return 'Other';
+}
 
 const statesData = {
   "01": { name: "Alabama", abbr: "AL" },
@@ -315,18 +352,26 @@ function formatMetricName(metricName) {
 
 // Helper function to format metric values (add units to values)
 function formatMetricValue(metricName, value) {
+  // Format numeric values to 2 decimal places
+  let formattedValue = value;
+  if (typeof value === 'number') {
+    formattedValue = formatNumberToTwoDecimals(value);
+  } else if (typeof value === 'string' && !isNaN(Number(value))) {
+    formattedValue = formatNumberToTwoDecimals(Number(value));
+  }
+  
   // Special handling for Percent Access metric
   if (metricName.includes('Percent Access')) {
-    return `${value}%`;
+    return `${formattedValue}%`;
   }
   // Handle metrics that are specifically about time in minutes (not just containing the word "minutes")
   else if ((metricName.includes('Minutes') || metricName.includes('minutes')) && 
            !metricName.includes('Percent Access')) {
-    return `${value} min`;
+    return `${formattedValue} min`;
   } else if (metricName.includes('Miles')) {
-    return `${value} miles`;
+    return `${formattedValue} miles`;
   }
-  return value;
+  return formattedValue;
 }
 
 // Helper function to get the original metric name for info lookup
@@ -438,29 +483,49 @@ const METRIC_COLOR_LOGIC = {
   'Sample Size': 'high_is_good',
   
   // Metrics where HIGH values are BAD (red for high, green for low)
-  'Transit: Driving': 'high_is_bad',
+  // NEW NAMES
+  'Transit to Car Travel Time Ratio': 'high_is_bad',
   'Average Initial Wait Time in Minutes': 'high_is_bad',
   'Initial Wait Time in Minutes': 'high_is_bad',
   'Average Initial Walk Distance in Miles': 'high_is_bad',
   'Initial Walk Distance in Miles': 'high_is_bad',
+  'Average Initial Walk Time in Minutes': 'high_is_bad',
+  'Initial Walk Time in Minutes': 'high_is_bad',
   'Average Initial Walk Duration in Minutes': 'high_is_bad',
   'Initial Walk Duration in Minutes': 'high_is_bad',
+  'Average Total Wait Time in Minutes': 'high_is_bad',
+  'Total Wait Time in Minutes': 'high_is_bad',
   'Average Total Wait Duration in Minutes': 'high_is_bad',
   'Total Wait Duration in Minutes': 'high_is_bad',
   'Average Total Walk Distance in Miles': 'high_is_bad',
   'Total Walk Distance in Miles': 'high_is_bad',
+  'Average Total Walk Time': 'high_is_bad',
+  'Total Walk Time': 'high_is_bad',
   'Average Total Walk Duration in minutes': 'high_is_bad',
   'Total Walk Duration in minutes': 'high_is_bad',
+  'Number of Transfers': 'high_is_bad',
   'Transfers': 'high_is_bad',
+  'Average In-Vehicle Travel Time in Minutes': 'high_is_bad',
+  'In-Vehicle Travel Time in Minutes': 'high_is_bad',
   'Average In-Vehicle Duration in Minutes': 'high_is_bad',
   'In-Vehicle Duration in Minutes': 'high_is_bad',
+  'Average Out-of-Vehicle Travel Time in Minutes': 'high_is_bad',
+  'Out-of-Vehicle Travel Time in Minutes': 'high_is_bad',
   'Average Out-of-Vehicle Duration in Minutes': 'high_is_bad',
   'Out-of-Vehicle Duration in Minutes': 'high_is_bad',
+  'In-Vehicle to Out-of-Vehicle Time Ratio': 'high_is_bad',
   'In-Vehicle:Out-of-Vehicle': 'high_is_bad',
+  'Average Travel Time by Transit in Minutes': 'high_is_bad',
+  'Travel Time by Transit in Minutes': 'high_is_bad',
   'Average Travel Duration in Minutes': 'high_is_bad',
   'Travel Duration in Minutes': 'high_is_bad',
+  'Average Travel Time by Car in Minutes': 'high_is_bad',
+  'Travel Time by Car in Minutes': 'high_is_bad',
   'Average Driving Duration with Traffic in Minutes': 'high_is_bad',
-  'Driving Duration with Traffic in Minutes': 'high_is_bad'
+  'Driving Duration with Traffic in Minutes': 'high_is_bad',
+  // OLD NAMES (keep for backwards compatibility)
+  'Transit: Driving': 'high_is_bad',
+  'Transit to Driving Ratio': 'high_is_bad'
 };
 
 // Get color scheme based on metric type
@@ -484,54 +549,64 @@ function createMetricMapping(data) {
     "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)": [
       "Percent Access", "percent access", "Percent_Access", "percent_access"
     ],
-    "Transit: Driving": [
-      "Transit: Driving", "transit driving", "Transit_Driving", "transit_driving"
+    "Travel Time by Transit in Minutes": [
+      "Travel Time by Transit in Minutes", "Average Travel Time by Transit in Minutes",
+      "Travel Duration in Minutes", "Average Travel Duration in Minutes",
+      "travel duration", "Travel_Duration", "travel_duration", "travel time by transit"
     ],
-    "Initial Wait Time in Minutes": [
-      "Average Initial Wait Time in Minutes", "Initial Wait Time in Minutes", 
-      "initial wait time", "Initial_Wait_Time", "initial_wait_time"
+    "Travel Time by Car in Minutes": [
+      "Travel Time by Car in Minutes", "Average Travel Time by Car in Minutes",
+      "Driving Duration with Traffic in Minutes", "Average Driving Duration with Traffic in Minutes",
+      "driving duration with traffic", "Driving_Duration_with_Traffic", "driving_duration_with_traffic", "travel time by car"
+    ],
+    "Transit to Car Travel Time Ratio": [
+      "Transit to Car Travel Time Ratio", "Transit: Driving", "Transit to Driving Ratio",
+      "transit driving", "Transit_Driving", "transit_driving", "transit to car"
+    ],
+    "Number of Transfers": [
+      "Number of Transfers", "Transfers", "transfers", "TRANSFERS", "number of transfers"
     ],
     "Initial Walk Distance in Miles": [
-      "Average Initial Walk Distance in Miles", "Initial Walk Distance in Miles",
+      "Initial Walk Distance in Miles", "Average Initial Walk Distance in Miles",
       "initial walk distance", "Initial_Walk_Distance", "initial_walk_distance"
     ],
-    "Initial Walk Duration in Minutes": [
-      "Average Initial Walk Duration in Minutes", "Initial Walk Duration in Minutes",
-      "initial walk duration", "Initial_Walk_Duration", "initial_walk_duration"
+    "Initial Walk Time in Minutes": [
+      "Initial Walk Time in Minutes", "Average Initial Walk Time in Minutes",
+      "Initial Walk Duration in Minutes", "Average Initial Walk Duration in Minutes",
+      "initial walk time", "initial walk duration", "Initial_Walk_Duration", "initial_walk_duration", "Initial_Walk_Time"
     ],
-    "Total Wait Duration in Minutes": [
-      "Average Total Wait Duration in Minutes", "Total Wait Duration in Minutes",
-      "total wait duration", "Total_Wait_Duration", "total_wait_duration"
+    "Initial Wait Time in Minutes": [
+      "Initial Wait Time in Minutes", "Average Initial Wait Time in Minutes", 
+      "initial wait time", "Initial_Wait_Time", "initial_wait_time"
     ],
     "Total Walk Distance in Miles": [
-      "Average Total Walk Distance in Miles", "Total Walk Distance in Miles",
+      "Total Walk Distance in Miles", "Average Total Walk Distance in Miles",
       "total walk distance", "Total_Walk_Distance", "total_walk_distance"
     ],
-    "Total Walk Duration in minutes": [
-      "Average Total Walk Duration in minutes", "Total Walk Duration in minutes",
-      "total walk duration", "Total_Walk_Duration", "total_walk_duration"
+    "Total Walk Time": [
+      "Total Walk Time", "Average Total Walk Time",
+      "Total Walk Duration in Minutes", "Average Total Walk Duration in Minutes",
+      "Total Walk Duration in minutes", "Average Total Walk Duration in minutes",
+      "total walk duration", "Total_Walk_Duration", "total_walk_duration", "total walk time"
     ],
-    "Transfers": [
-      "Transfers", "transfers", "TRANSFERS"
+    "Total Wait Time in Minutes": [
+      "Total Wait Time in Minutes", "Average Total Wait Time in Minutes",
+      "Total Wait Duration in Minutes", "Average Total Wait Duration in Minutes",
+      "total wait duration", "Total_Wait_Duration", "total_wait_duration", "total wait time"
     ],
-    "In-Vehicle Duration in Minutes": [
-      "Average In-Vehicle Duration in Minutes", "In-Vehicle Duration in Minutes",
-      "in-vehicle duration", "In_Vehicle_Duration", "in_vehicle_duration"
+    "In-Vehicle Travel Time in Minutes": [
+      "In-Vehicle Travel Time in Minutes", "Average In-Vehicle Travel Time in Minutes",
+      "In-Vehicle Duration in Minutes", "Average In-Vehicle Duration in Minutes",
+      "in-vehicle duration", "In_Vehicle_Duration", "in_vehicle_duration", "in-vehicle travel time"
     ],
-    "Out-of-Vehicle Duration in Minutes": [
-      "Average Out-of-Vehicle Duration in Minutes", "Out-of-Vehicle Duration in Minutes",
-      "out-of-vehicle duration", "Out_of_Vehicle_Duration", "out_of_vehicle_duration"
+    "Out-of-Vehicle Travel Time in Minutes": [
+      "Out-of-Vehicle Travel Time in Minutes", "Average Out-of-Vehicle Travel Time in Minutes",
+      "Out-of-Vehicle Duration in Minutes", "Average Out-of-Vehicle Duration in Minutes",
+      "out-of-vehicle duration", "Out_of_Vehicle_Duration", "out_of_vehicle_duration", "out-of-vehicle travel time"
     ],
-    "In-Vehicle:Out-of-Vehicle": [
-      "In-Vehicle:Out-of-Vehicle", "in-vehicle:out-of-vehicle", "In_Vehicle_Out_of_Vehicle", "in_vehicle_out_of_vehicle"
-    ],
-    "Travel Duration in Minutes": [
-      "Average Travel Duration in Minutes", "Travel Duration in Minutes",
-      "travel duration", "Travel_Duration", "travel_duration"
-    ],
-    "Driving Duration with Traffic in Minutes": [
-      "Average Driving Duration with Traffic in Minutes", "Driving Duration with Traffic in Minutes",
-      "driving duration with traffic", "Driving_Duration_with_Traffic", "driving_duration_with_traffic"
+    "In-Vehicle to Out-of-Vehicle Time Ratio": [
+      "In-Vehicle to Out-of-Vehicle Time Ratio", "In-Vehicle:Out-of-Vehicle",
+      "in-vehicle:out-of-vehicle", "In_Vehicle_Out_of_Vehicle", "in_vehicle_out_of_vehicle", "in-vehicle to out-of-vehicle"
     ],
     "Sample Size": [
       "Sample Size", "sample size", "Sample_Size", "sample_size"
@@ -731,16 +806,41 @@ function populateMetricSelect() {
   // Create a mapping from our desired names to actual database names
   const metricMapping = createMetricMapping(allStateData);
   
-  // Use ordered metrics with mapping
+  // Group metrics by category
+  let currentGroup = null;
+  let currentOptgroup = null;
+  
+  // Use ordered metrics with mapping and grouping
   ORDERED_TRANSIT_METRICS.forEach(desiredName => {
+    // Skip empty strings (visual breaks)
+    if (!desiredName) return;
+    
     const actualName = metricMapping[desiredName];
     if (actualName) {
+      const group = getMetricGroup(desiredName);
+      
+      // Create new optgroup if group changed
+      if (group !== currentGroup) {
+        currentOptgroup = document.createElement('optgroup');
+        currentOptgroup.label = group;
+        currentOptgroup.style.fontWeight = 'bold';
+        currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+        select.appendChild(currentOptgroup);
+        currentGroup = group;
+      }
+      
       const option = document.createElement('option');
       option.value = actualName; // Use actual database name as value
       option.textContent = desiredName; // Show desired name to user
-      select.appendChild(option);
+      option.dataset.group = group;
+      currentOptgroup.appendChild(option);
     }
   });
+  
+  // Set the dropdown to show the currently selected metric
+  if (selectedMetric) {
+    select.value = selectedMetric;
+  }
   
   // Remove any existing event listeners to prevent duplicates
   select.removeEventListener('change', handleMetricChange);
@@ -805,6 +905,18 @@ function addInfoButtonToMetricSelection(mapType) {
 
 function handleMetricChange(event) {
   selectedMetric = event.target.value;
+  
+  if (selectedMetric === '' || !selectedMetric) {
+    // If "Select a metric" is chosen, show plain map without colors
+    if (usMap && usMap.svg) {
+      usMap.svg.selectAll('.state').attr('fill', '#bdc3c7'); // Plain gray color
+    }
+    // Clear legend
+    const legend = document.getElementById('legend');
+    if (legend) legend.innerHTML = '';
+    return;
+  }
+  
   updateMapColors();
   createDistributionChart();
   createTopBottomChart();
@@ -911,6 +1023,7 @@ function createLegendWithBreaks(breaks, colors, isHighGood, validValues = []) {
   legend.innerHTML = legendContent;
   console.log('Legend updated successfully');
 }
+
 
 function createLegend(minVal, maxVal) {
   const legend = document.getElementById('legend');
@@ -1163,7 +1276,27 @@ function createUSMap() {
         .attr('text-anchor', 'middle')
         .attr('font-size', '10px')
         .attr('fill', '#2c3e50')
-        .text(d => statesData[d.id]?.abbr || '');
+        .style('cursor', 'pointer')
+        .style('pointer-events', 'all') // Enable pointer events for text
+        .text(d => statesData[d.id]?.abbr || '')
+        .on('click', (event, d) => {
+          event.stopPropagation(); // Prevent event bubbling
+          handleStateClick(d.id);
+        })
+        .on('mouseover', function(event, d) {
+          d3.select(this).attr('cursor', 'pointer').attr('font-size', '12px');
+          // Also highlight the corresponding state path
+          d3.select(`path[data-state-id="${d.id}"]`).attr('stroke-width', 2);
+          // Show full state name
+          d3.select(this).text(statesData[d.id]?.name || '');
+        })
+        .on('mouseout', function(event, d) {
+          d3.select(this).attr('font-size', '10px');
+          // Reset state path highlight
+          d3.select(`path[data-state-id="${d.id}"]`).attr('stroke-width', 1);
+          // Show abbreviation again
+          d3.select(this).text(statesData[d.id]?.abbr || '');
+        });
       mapContainer.appendChild(svg.node());
       usMap = { svg, path, projection, states, colorScale };
       
@@ -1463,6 +1596,8 @@ function createCountyMap(stateId) {
               d3.selectAll('.county-tooltip').remove();
             }
           });
+        
+        // County names removed - only hover tooltips remain
           
         mapContainer.classList.remove('zoom-to-county');
         document.getElementById('mapTitle').textContent = `${statesData[stateId].name} Counties`;
@@ -1759,10 +1894,18 @@ function displayCountryMetrics(data) {
   
   // Display metrics in the specified order using the mapping
   ORDERED_TRANSIT_METRICS.forEach(desiredName => {
+    // Skip empty strings (visual breaks)
+    if (!desiredName) return;
+    
     const actualName = metricMapping[desiredName];
     if (actualName && metrics[actualName]) {
       const card = document.createElement('div');
       card.className = 'metric-card';
+      
+      // Add colored left border based on metric group
+      const group = getMetricGroup(desiredName);
+      const groupColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color : '#3498db';
+      card.style.borderLeft = `4px solid ${groupColor}`;
       
       const label = document.createElement('span');
       label.className = 'metric-label';
@@ -1815,10 +1958,18 @@ function displayStateMetrics(data, stateName) {
   
   // Display metrics in the specified order WITHOUT Average prefix for side panel
   ORDERED_TRANSIT_METRICS.forEach(desiredName => {
+    // Skip empty strings (visual breaks)
+    if (!desiredName) return;
+    
     const actualName = metricMapping[desiredName];
     if (actualName && metricMap[actualName] !== undefined) {
       const card = document.createElement('div');
       card.className = 'metric-card';
+      
+      // Add colored left border based on metric group
+      const group = getMetricGroup(desiredName);
+      const groupColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color : '#3498db';
+      card.style.borderLeft = `4px solid ${groupColor}`;
       
       const label = document.createElement('span');
       label.className = 'metric-label';
@@ -1830,9 +1981,7 @@ function displayStateMetrics(data, stateName) {
       
       const value = document.createElement('span');
       value.className = 'metric-value';
-      const valueText = typeof metricMap[actualName] === 'number' ? 
-        formatNumberToTwoDecimals(metricMap[actualName]).toFixed(2) : 
-        metricMap[actualName];
+      const valueText = metricMap[actualName];
       const formattedValue = formatMetricValue(desiredName, valueText);
       value.textContent = formattedValue;
       
@@ -1860,32 +2009,55 @@ function displayFrequencyDistributions(data) {
   
   // Define the frequency chart mappings with info text
   const frequencyChartInfo = {
+    // NEW NAMES
+    'Travel Time by Transit in Minutes': 'This chart shows the distribution of travel durations by transit across different time ranges. It helps identify the most common travel times and patterns in the selected area.',
+    'Travel Time by Car in Minutes': 'This chart shows the distribution of travel durations by car across different time ranges.',
+    'Transit to Car Travel Time Ratio': 'This chart illustrates the ratio between transit travel time and car travel time. Values closer to 1 indicate similar travel times, while higher values suggest transit takes longer.',
+    'Number of Transfers': 'This chart shows the distribution of transfer counts during transit journeys. It helps understand the complexity of transit routes and the number of connections required.',
+    'Initial Walk Time in Minutes': 'This chart displays the distribution of initial walking durations before boarding transit. It shows how long people typically walk to reach their first transit stop.',
+    'Initial Walk Distance in Miles': 'This chart displays the distribution of initial walking distances to reach transit stops. It shows how far people typically walk to access public transportation.',
+    'Initial Wait Time in Minutes': 'This chart shows the distribution of waiting times at the first transit stop. It indicates how long passengers typically wait for their initial transit connection.',
+    'Out-of-Vehicle Travel Time in Minutes': 'This chart displays the distribution of time spent outside of vehicles during transit journeys, including walking and waiting times.',
+    'In-Vehicle Travel Time in Minutes': 'This chart shows the distribution of time spent inside transit vehicles during journeys. It represents the actual riding time on buses, trains, or other transit modes.',
+    'Total Walk Time': 'This chart displays the distribution of total walking time throughout the entire journey, including initial and transfer walks.',
+    'Total Walk Distance in Miles': 'This chart shows the distribution of total walking distance for complete transit journeys, including all walking segments.',
+    'In-Vehicle to Out-of-Vehicle Time Ratio': 'This chart illustrates the ratio between time spent in vehicles versus time spent walking and waiting. It helps understand the efficiency of transit journeys.',
+    'Total Wait Time in Minutes': 'This chart displays the distribution of total waiting time across all transit stops during a journey, including initial and transfer waits.',
+    // OLD NAMES (for backward compatibility)
     'Travel Duration in Minutes': 'This chart shows the distribution of travel durations across different time ranges. It helps identify the most common travel times and patterns in the selected area.',
     'Initial Walk Duration in Minutes': 'This chart displays the distribution of initial walking durations before boarding transit. It shows how long people typically walk to reach their first transit stop.',
     'Transit to Driving Ratio': 'This chart illustrates the ratio between transit travel time and driving time. Values closer to 1 indicate similar travel times, while higher values suggest transit takes longer.',
     'Transfers': 'This chart shows the distribution of transfer counts during transit journeys. It helps understand the complexity of transit routes and the number of connections required.',
-    'Initial Walk Distance in Miles': 'This chart displays the distribution of initial walking distances to reach transit stops. It shows how far people typically walk to access public transportation.',
-    'Initial Wait Time in Minutes': 'This chart shows the distribution of waiting times at the first transit stop. It indicates how long passengers typically wait for their initial transit connection.',
     'Out-Of-Vehicle Duration In Minutes': 'This chart displays the distribution of time spent outside of vehicles during transit journeys, including walking and waiting times.',
     'In-Vehicle Duration in Minutes': 'This chart shows the distribution of time spent inside transit vehicles during journeys. It represents the actual riding time on buses, trains, or other transit modes.',
     'Total Walk Duration in Minutes': 'This chart displays the distribution of total walking time throughout the entire journey, including initial and transfer walks.',
-    'Total Walk Distance in Miles': 'This chart shows the distribution of total walking distance for complete transit journeys, including all walking segments.',
     'In-Vehicle To Out-Of-Vehicle Ratio': 'This chart illustrates the ratio between time spent in vehicles versus time spent walking and waiting. It helps understand the efficiency of transit journeys.',
     'Total Wait Duration In Minutes': 'This chart displays the distribution of total waiting time across all transit stops during a journey, including initial and transfer waits.'
   };
   
-  // Create ordered frequency chart names based on the same order as average values
+  // Create ordered frequency chart names in user-requested order
   const orderedFrequencyCharts = [
-    'Travel Duration in Minutes',
-    'Initial Walk Duration in Minutes', 
-    'Transit to Driving Ratio',
-    'Transfers',
+    // NEW NAMES (try first)
+    'Travel Time by Transit in Minutes',
+    'Transit to Car Travel Time Ratio',
+    'Number of Transfers',
+    'Initial Walk Time in Minutes',
     'Initial Walk Distance in Miles',
     'Initial Wait Time in Minutes',
+    'Out-of-Vehicle Travel Time in Minutes',
+    'In-Vehicle Travel Time in Minutes',
+    'Total Walk Time',
+    'Total Walk Distance in Miles',
+    'In-Vehicle to Out-of-Vehicle Time Ratio',
+    'Total Wait Time in Minutes',
+    // OLD NAMES (for backward compatibility)
+    'Travel Duration in Minutes',
+    'Transit to Driving Ratio',
+    'Transfers',
+    'Initial Walk Duration in Minutes',
     'Out-Of-Vehicle Duration In Minutes',
     'In-Vehicle Duration in Minutes',
     'Total Walk Duration in Minutes',
-    'Total Walk Distance in Miles',
     'In-Vehicle To Out-Of-Vehicle Ratio',
     'Total Wait Duration In Minutes'
   ];
@@ -1920,7 +2092,35 @@ function displayFrequencyDistributions(data) {
   // If no ordered data found, fall back to original data
   const dataToProcess = orderedData.length > 0 ? orderedData : Object.entries(data);
   
+  // Map old database collection names to new display names
+  const displayNameMapping = {
+    'Travel Duration in Minutes': 'Travel Time by Transit in Minutes',
+    'Transit to Driving Ratio': 'Transit to Car Travel Time Ratio',
+    'Transfers': 'Number of Transfers',
+    'Initial Walk Duration in Minutes': 'Initial Walk Time in Minutes',
+    'Out-Of-Vehicle Duration In Minutes': 'Out-of-Vehicle Travel Time in Minutes',
+    'In-Vehicle Duration in Minutes': 'In-Vehicle Travel Time in Minutes',
+    'Total Walk Duration in Minutes': 'Total Walk Time',
+    'In-Vehicle To Out-Of-Vehicle Ratio': 'In-Vehicle to Out-of-Vehicle Time Ratio',
+    'Total Wait Duration In Minutes': 'Total Wait Time in Minutes'
+  };
+  
+  // Track displayed charts to avoid duplicates
+  const displayedCharts = new Set();
+  
   dataToProcess.forEach(([collectionName, stateData]) => {
+    // Remove "Frequency-" prefix from collection name
+    let cleanTitle = collectionName.replace(/^Frequency-\s*/, '').replace(/^Frequency\s*/, '');
+    
+    // Map to new display name if available
+    const displayTitle = displayNameMapping[cleanTitle] || cleanTitle;
+    
+    // Skip if already displayed (avoid duplicates)
+    if (displayedCharts.has(displayTitle)) {
+      return;
+    }
+    displayedCharts.add(displayTitle);
+    
     const wrapper = document.createElement('div');
     wrapper.className = 'chart-wrapper';
     wrapper.style.marginBottom = '2rem'; // Add gap between charts
@@ -1932,9 +2132,7 @@ function displayFrequencyDistributions(data) {
     titleContainer.style.gap = '0.5rem';
     
     const title = document.createElement('h4');
-    // Remove "Frequency-" prefix from title
-    const cleanTitle = collectionName.replace(/^Frequency-\s*/, '');
-    title.textContent = cleanTitle;
+    title.textContent = displayTitle;
     title.style.margin = '0';
     
     // Create info button
@@ -1946,7 +2144,7 @@ function displayFrequencyDistributions(data) {
     // Add click handler for info button
     infoButton.addEventListener('click', () => {
       // Try to load from frequency_metrics.txt file first, fallback to hardcoded text
-      showInfoPopup(cleanTitle, 'frequency');
+      showInfoPopup(displayTitle, 'frequency');
     });
     
     titleContainer.appendChild(title);
@@ -1978,9 +2176,9 @@ function displayFrequencyDistributions(data) {
     
     // Determine units for x-axis title
     let xAxisTitle = 'Range';
-    if (cleanTitle.includes('Minutes') || cleanTitle.includes('Duration')) {
+    if (displayTitle.includes('Minutes') || displayTitle.includes('Duration') || displayTitle.includes('Time')) {
       xAxisTitle = 'Range (in min)';
-    } else if (cleanTitle.includes('Miles') || cleanTitle.includes('Distance')) {
+    } else if (displayTitle.includes('Miles') || displayTitle.includes('Distance')) {
       xAxisTitle = 'Range (in miles)';
     }
     
@@ -2097,36 +2295,67 @@ function displayCountyData(data, countyName) {
   document.getElementById('countyName').textContent = countyName;
   grid.innerHTML = '';
   if (data.averages) {
-    // Display metrics in the specified order with Average prefix
-    ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
-      if (data.averages[metricName] !== undefined) {
+    // Create mapping from database field names to display names
+    const databaseToDisplayMapping = {
+      'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)': 'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)',
+      'Average Travel Duration in Minutes': 'Travel Time by Transit in Minutes',
+      'Average Driving Duration with Traffic in Minutes': 'Travel Time by Car in Minutes',
+      'Transit: Driving': 'Transit to Car Travel Time Ratio',
+      'Transfers': 'Number of Transfers',
+      'Average Initial Walk Distance in Miles': 'Initial Walk Distance in Miles',
+      'Average Initial Walk Duration in Minutes': 'Initial Walk Time in Minutes',
+      'Average Initial Wait Time in Minutes': 'Initial Wait Time in Minutes',
+      'Average Total Walk Distance in Miles': 'Total Walk Distance in Miles',
+      'Average Total Walk Duration in minutes': 'Total Walk Time in Minutes',
+      'Average Total Wait Duration in Minutes': 'Total Wait Time in Minutes',
+      'Average In-Vehicle Duration in Minutes': 'In-Vehicle Travel Time in Minutes',
+      'Average Out-of-Vehicle Duration in Minutes': 'Out-of-Vehicle Travel Time in Minutes',
+      'In-Vehicle:Out-of-Vehicle': 'In-Vehicle to Out-of-Vehicle Time Ratio',
+      'Sample Size': 'Sample Size'
+    };
+    
+    // Display metrics in the specified order using the main ORDERED_TRANSIT_METRICS array
+    ORDERED_TRANSIT_METRICS.forEach(desiredName => {
+      // Skip empty strings (visual breaks)
+      if (!desiredName) return;
+      
+      // Find the database field name that maps to this display name
+      const databaseFieldName = Object.keys(databaseToDisplayMapping).find(
+        dbField => databaseToDisplayMapping[dbField] === desiredName
+      );
+      
+      if (databaseFieldName && data.averages[databaseFieldName] !== undefined) {
         const card = document.createElement('div');
         card.className = 'metric-card';
         
+        // Add colored left border based on metric group
+        const group = getMetricGroup(desiredName);
+        const groupColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color : '#3498db';
+        card.style.borderLeft = `4px solid ${groupColor}`;
+        
         const label = document.createElement('span');
         label.className = 'metric-label';
-        // For county, remove "Average" from display but keep it for info lookup
-        const displayName = formatMetricName(metricName.replace('Average ', ''));
+        const displayName = formatMetricName(desiredName);
         label.textContent = displayName;
         
-        const infoButton = createInfoButton(metricName, 'county');
+        const infoButton = createInfoButton(databaseFieldName, 'county');
         label.appendChild(infoButton);
         
         const value = document.createElement('span');
         value.className = 'metric-value';
         
         // Check if the value is null, undefined, or empty and replace with NO ACCESS
-        const rawValue = data.averages[metricName];
+        const rawValue = data.averages[databaseFieldName];
         if (rawValue === null || rawValue === undefined || rawValue === '') {
           value.textContent = 'NO ACCESS';
         } else {
           // Special handling for Percent Access in county view - multiply by 100
           let valueToFormat = rawValue;
-          if (metricName.includes('Percent Access')) {
+          if (databaseFieldName.includes('Percent Access')) {
             valueToFormat = valueToFormat * 100;
           }
           
-          const formattedValue = formatMetricValue(metricName, valueToFormat);
+          const formattedValue = formatMetricValue(desiredName, valueToFormat);
           value.textContent = formattedValue;
         }
         
@@ -2148,18 +2377,42 @@ function displayCountyData(data, countyName) {
       '#0984e3', '#fd9644', '#eb3b5a', '#6c5ce7', '#00b894', '#fdcb6e'
     ];
     
-    // Create ordered frequency chart names for county
+    // Create ordered frequency chart names for county with proper display names
+    const frequencyChartMapping = {
+      'Frequency-Travel Duration in Minutes': 'Travel Time by Transit in Minutes',
+      'Frequency-Initial Walk Duration in Minutes': 'Initial Walk Time in Minutes',
+      'Frequency-Initial Walk Distance in Miles': 'Initial Walk Distance in Miles',
+      'Frequency-Initial Wait Time in Minutes': 'Initial Wait Time in Minutes',
+      'Frequency-Total Walk Duration in Minutes': 'Total Walk Time in Minutes',
+      'Frequency-Total Walk Distance in Miles': 'Total Walk Distance in Miles'
+    };
+    
     const orderedFrequencyCharts = [
-      'Travel Duration in Minutes',
-      'Initial Walk Duration in Minutes', 
-      'Transit to Driving Ratio',
-      'Transfers',
+      'Frequency-Travel Duration in Minutes',
+      'Frequency-Initial Walk Duration in Minutes',
+      'Frequency-Initial Walk Distance in Miles',
+      'Frequency-Initial Wait Time in Minutes',
+      'Frequency-Total Walk Duration in Minutes',
+      'Frequency-Total Walk Distance in Miles',
+      // OLD NAMES (for backward compatibility)
+      'Travel Time by Transit in Minutes',
+      'Transit to Car Travel Time Ratio',
+      'Number of Transfers',
+      'Initial Walk Time in Minutes',
       'Initial Walk Distance in Miles',
       'Initial Wait Time in Minutes',
+      'Out-of-Vehicle Travel Time in Minutes',
+      'In-Vehicle Travel Time in Minutes',
+      'Total Walk Time in Minutes',
+      'Total Walk Distance in Miles',
+      'In-Vehicle to Out-of-Vehicle Time Ratio',
+      'Total Wait Time in Minutes',
+      'Travel Duration in Minutes',
+      'Transit to Driving Ratio',
+      'Transfers',
       'Out-Of-Vehicle Duration In Minutes',
       'In-Vehicle Duration in Minutes',
       'Total Walk Duration in Minutes',
-      'Total Walk Distance in Miles',
       'In-Vehicle To Out-Of-Vehicle Ratio',
       'Total Wait Duration In Minutes'
     ];
@@ -2204,8 +2457,8 @@ function displayCountyData(data, countyName) {
       titleContainer.style.gap = '0.5rem';
       
       const title = document.createElement('h4');
-      // Remove "Frequency-" prefix from title
-      const cleanTitle = collectionName.replace(/^Frequency-\s*/, '');
+      // Use proper display name from mapping, or fallback to removing "Frequency-" prefix
+      const cleanTitle = frequencyChartMapping[collectionName] || collectionName.replace(/^Frequency-\s*/, '');
       title.textContent = cleanTitle;
       title.style.margin = '0';
       
@@ -2310,6 +2563,12 @@ function createCountyTopBottomChart() {
     countyTopBottomChart.destroy();
   }
   if (!allCountyData || allCountyData.length === 0) return;
+  
+  // Get display name for chart label
+  const select = document.getElementById('countyMetricSelect');
+  const selectedOption = select ? select.options[select.selectedIndex] : null;
+  const metricDisplayName = selectedOption ? (selectedOption.dataset.displayName || selectedOption.textContent) : selectedCountyMetric;
+  
   const countyValues = allCountyData.map(doc => ({
     county: doc.title,
     value: Number(doc[selectedCountyMetric])
@@ -2325,7 +2584,7 @@ function createCountyTopBottomChart() {
     data: {
       labels: labels,
       datasets: [{
-        label: selectedCountyMetric,
+        label: metricDisplayName,
         data: data,
         backgroundColor: colors,
         borderColor: colors,
@@ -2355,21 +2614,122 @@ function populateCountyMetricSelect(availableMetrics) {
   const select = document.getElementById('countyMetricSelect');
   select.innerHTML = '';
   
+  // Create mapping between new display names and old database names
+  const metricPatterns = {
+    "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)": [
+      "Percent Access", "percent access", "Percent_Access", "percent_access"
+    ],
+    "Average Travel Time by Transit in Minutes": [
+      "Average Travel Time by Transit in Minutes", "Average Travel Duration in Minutes",
+      "travel duration", "Travel_Duration", "travel_duration"
+    ],
+    "Average Travel Time by Car in Minutes": [
+      "Average Travel Time by Car in Minutes", "Average Driving Duration with Traffic in Minutes",
+      "driving duration with traffic", "Driving_Duration_with_Traffic", "driving_duration_with_traffic"
+    ],
+    "Transit to Car Travel Time Ratio": [
+      "Transit to Car Travel Time Ratio", "Transit: Driving", "Transit to Driving Ratio",
+      "transit driving", "Transit_Driving", "transit_driving"
+    ],
+    "Number of Transfers": [
+      "Number of Transfers", "Transfers", "transfers", "TRANSFERS"
+    ],
+    "Average Initial Walk Distance in Miles": [
+      "Average Initial Walk Distance in Miles", "initial walk distance", "Initial_Walk_Distance"
+    ],
+    "Average Initial Walk Time in Minutes": [
+      "Average Initial Walk Time in Minutes", "Average Initial Walk Duration in Minutes",
+      "initial walk time", "initial walk duration", "Initial_Walk_Duration", "Initial_Walk_Time"
+    ],
+    "Average Initial Wait Time in Minutes": [
+      "Average Initial Wait Time in Minutes", "initial wait time", "Initial_Wait_Time"
+    ],
+    "Average Total Walk Distance in Miles": [
+      "Average Total Walk Distance in Miles", "total walk distance", "Total_Walk_Distance"
+    ],
+    "Average Total Walk Time": [
+      "Average Total Walk Time in Minutes", "Average Total Walk Duration in Minutes", "Average Total Walk Duration in minutes",
+      "total walk duration", "Total_Walk_Duration", "total walk time"
+    ],
+    "Average Total Wait Time in Minutes": [
+      "Average Total Wait Time in Minutes", "Average Total Wait Duration in Minutes",
+      "total wait duration", "Total_Wait_Duration", "total wait time"
+    ],
+    "Average In-Vehicle Travel Time in Minutes": [
+      "Average In-Vehicle Travel Time in Minutes", "Average In-Vehicle Duration in Minutes",
+      "in-vehicle duration", "In_Vehicle_Duration", "in-vehicle travel time"
+    ],
+    "Average Out-of-Vehicle Travel Time in Minutes": [
+      "Average Out-of-Vehicle Travel Time in Minutes", "Average Out-of-Vehicle Duration in Minutes",
+      "out-of-vehicle duration", "Out_of_Vehicle_Duration", "out-of-vehicle travel time"
+    ],
+    "In-Vehicle to Out-of-Vehicle Time Ratio": [
+      "In-Vehicle to Out-of-Vehicle Time Ratio", "In-Vehicle:Out-of-Vehicle",
+      "in-vehicle:out-of-vehicle", "In_Vehicle_Out_of_Vehicle"
+    ],
+    "Sample Size": [
+      "Sample Size", "sample size", "Sample_Size", "sample_size"
+    ]
+  };
+  
+  // Group metrics by category
+  let currentGroup = null;
+  let currentOptgroup = null;
+  
   // Use ordered metrics with Average prefix for county data
-  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
-    // Check if this metric exists in the available metrics
-    if (availableMetrics.includes(metricName)) {
+  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(displayName => {
+    // Skip empty strings (visual breaks)
+    if (!displayName) return;
+    
+    // Try to find matching database field name
+    let databaseFieldName = null;
+    
+    // First try exact match
+    if (availableMetrics.includes(displayName)) {
+      databaseFieldName = displayName;
+    } else if (metricPatterns[displayName]) {
+      // Try pattern variations
+      for (const pattern of metricPatterns[displayName]) {
+        const match = availableMetrics.find(dbField => 
+          dbField === pattern ||
+          dbField.toLowerCase().includes(pattern.toLowerCase()) ||
+          pattern.toLowerCase().includes(dbField.toLowerCase()) ||
+          dbField.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === pattern.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+        );
+        if (match) {
+          databaseFieldName = match;
+          break;
+        }
+      }
+    }
+    
+    // If we found a match, add to dropdown with grouping
+    if (databaseFieldName) {
+      const group = getMetricGroup(displayName);
+      
+      // Create new optgroup if group changed
+      if (group !== currentGroup) {
+        currentOptgroup = document.createElement('optgroup');
+        currentOptgroup.label = group;
+        currentOptgroup.style.fontWeight = 'bold';
+        currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+        select.appendChild(currentOptgroup);
+        currentGroup = group;
+      }
+      
       const option = document.createElement('option');
-      option.value = metricName;
-      option.textContent = metricName;
-      select.appendChild(option);
+      option.value = databaseFieldName;  // Use database field name for data lookup
+      option.textContent = displayName;   // Show new display name to user
+      option.dataset.displayName = displayName;
+      option.dataset.group = group;
+      currentOptgroup.appendChild(option);
     }
   });
   
   // Set default to "Percent Access" if available, otherwise first option
   if (select.options.length > 0) {
     const percentAccessOption = Array.from(select.options).find(option => 
-      option.value === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
+      option.textContent === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
     );
     if (percentAccessOption) {
       select.value = percentAccessOption.value;
@@ -2422,10 +2782,11 @@ function addInfoButtonToCountyMetricSelection(mapType) {
   
   infoBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    const currentMetric = document.getElementById('countyMetricSelect').value;
-    if (currentMetric) {
-      // For county metrics, we need to remove "Average" prefix for display
-      const displayName = currentMetric.replace('Average ', '');
+    const select = document.getElementById('countyMetricSelect');
+    const selectedOption = select.options[select.selectedIndex];
+    if (selectedOption) {
+      // Use the display name from the option's dataset, or fall back to textContent
+      const displayName = selectedOption.dataset.displayName || selectedOption.textContent;
       showInfoPopup(displayName, mapType);
     } else {
       showInfoPopup('Select a metric first', 'Please select a metric from the dropdown to view its information.');
@@ -2460,7 +2821,6 @@ function updateCountyMapColors() {
   const metricValues = {};
   const validValues = [];
   let nullCount = 0;
-  let naCount = 0;
   
   // Process all county data
   allCountyData.forEach(doc => {
@@ -2468,47 +2828,70 @@ function updateCountyMapColors() {
       const countyName = String(doc.title);
       const normalizedCountyName = normalizeCountyNameForComparison(countyName);
       
-      // Get the raw value
+      // Get the raw value for the selected metric
       const rawValue = doc[selectedCountyMetric];
       
-      if (rawValue === null || rawValue === undefined || rawValue === '') {
-        // Truly missing data - N/A
-        metricValues[normalizedCountyName] = 'NA';
-        naCount++;
-        console.log(`${countyName}: N/A (missing data)`);
-      } else if (typeof rawValue === 'number') {
-        if (rawValue === 0) {
-          // Zero value means NULL data for subsequent metrics
-          metricValues[normalizedCountyName] = 'NULL';
+      console.log(`Processing ${countyName}: rawValue=${rawValue}, type=${typeof rawValue}, metric=${selectedCountyMetric}`);
+      
+      // Check if Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes) is zero for this county (skip Sample Size metric)
+      if (selectedCountyMetric !== 'Sample Size') {
+        const percentAccessValue = doc['Percent Access'];
+        const hasZeroPercentAccess = (percentAccessValue === 0 || percentAccessValue === 0.0);
+        
+        console.log(`Percent Access for ${countyName}: ${percentAccessValue}, hasZeroPercentAccess: ${hasZeroPercentAccess}`);
+        
+        if (hasZeroPercentAccess) {
+          metricValues[normalizedCountyName] = 'No Access';
           nullCount++;
-          console.log(`${countyName}: NULL (zero value indicates null)`);
+          console.log(`${countyName}: No Access (zero Percent Access for this county)`);
+          return; // Skip processing - exclude from natural breaks
+        }
+      }
+      
+      // Process non-zero values only (only reached if Percent Access is non-zero)
+      if (rawValue === null || rawValue === undefined || rawValue === '') {
+        // Missing data for the selected metric - but since Percent Access is non-zero, this shouldn't happen
+        metricValues[normalizedCountyName] = 'No Access';
+        nullCount++;
+        console.log(`${countyName}: No Access (missing data for selected metric but non-zero Percent Access)`);
+      } else if (typeof rawValue === 'number') {
+        // Valid numeric value (not zero)
+        let valueToProcess = rawValue;
+        if (selectedCountyMetric.includes('Percent Access')) {
+          valueToProcess = valueToProcess * 100;
+        }
+        
+        // Additional check: if this is the Percent Access metric and the value is 0, treat as No Access
+        if (selectedCountyMetric.includes('Percent Access') && rawValue === 0) {
+          metricValues[normalizedCountyName] = 'No Access';
+          nullCount++;
+          console.log(`${countyName}: No Access (zero Percent Access value for Percent Access metric)`);
+          return; // Skip processing - exclude from natural breaks
+        }
+        
+        const formattedValue = formatNumberToTwoDecimals(valueToProcess);
+        metricValues[normalizedCountyName] = formattedValue;
+        validValues.push(formattedValue);
+        console.log(`${countyName}: ${formattedValue}`);
+      } else if (typeof rawValue === 'string') {
+        const parsed = parseFloat(rawValue.trim());
+        if (isNaN(parsed)) {
+          metricValues[normalizedCountyName] = 'No Access';
+          nullCount++;
+          console.log(`${countyName}: No Access (unparseable string: ${rawValue})`);
         } else {
-          // Special handling for Percent Access in county data - multiply by 100
-          let valueToProcess = rawValue;
+          // Valid parsed value (not zero)
+          let valueToProcess = parsed;
           if (selectedCountyMetric.includes('Percent Access')) {
             valueToProcess = valueToProcess * 100;
           }
           
-          const formattedValue = formatNumberToTwoDecimals(valueToProcess);
-          metricValues[normalizedCountyName] = formattedValue;
-          validValues.push(formattedValue);
-          console.log(`${countyName}: ${formattedValue}`);
-        }
-      } else if (typeof rawValue === 'string') {
-        const parsed = parseFloat(rawValue.trim());
-        if (isNaN(parsed)) {
-          metricValues[normalizedCountyName] = 'NA';
-          naCount++;
-          console.log(`${countyName}: N/A (unparseable string: ${rawValue})`);
-        } else if (parsed === 0) {
-          metricValues[normalizedCountyName] = 'NULL';
-          nullCount++;
-          console.log(`${countyName}: NULL (zero string value)`);
-        } else {
-          // Special handling for Percent Access in county data - multiply by 100
-          let valueToProcess = parsed;
-          if (selectedCountyMetric.includes('Percent Access')) {
-            valueToProcess = valueToProcess * 100;
+          // Additional check: if this is the Percent Access metric and the parsed value is 0, treat as No Access
+          if (selectedCountyMetric.includes('Percent Access') && parsed === 0) {
+            metricValues[normalizedCountyName] = 'No Access';
+            nullCount++;
+            console.log(`${countyName}: No Access (zero Percent Access parsed value for Percent Access metric)`);
+            return; // Skip processing - exclude from natural breaks
           }
           
           const formattedValue = formatNumberToTwoDecimals(valueToProcess);
@@ -2517,14 +2900,20 @@ function updateCountyMapColors() {
           console.log(`${countyName}: ${formattedValue}`);
         }
       } else {
-        metricValues[normalizedCountyName] = 'NA';
-        naCount++;
-        console.log(`${countyName}: N/A (unknown type: ${typeof rawValue})`);
+        metricValues[normalizedCountyName] = 'No Access';
+        nullCount++;
+        console.log(`${countyName}: No Access (unknown type: ${typeof rawValue})`);
       }
     }
   });
   
-  console.log(`Processed counties: ${validValues.length} valid values, ${nullCount} NULL, ${naCount} N/A`);
+  console.log(`Processed counties: ${validValues.length} valid values, ${nullCount} No Access`);
+  console.log(`Selected metric: ${selectedCountyMetric}`);
+  console.log(`Is Percent Access metric: ${selectedCountyMetric.includes('Percent Access')}`);
+  
+  // Debug: Show some sample metric values
+  const sampleValues = Object.entries(metricValues).slice(0, 5);
+  console.log('Sample metric values:', sampleValues);
   
   // Create color scale for valid numeric values only
   let colorScale;
@@ -2548,7 +2937,6 @@ function updateCountyMapColors() {
   // Update county colors
   let coloredCount = 0;
   let nullColoredCount = 0;
-  let naColoredCount = 0;
   
   countyMap.svg.selectAll('.county-path')
     .each(function() {
@@ -2564,58 +2952,94 @@ function updateCountyMapColors() {
       const value = metricValues[normalizedMapName];
       
       let color;
-      if (value === 'NULL') {
-        // Zero value indicates NULL data - use black
-        color = '#000000';
+      if (value === 'No Access') {
+        // Counties with zero Percent Access - use pattern instead of black
+        color = 'noAccess';
         nullColoredCount++;
-      } else if (value === 'NA') {
-        // Missing data - use grey
-        color = '#808080';
-        naColoredCount++;
       } else if (value !== undefined && !isNaN(value) && colorScale) {
         // Valid numeric value - use color scale
         color = colorScale(value);
         coloredCount++;
       } else {
-        // Fallback to N/A
-        color = '#808080';
-        naColoredCount++;
+        // Fallback to No Access
+        color = 'noAccess';
+        nullColoredCount++;
       }
       
-      // Apply the color
-      d3.select(this)
-        .attr('fill', color)
-        .attr('original-fill', color);
+      // Apply the color (with special handling for No Access pattern)
+      if (color === 'noAccess') {
+        // Create pattern for No Access areas on counties
+        const svg = countyMap.svg;
+        let defs = svg.select('defs');
+        if (defs.empty()) {
+          defs = svg.append('defs');
+        }
+        
+        // Create or reuse the No Access pattern
+        if (defs.select('#countyNoAccessPattern').empty()) {
+          const pattern = defs.append('pattern')
+            .attr('id', 'countyNoAccessPattern')
+            .attr('patternUnits', 'userSpaceOnUse')
+            .attr('width', 6)
+            .attr('height', 6);
+          
+          pattern.append('rect')
+            .attr('width', 6)
+            .attr('height', 6)
+            .attr('fill', '#f8f9fa');
+          
+          pattern.append('path')
+            .attr('d', 'M0,6 l6,-6 M-1.5,1.5 l3,-3 M4.5,7.5 l3,-3')
+            .attr('stroke', '#6c757d')
+            .attr('stroke-width', 1.5);
+        }
+        
+        d3.select(this)
+          .attr('fill', 'url(#countyNoAccessPattern)')
+          .attr('original-fill', 'url(#countyNoAccessPattern)');
+      } else {
+        d3.select(this)
+          .attr('fill', color)
+          .attr('original-fill', color);
+      }
       
-      // Handle selection state - keep all counties clickable
+      // Handle selection state - keep all counties clickable and maintain highlighting
       if (selectedCounty) {
         const normalizedSelectedName = normalizeCountyNameForComparison(selectedCounty);
-        if (normalizedMapName !== normalizedSelectedName) {
-          d3.select(this)
-            .attr('data-clickable', 'true') // Keep clickable
-            .style('cursor', 'pointer')
-            .attr('opacity', 0.3);
-        } else {
+        if (normalizedMapName === normalizedSelectedName) {
+          // Selected county gets prominent boundary and full opacity
           d3.select(this)
             .attr('data-clickable', 'true')
             .style('cursor', 'pointer')
-            .attr('opacity', 1);
+            .attr('opacity', 1)
+            .attr('stroke', '#2c41ff')
+            .attr('stroke-width', 3);
+        } else {
+          // Other counties remain fully clickable with normal styling
+          d3.select(this)
+            .attr('data-clickable', 'true')
+            .style('cursor', 'pointer')
+            .attr('opacity', 1)
+            .attr('stroke', '#666')
+            .attr('stroke-width', 1);
         }
       } else {
+        // No county selected - all counties normal styling
         d3.select(this)
           .attr('data-clickable', 'true')
           .style('cursor', 'pointer')
-          .attr('opacity', 1);
+          .attr('opacity', 1)
+          .attr('stroke', '#666')
+          .attr('stroke-width', 1);
       }
     });
   
-  console.log(`Applied colors: ${coloredCount} valid, ${nullColoredCount} NULL (black), ${naColoredCount} N/A (grey)`);
+  console.log(`Applied colors: ${coloredCount} valid, ${nullColoredCount} No Access (black)`);
   
   // Store data for legend
   countyMap.colorScale = colorScale;
   countyMap.validValues = validValues;
   countyMap.hasNullValues = nullCount > 0;
-  countyMap.hasNAValues = naCount > 0;
 }
 
 function createCountyLegendForMap() {
@@ -2625,8 +3049,9 @@ function createCountyLegendForMap() {
   const colorScale = countyMap?.colorScale;
   const validValues = countyMap?.validValues || [];
   const hasNullValues = countyMap?.hasNullValues || false;
-  const hasNAValues = countyMap?.hasNAValues || false;
-  console.log('County legend data:', { validValues: validValues.length, hasNullValues, hasNAValues });
+  console.log('County legend data:', { validValues: validValues.length, hasNullValues });
+  console.log('Selected county metric:', selectedCountyMetric);
+  console.log('Is Percent Access metric:', selectedCountyMetric.includes('Percent Access'));
   
   if (!selectedCountyMetric) {
     legend.innerHTML = `<h3>Select a metric</h3>`;
@@ -2642,17 +3067,8 @@ function createCountyLegendForMap() {
     if (hasNullValues) {
       legendContent += `
         <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: #000000; border: 1px solid #ccc;"></div> 
-          <span>NULL</span>
-        </div>
-      `;
-    }
-    
-    if (hasNAValues) {
-      legendContent += `
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: #808080;"></div> 
-          <span>N/A</span>
+          <div style="width: 20px; height: 20px; background: repeating-linear-gradient(45deg, #f8f9fa 0px, #f8f9fa 3px, #6c757d 3px, #6c757d 6px); border: 1px solid #6c757d;"></div> 
+          <span>No Access</span>
         </div>
       `;
     }
@@ -2682,8 +3098,9 @@ function createCountyLegendForMap() {
       const allValues = [...validValues];
       const actualMin = Math.min(...allValues);
       const actualMax = Math.max(...allValues);
+      console.log('Range values:', { allValues, actualMin, actualMax, breaks });
       
-      // Create ranges based on breaks
+      // Create ranges based on breaks - ensure proper range boundaries
       if (breaks.length === 1) {
         ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
         ranges.push({ min: breaks[0], max: actualMax, color: colors[1] });
@@ -2691,19 +3108,24 @@ function createCountyLegendForMap() {
         ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
         ranges.push({ min: breaks[0], max: breaks[1], color: colors[1] });
         ranges.push({ min: breaks[1], max: actualMax, color: colors[2] });
-      } else {
+      } else if (breaks.length > 2) {
         // Handle more than 2 breaks
         ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
         for (let i = 0; i < breaks.length - 1; i++) {
           ranges.push({ min: breaks[i], max: breaks[i + 1], color: colors[i + 1] });
         }
         ranges.push({ min: breaks[breaks.length - 1], max: actualMax, color: colors[colors.length - 1] });
+      } else {
+        // No breaks - single range
+        ranges.push({ min: actualMin, max: actualMax, color: colors[0] });
       }
       
       ranges.forEach(range => {
         const rangeText = range.max === actualMax ? 
           `${range.min.toFixed(2)} - ${range.max.toFixed(2)}` : 
           `${range.min.toFixed(2)} - ${range.max.toFixed(2)}`;
+        
+        console.log('Range:', { min: range.min, max: range.max, text: rangeText, color: range.color });
         
         legendContent += `
           <div style="display: flex; align-items: center; gap: 5px;">
@@ -2714,22 +3136,12 @@ function createCountyLegendForMap() {
       });
     }
     
-    // Add No Access legend if present
+    // Add No Access legend if present (when counties have zero Percent Access)
     if (hasNullValues) {
       legendContent += `
         <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: #000000; border: 1px solid #ccc;"></div> 
+          <div style="width: 20px; height: 20px; background: repeating-linear-gradient(45deg, #f8f9fa 0px, #f8f9fa 3px, #6c757d 3px, #6c757d 6px); border: 1px solid #6c757d;"></div> 
           <span>No Access</span>
-        </div>
-      `;
-    }
-    
-    // Add N/A legend if present
-    if (hasNAValues) {
-      legendContent += `
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <div style="width: 20px; height: 20px; background: #808080;"></div> 
-          <span>N/A</span>
         </div>
       `;
     }
@@ -2740,7 +3152,9 @@ function createCountyLegendForMap() {
   console.log('Setting county legend content:', legendContent);
   legend.innerHTML = legendContent;
   console.log('County legend updated successfully');
+  console.log('Final legend HTML:', legend.innerHTML);
 }
+
 // -----------------------------------------------------------------------------
 // SCROLLBAR RESTORATION FUNCTION
 function restoreScrollbarFunctionality() {
@@ -3009,21 +3423,109 @@ function populateTransitMetricDropdown() {
   
   console.log("Populating transit metrics:", transitMetricKeys);
   
+  // Create mapping patterns (similar to county metrics) - COMPLETE LIST
+  const metricPatterns = {
+    "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)": [
+      "Percent Access", "percent access", "Percent_Access"
+    ],
+    "Average Travel Time by Transit in Minutes": [
+      "Average Travel Time by Transit in Minutes", "Average Travel Duration in Minutes", "Travel Duration in Minutes"
+    ],
+    "Average Travel Time by Car in Minutes": [
+      "Average Travel Time by Car in Minutes", "Average Driving Duration with Traffic in Minutes", "Driving Duration with Traffic in Minutes"
+    ],
+    "Transit to Car Travel Time Ratio": [
+      "Transit to Car Travel Time Ratio", "Transit: Driving", "Transit to Driving Ratio"
+    ],
+    "Number of Transfers": [
+      "Number of Transfers", "Transfers", "transfers"
+    ],
+    "Average Initial Walk Distance in Miles": [
+      "Average Initial Walk Distance in Miles", "Initial Walk Distance in Miles"
+    ],
+    "Average Initial Walk Time in Minutes": [
+      "Average Initial Walk Time in Minutes", "Average Initial Walk Duration in Minutes", "Initial Walk Duration in Minutes"
+    ],
+    "Average Initial Wait Time in Minutes": [
+      "Average Initial Wait Time in Minutes", "Initial Wait Time in Minutes"
+    ],
+    "Average Total Walk Distance in Miles": [
+      "Average Total Walk Distance in Miles", "Total Walk Distance in Miles"
+    ],
+    "Average Total Walk Time": [
+      "Average Total Walk Time in Minutes", "Average Total Walk Duration in Minutes", "Total Walk Duration in Minutes"
+    ],
+    "Average Total Wait Time in Minutes": [
+      "Average Total Wait Time in Minutes", "Average Total Wait Duration in Minutes", "Total Wait Duration in Minutes"
+    ],
+    "Average In-Vehicle Travel Time in Minutes": [
+      "Average In-Vehicle Travel Time in Minutes", "Average In-Vehicle Duration in Minutes", "In-Vehicle Duration in Minutes"
+    ],
+    "Average Out-of-Vehicle Travel Time in Minutes": [
+      "Average Out-of-Vehicle Travel Time in Minutes", "Average Out-of-Vehicle Duration in Minutes", "Out-of-Vehicle Duration in Minutes"
+    ],
+    "In-Vehicle to Out-of-Vehicle Time Ratio": [
+      "In-Vehicle to Out-of-Vehicle Time Ratio", "In-Vehicle:Out-of-Vehicle"
+    ],
+    "Sample Size": [
+      "Sample Size", "sample size"
+    ]
+  };
+  
+  // Group metrics by category
+  let currentGroup = null;
+  let currentOptgroup = null;
+  
   // Use ordered metrics with Average prefix for equity comparison
-  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
-    // Check if this metric exists in the available metrics
-    if (transitMetricKeys.includes(metricName)) {
+  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(displayName => {
+    // Skip empty strings
+    if (!displayName) return;
+    
+    // Try to find matching database field
+    let databaseFieldName = null;
+    if (transitMetricKeys.includes(displayName)) {
+      databaseFieldName = displayName;
+    } else if (metricPatterns[displayName]) {
+      for (const pattern of metricPatterns[displayName]) {
+        const match = transitMetricKeys.find(dbField => 
+          dbField === pattern ||
+          dbField.toLowerCase().includes(pattern.toLowerCase()) ||
+          pattern.toLowerCase().includes(dbField.toLowerCase())
+        );
+        if (match) {
+          databaseFieldName = match;
+          break;
+        }
+      }
+    }
+    
+    // If found, add with grouping
+    if (databaseFieldName) {
+      const group = getMetricGroup(displayName);
+      
+      // Create new optgroup if group changed
+      if (group !== currentGroup) {
+        currentOptgroup = document.createElement('optgroup');
+        currentOptgroup.label = group;
+        currentOptgroup.style.fontWeight = 'bold';
+        currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+        select.appendChild(currentOptgroup);
+        currentGroup = group;
+      }
+      
       const option = document.createElement('option');
-      option.value = metricName;
-      option.textContent = metricName;
-      select.appendChild(option);
+      option.value = databaseFieldName;
+      option.textContent = displayName;
+      option.dataset.displayName = displayName;
+      option.dataset.group = group;
+      currentOptgroup.appendChild(option);
     }
   });
   
   if (select.options.length > 0) {
     // Set default to "Percent Access" if available, otherwise first option
     const percentAccessOption = Array.from(select.options).find(option => 
-      option.value === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
+      option.textContent === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
     );
     select.value = percentAccessOption ? percentAccessOption.value : select.options[0].value;
     selectedCountyMetric = select.value;
@@ -3378,7 +3880,7 @@ function initComparisonFunctionality() {
     exitComparisonMode();
   });
   
-  // Proceed to AI report generation instead of chart options
+  // Proceed to comparison page
   proceedToCompareBtn.addEventListener('click', function() {
     if (selectedEntitiesForComparison.length < 2) {
       alert('Please select at least 2 entities to compare.');
@@ -3388,8 +3890,12 @@ function initComparisonFunctionality() {
     // Exit comparison mode
     exitComparisonMode();
     
-    // Generate AI report directly
-    generateComprehensiveAIReport();
+    // Store selected states in sessionStorage to pass to comparison page
+    const stateNames = selectedEntitiesForComparison.map(entity => entity.name);
+    sessionStorage.setItem('selectedStatesForComparison', JSON.stringify(stateNames));
+    
+    // Redirect to comparison page
+    window.location.href = '/comparison';
   });
   
   // Close modal

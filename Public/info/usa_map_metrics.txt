@@ -3,8 +3,8 @@
 ## Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)
 USA Map natural breakdown metrics
 
-## Transit: Driving
-This metric compares transit travel time to driving time. Values closer to 1.0 indicate transit is competitive with driving, while higher values suggest transit takes significantly longer than driving.
+## Transit to Car Travel Time Ratio
+This metric compares transit travel time to car travel time. Values closer to 1.0 indicate transit is competitive with driving, while higher values suggest transit takes significantly longer than driving.
 
 ## Initial Wait Time in Minutes
 The average time passengers wait for their first transit vehicle. Lower values indicate better service frequency and reduced waiting times.
@@ -12,34 +12,34 @@ The average time passengers wait for their first transit vehicle. Lower values i
 ## Initial Walk Distance in Miles
 The average distance passengers walk to reach their first transit stop. Shorter distances indicate better transit coverage and accessibility.
 
-## Initial Walk Duration in Minutes
+## Initial Walk Time in Minutes
 The average time spent walking to reach the first transit stop. Shorter durations indicate better transit accessibility and coverage.
 
-## Total Wait Duration in Minutes
+## Total Wait Time in Minutes
 The total time spent waiting for transit vehicles throughout the entire journey. Lower values indicate more efficient transit service.
 
 ## Total Walk Distance in Miles
 The total distance walked throughout the entire transit journey. Shorter distances indicate better transit connectivity and fewer transfers.
 
-## Total Walk Duration in minutes
+## Total Walk Time
 The total time spent walking throughout the entire transit journey. Shorter durations indicate better transit connectivity and accessibility.
 
-## Transfers
+## Number of Transfers
 The average number of transfers required to complete a transit journey. Fewer transfers indicate better route planning and connectivity.
 
-## In-Vehicle Duration in Minutes
+## In-Vehicle Travel Time in Minutes
 The total time spent inside transit vehicles during the journey. This metric helps assess the efficiency of transit routes.
 
-## Out-of-Vehicle Duration in Minutes
+## Out-of-Vehicle Travel Time in Minutes
 The total time spent outside vehicles (walking, waiting, transferring) during the journey. Lower values indicate better transit efficiency.
 
-## In-Vehicle:Out-of-Vehicle
+## In-Vehicle to Out-of-Vehicle Time Ratio
 The ratio of time spent in vehicles to time spent outside vehicles. Higher ratios indicate more efficient transit service with less waiting and walking time.
 
-## Travel Duration in Minutes
+## Travel Time by Transit in Minutes
 The total time required to complete the transit journey from origin to destination. Shorter durations indicate more efficient transit service.
 
-## Driving Duration with Traffic in Minutes
+## Travel Time by Car in Minutes
 The time required to drive the same route during typical traffic conditions. This metric helps compare transit efficiency to driving.
 
 ## Sample Size

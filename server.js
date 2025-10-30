@@ -15,10 +15,10 @@ import authRoutes from './routes/auth.js';
 import comparisonRoutes from './routes/comparison.js';
 
 // Import middleware
-import { isGuestRoute } from './middleware/auth.js';
+import { isGuestRoute, authenticate } from './middleware/auth.js';
 
 // Import chatbot service
-import { TransitVizChatbot } from './services/huggingFaceService.js';
+import { OpenAIRagService } from './services/openAIRagService.js';
 
 
 // In server.js, near the top after imports
@@ -44,28 +44,26 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MongoDB connection configuration from environment variables
-const uri = process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility";
+const uri = process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitaccessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAccessibility";
 const dbName = process.env.DB_NAME || 'StateWiseComputation';
 const client = new MongoClient(uri);
 
 // Connect to MongoDB for Mongoose (for authentication)
 mongoose.connect(process.env.MONGODB_URI || uri, {
-  dbName: 'Login_authentication', // Database for user authentication
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+  dbName: 'Login_authentication' // Database for user authentication
 }).then(() => {
-  console.log('Connected to MongoDB for authentication');
+  console.log('✅ Connected to MongoDB 1 for authentication');
 }).catch(err => {
-  console.error('Error connecting to MongoDB for authentication:', err);
+  console.error('❌ Error connecting to MongoDB 1 for authentication:', err);
 });
 
 async function connectToMongoDB() {
   try {
     await client.connect();
-    console.log('Connected to MongoDB Atlas');
+    console.log('✅ Connected to MongoDB 1 for data');
     return client.db(dbName);
   } catch (error) {
-    console.error('Error connecting to MongoDB:', error);
+    console.error('❌ Error connecting to MongoDB 1:', error);
     process.exit(1);
   }
 }
@@ -477,6 +475,12 @@ startServer().catch(console.error);
 process.on('SIGINT', async () => {
   await client.close();
   await mongoose.connection.close();
+  
+  // Cleanup RAG service
+  if (ragService) {
+    await ragService.cleanup();
+  }
+  
   console.log('MongoDB connections closed');
   process.exit(0);
 });
@@ -489,11 +493,24 @@ app.get('/auth-debug', (req, res) => {
   });
 });
 
-// Chatbot endpoint
-app.post('/api/chatbot', async (req, res) => {
-  console.log('=== CHATBOT ENDPOINT CALLED ===');
+// Initialize OpenAI RAG Service (singleton instance)
+let ragService = null;
+
+async function getRagService() {
+  if (!ragService) {
+    console.log('🔄 Creating new OpenAI RAG service instance...');
+    ragService = new OpenAIRagService();
+    await ragService.initialize();
+    console.log('✅ OpenAI RAG service initialized');
+  }
+  return ragService;
+}
+
+// Chatbot endpoint with RAG (requires authentication)
+app.post('/api/chatbot', authenticate, async (req, res) => {
+  console.log('=== CHATBOT ENDPOINT CALLED (OpenAI RAG) ===');
   console.log('Request body:', req.body);
-  console.log('Request headers:', req.headers);
+  console.log('Authenticated user:', req.user.username);
   
   try {
     const { message, context } = req.body;
@@ -509,22 +526,20 @@ app.post('/api/chatbot', async (req, res) => {
       });
     }
 
-    console.log('Creating TransitVizChatbot instance...');
-    const chatbot = new TransitVizChatbot();
-    console.log('Chatbot instance created successfully');
+    console.log('Getting OpenAI RAG service...');
+    const chatbot = await getRagService();
     
     console.log('Calling chatbot.generateResponse...');
-    const response = await chatbot.generateResponse(message, context);
+    const response = await chatbot.generateResponse(message, context, req.user.username);
     console.log('Chatbot response received:', response);
     
-    console.log('Sending response to client:', response);
+    console.log('Sending response to client');
     res.json(response);
   } catch (error) {
     console.error('=== CHATBOT ENDPOINT ERROR ===');
     console.error('Error type:', error.constructor.name);
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
-    console.error('Full error object:', error);
     
     res.status(500).json({ 
       success: false, 

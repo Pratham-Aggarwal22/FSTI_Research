@@ -1,9 +1,9 @@
 /* Public/css/comparison.css */
-.comparison-container {
+  .comparison-container {
     display: flex;
-    height: calc(100vh - var(--navbar-height));
+    min-height: calc(100vh - var(--navbar-height));
     width: 100vw;
-    overflow: hidden;
+    overflow: visible;
   }
   
   .comparison-sidebar {
@@ -23,6 +23,8 @@
     padding: 2rem;
     background-color: var(--bg-light);
     transition: background-color var(--transition-medium);
+    min-height: 100vh;
+    height: auto;
   }
   
   .comparison-header {
@@ -44,6 +46,40 @@
   
   .comparison-controls {
     padding: 1.5rem;
+  }
+
+  /* Metrics Selection in Sidebar */
+  .metrics-selection-sidebar {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .metrics-selection-sidebar .control-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .metrics-selection-sidebar .custom-select {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    background-color: var(--bg-white);
+    color: var(--text-dark);
+    font-size: 0.875rem;
+    transition: all var(--transition-fast);
+  }
+
+  .metrics-selection-sidebar .custom-select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(44, 65, 255, 0.1);
+  }
+
+  .metrics-selection-sidebar .custom-select:disabled {
+    background-color: var(--bg-light);
+    color: var(--text-light);
+    cursor: not-allowed;
   }
   
   .control-group {
@@ -504,6 +540,14 @@
     
     .chart-container {
       height: 350px;
+    }
+    
+    /* Keep dynamic height for mobile too - shows all states */
+    .chart-container-full {
+      height: auto !important;
+      min-height: 400px !important;
+      max-height: none !important;
+      overflow: visible !important;
     }
   }
   
@@ -1395,4 +1439,717 @@
   .metrics-actions .compare-btn:disabled:hover {
     background-color: var(--text-light);
     transform: none;
+  }
+
+  /* New Comparison Interface Styles */
+  .new-comparison-interface {
+    display: none;
+    height: 100vh;
+    background: var(--background);
+  }
+
+  .comparison-controls-panel {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    border: 1px solid var(--border-color);
+  }
+
+  .control-row {
+    display: flex;
+    gap: 20px;
+    align-items: end;
+    flex-wrap: wrap;
+  }
+
+  .control-group {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .control-group label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+  }
+
+  .control-group label i {
+    color: var(--primary-color);
+  }
+
+  .custom-select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--background);
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: all 0.3s ease;
+  }
+
+  .custom-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  }
+
+  .custom-select:disabled {
+    background: var(--disabled-bg);
+    color: var(--text-disabled);
+    cursor: not-allowed;
+  }
+
+  /* County Controls */
+  .county-controls {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .county-selection {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .selected-counties {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 40px;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--background);
+  }
+
+  .selected-counties .placeholder {
+    color: var(--text-disabled);
+    font-style: italic;
+    align-self: center;
+  }
+
+  .selected-county {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 20px;
+    font-size: 14px;
+  }
+
+  .remove-county {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+  }
+
+  .remove-county:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .add-county-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--primary-color);
+    border-radius: 8px;
+    background: var(--background);
+    color: var(--primary-color);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    align-self: flex-start;
+  }
+
+  .add-county-btn:hover:not(:disabled) {
+    background: var(--primary-color);
+    color: white;
+  }
+
+  .add-county-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Chart Visualization Area */
+  .chart-visualization-area {
+    display: flex;
+    flex-direction: column;
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    border: 1px solid var(--border-color);
+    min-height: 600px;
+    width: 100%;
+  }
+
+  .chart-container-full {
+    position: relative;
+    height: auto; /* Dynamic height - grows with content */
+    min-height: 500px;
+    max-height: none;
+    border: 1px solid #e8e8e8;
+    border-radius: 4px;
+    padding: 30px 20px;
+    background: #ffffff;
+    overflow: visible; /* No scrollbar - all content visible */
+    margin-bottom: 2rem;
+    width: 100%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+
+  .chart-container-full canvas {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 500px; /* Minimum comfortable height */
+    max-height: none !important;
+  }
+
+  /* Dynamic sizing - container grows to show all states */
+  .chart-container-full.dynamic-size {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .chart-container-full.dynamic-size canvas {
+    height: auto !important;
+    min-height: 500px;
+  }
+
+  /* Custom scrollbar styling - prominent and user-friendly */
+  .chart-container-full::-webkit-scrollbar {
+    width: 12px;
+  }
+
+  .chart-container-full::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 6px;
+    margin: 10px 0;
+  }
+
+  .chart-container-full::-webkit-scrollbar-thumb {
+    background: #2c41ff;
+    border-radius: 6px;
+    border: 2px solid #f1f1f1;
+  }
+
+  .chart-container-full::-webkit-scrollbar-thumb:hover {
+    background: #1e2bb8;
+  }
+
+  /* Firefox scrollbar styling */
+  .chart-container-full {
+    scrollbar-width: thin;
+    scrollbar-color: #2c41ff #f1f1f1;
+  }
+
+  /* Scroll indicator for chart container */
+  .scroll-indicator {
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(44, 65, 255, 0.9);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 10;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    box-shadow: 0 4px 12px rgba(44, 65, 255, 0.3);
+    animation: bounce 2s infinite;
+  }
+
+  @keyframes bounce {
+    0%, 100% {
+      transform: translateX(-50%) translateY(0);
+    }
+    50% {
+      transform: translateX(-50%) translateY(-5px);
+    }
+  }
+
+  .scroll-indicator i {
+    font-size: 12px;
+  }
+
+  /* Chart Legend */
+  .chart-legend {
+    margin-top: 20px;
+    padding: 16px 20px;
+    background: #fafafa;
+    border-radius: 4px;
+    border: 1px solid #e8e8e8;
+  }
+
+  .legend-title {
+    font-weight: 500;
+    color: #4a4a4a;
+    margin-bottom: 12px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .legend-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #4a4a4a;
+    font-family: 'Inter', 'Arial', sans-serif;
+    font-weight: 500;
+  }
+
+  .legend-symbol {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Circle (default) */
+  .legend-symbol.mean {
+    background: #2c41ff;
+  }
+
+  /* Triangle (pointing up) */
+  .legend-symbol.triangle {
+    border-radius: 0;
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+    border: none;
+    box-shadow: none;
+  }
+
+  .legend-symbol.min.triangle {
+    background: #20bf6b;
+  }
+
+  /* Triangle pointing down */
+  .legend-symbol.triangle-down {
+    border-radius: 0;
+    clip-path: polygon(50% 100%, 0% 0%, 100% 0%);
+    border: none;
+    box-shadow: none;
+  }
+
+  .legend-symbol.max.triangle-down {
+    background: #fd9644;
+  }
+
+  /* Square */
+  .legend-symbol.square {
+    border-radius: 0;
+  }
+
+  .legend-symbol.percentile-10.square {
+    background: #f7b731;
+  }
+
+  /* Diamond (rotated square) */
+  .legend-symbol.diamond {
+    border-radius: 0;
+    transform: rotate(45deg);
+  }
+
+  .legend-symbol.percentile-90.diamond {
+    background: #eb3b5a;
+  }
+
+  /* Enhanced chart styles for new format */
+
+  /* State and County labels styling */
+  .y-axis-state-label {
+    font-weight: bold;
+    color: #2c41ff;
+    font-size: 14px;
+    text-shadow: 0 1px 2px rgba(44, 65, 255, 0.3);
+  }
+
+  .y-axis-county-label {
+    font-weight: normal;
+    color: #666;
+    font-size: 11px;
+    margin-left: 15px;
+    font-style: italic;
+  }
+
+  /* Enhanced chart grid styling for better readability */
+  .chart-container-full canvas {
+    background: linear-gradient(90deg, transparent 0%, rgba(44, 65, 255, 0.02) 50%, transparent 100%);
+  }
+
+  /* Grid lines enhancement */
+  .chart-grid-lines {
+    stroke: rgba(0, 0, 0, 0.1);
+    stroke-width: 1;
+  }
+
+  /* Statistical symbols */
+  .statistical-symbol {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 8px;
+    border-radius: 50%;
+  }
+
+  .statistical-symbol.triangle {
+    border-radius: 0;
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+  }
+
+  /* Chart legend enhancements - keep consistent with above */
+
+  /* County Modal Styles */
+  .county-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .county-modal-content {
+    background: white;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  }
+
+  .county-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  .county-modal-header h3 {
+    margin: 0;
+    color: #2c41ff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .close-county-modal {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: #666;
+    padding: 8px;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+  }
+
+  .close-county-modal:hover {
+    background-color: #f0f0f0;
+    color: #333;
+  }
+
+  .county-modal-body {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+  }
+
+  .county-search {
+    margin-bottom: 20px;
+  }
+
+  .county-search-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.2s ease;
+  }
+
+  .county-search-input:focus {
+    outline: none;
+    border-color: #2c41ff;
+    box-shadow: 0 0 0 3px rgba(44, 65, 255, 0.1);
+  }
+
+  .county-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+
+  .county-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+
+  .county-item:last-child {
+    border-bottom: none;
+  }
+
+  .county-item:hover {
+    background-color: #f8f9fa;
+  }
+
+  .county-item.selected {
+    background-color: #e3f2fd;
+    color: #2c41ff;
+  }
+
+  .county-checkbox {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .county-item.selected .county-checkbox {
+    background-color: #2c41ff;
+    border-color: #2c41ff;
+    color: white;
+  }
+
+  .county-info {
+    flex: 1;
+  }
+
+  .county-name {
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+
+  .county-state {
+    font-size: 12px;
+    color: #666;
+  }
+
+  .county-selection-info {
+    padding: 12px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 14px;
+    color: #666;
+  }
+
+  .county-modal-footer {
+    display: flex;
+    gap: 12px;
+    padding: 20px;
+    border-top: 1px solid #e0e0e0;
+    justify-content: flex-end;
+  }
+
+  .btn-primary, .btn-secondary {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s ease;
+  }
+
+  .btn-primary {
+    background-color: #2c41ff;
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: #1e2bb8;
+  }
+
+  .btn-secondary {
+    background-color: #f8f9fa;
+    color: #666;
+    border: 1px solid #ddd;
+  }
+
+  .btn-secondary:hover {
+    background-color: #e9ecef;
+  }
+
+  /* County Controls in Main Interface */
+  .county-controls {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #e0e0e0;
+  }
+
+  .county-selection {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .selected-counties {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 40px;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #f8f9fa;
+  }
+
+  .selected-counties .placeholder {
+    color: #999;
+    font-style: italic;
+    align-self: center;
+  }
+
+  .selected-county {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #2c41ff;
+    color: white;
+    border-radius: 20px;
+    font-size: 14px;
+  }
+
+  .remove-county {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+  }
+
+  .remove-county:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .add-county-btn {
+    padding: 8px 16px;
+    border: 1px solid #2c41ff;
+    border-radius: 8px;
+    background: white;
+    color: #2c41ff;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    align-self: flex-start;
+  }
+
+  .add-county-btn:hover:not(:disabled) {
+    background: #2c41ff;
+    color: white;
+  }
+
+  .add-county-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Dark mode adjustments for county modal */
+  .dark-mode .county-modal-content {
+    background: var(--bg-dark);
+  }
+
+  .dark-mode .county-modal-header {
+    border-bottom-color: var(--border-color);
+  }
+
+  .dark-mode .county-item {
+    border-bottom-color: var(--border-color);
+  }
+
+  .dark-mode .county-item:hover {
+    background-color: var(--bg-darker);
+  }
+
+  .dark-mode .county-item.selected {
+    background-color: rgba(44, 65, 255, 0.2);
+  }
+
+  .dark-mode .county-selection-info {
+    background-color: var(--bg-darker);
+  }
+
+  .dark-mode .county-modal-footer {
+    border-top-color: var(--border-color);
+  }
+
+  .dark-mode .selected-counties {
+    background: var(--bg-darker);
+    border-color: var(--border-color);
+  }
+
+  .dark-mode .add-county-btn {
+    background: var(--bg-dark);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+
+  .dark-mode .add-county-btn:hover:not(:disabled) {
+    background: var(--primary);
+    color: white;
   }

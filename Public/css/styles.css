@@ -996,6 +996,36 @@
     gap: 0.5rem;
     margin-bottom: 1.5rem;
   }
+
+  /* County-specific layout for fixed header and scrollable content */
+  .county-fixed-header {
+    position: sticky;
+    top: 0;
+    background-color: var(--bg-white);
+    z-index: 10;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+  }
+
+  .county-fixed-header .template-header {
+    margin-bottom: 1rem;
+  }
+
+  .county-scrollable-content {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-light) transparent;
+  }
+
+  /* Ensure the data panel content uses flexbox for county view */
+  .sidebar-content:has(.county-fixed-header) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
   
   .back-btn {
     align-self: flex-start;
@@ -1098,7 +1128,8 @@
     overflow: hidden;
   }
   
-  .metric-card::before {
+  /* Removed - now using dynamic colored borders per metric group via JavaScript */
+  /* .metric-card::before {
     content: '';
     position: absolute;
     top: 0;
@@ -1106,7 +1137,7 @@
     width: 4px;
     height: 100%;
     background-color: var(--primary);
-  }
+  } */
   
   .metric-card:hover {
     transform: translateY(-2px);
@@ -2446,6 +2477,99 @@
 
 .dark-mode .chatbot-header h3 {
   color: var(--text-white);
+}
+
+/* Chatbot Login Overlay */
+.chatbot-login-overlay {
+  position: relative;
+  background: var(--bg-white);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: 2rem;
+  text-align: center;
+  filter: blur(2px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.login-prompt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg-white);
+  border: 2px solid var(--primary);
+  border-radius: var(--border-radius-lg);
+  padding: 2rem;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+  pointer-events: all;
+  min-width: 300px;
+}
+
+.login-prompt i {
+  font-size: 3rem;
+  color: var(--primary);
+  margin-bottom: 1rem;
+  display: block;
+}
+
+.login-prompt h4 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-dark);
+  margin-bottom: 0.5rem;
+}
+
+.login-prompt p {
+  color: var(--text-medium);
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.login-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--primary);
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--border-radius-md);
+  text-decoration: none;
+  font-weight: 600;
+  transition: all var(--transition-fast);
+  border: none;
+  cursor: pointer;
+}
+
+.login-button:hover {
+  background: var(--primary-dark);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  color: white;
+  text-decoration: none;
+}
+
+.login-button:active {
+  transform: translateY(0);
+}
+
+.dark-mode .chatbot-login-overlay {
+  background: var(--bg-darker);
+  border-color: var(--border-color);
+}
+
+.dark-mode .login-prompt {
+  background: var(--bg-darker);
+  border-color: var(--primary);
+}
+
+.dark-mode .login-prompt h4 {
+  color: var(--text-white);
+}
+
+.dark-mode .login-prompt p {
+  color: var(--text-light);
 }
 
 /* Responsive adjustments */

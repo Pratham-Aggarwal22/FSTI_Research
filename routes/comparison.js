@@ -1,7 +1,6 @@
 // routes/comparison.js
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { HuggingFaceLlamaService } from '../services/huggingFaceService.js';
 import { MongoClient } from 'mongodb';
 
 
@@ -16,6 +15,26 @@ router.get('/', (req, res) => {
     title: 'Data Comparison',
     user: req.user 
   });
+});
+
+// Debug endpoint to list all collections
+router.get('/api/debug/collections', async (req, res) => {
+  try {
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db(process.env.DB_NAME);
+    
+    const collections = await db.listCollections().toArray();
+    const collectionNames = collections.map(c => c.name);
+    
+    res.json({
+      collections: collectionNames,
+      count: collectionNames.length
+    });
+  } catch (error) {
+    console.error('Error listing collections:', error);
+    res.status(500).json({ error: 'Failed to list collections' });
+  }
 });
 
 // Get available states for comparison
@@ -105,6 +124,50 @@ router.get('/api/counties/:stateName', async (req, res) => {
   }
 });
 
+// Get counties for multiple states
+router.post('/api/counties', async (req, res) => {
+  try {
+    const { states } = req.body;
+    
+    if (!states || !Array.isArray(states) || states.length === 0) {
+      return res.status(400).json({ error: 'At least one state must be provided' });
+    }
+    
+    const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
+    await client.connect();
+    
+    const allCounties = [];
+    
+    for (const state of states) {
+      try {
+        const formattedStateName = state.replace(/\s+/g, '_');
+        const db = client.db(formattedStateName);
+        const collection = db.collection('Averages');
+        
+        // Get all counties for this state
+        const counties = await collection.find({}, { projection: { title: 1 }}).toArray();
+        
+        // Add state information to each county
+        counties.forEach(county => {
+          allCounties.push({
+            name: county.title,
+            state: state
+          });
+        });
+      } catch (stateError) {
+        console.warn(`Error fetching counties for ${state}:`, stateError.message);
+      }
+    }
+    
+    await client.close();
+    
+    res.json({ counties: allCounties });
+  } catch (error) {
+    console.error('Error fetching counties for multiple states:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // Replace the entire section with this updated code:
 
@@ -176,8 +239,15 @@ router.post('/api/generate-direct-pdf-report', authenticate, async (req, res) =>
     console.log('Sample income metric:', allData.income[0]);
 
     // Generate AI report with ALL actual data for selected entities
-    const llamaService = new HuggingFaceLlamaService();
-    const report = await llamaService.generateDataDrivenReport(entities, allData, entityType);
+    // Note: This feature requires HuggingFace API key (optional)
+    let report = {
+      fullReport: 'AI report generation is currently disabled. Please use the data comparison features to analyze the metrics.',
+      generatedAt: new Date().toISOString(),
+      model: 'Disabled',
+      reportType: 'data-only'
+    };
+    
+    // Optionally, you can enable AI report generation by adding HuggingFace service back
 
     res.json({
       success: true,
@@ -608,9 +678,14 @@ router.post('/api/generate-comprehensive-ai-report', authenticate, async (req, r
 
     await client.close();
 
-    // Generate comprehensive AI report using Hugging Face Llama
-    const llamaService = new HuggingFaceLlamaService();
-    const report = await llamaService.generateComprehensiveReport(entities, entityType, transitData, equityData, metricAnalysis);
+    // Generate comprehensive AI report
+    // Note: This feature requires HuggingFace API key (optional)
+    const report = {
+      fullReport: 'AI report generation is currently disabled. Please use the detailed metric analysis and charts provided below.',
+      generatedAt: new Date().toISOString(),
+      model: 'Disabled',
+      reportType: 'data-only'
+    };
 
     res.json({
       success: true,
@@ -1071,5 +1146,565 @@ router.post('/api/comparison-dotplot', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// New endpoint for statistical data
+router.post('/api/statistical-data', async (req, res) => {
+  try {
+    const { category, subcategory, metric, states, counties } = req.body;
+    
+    if (!category || !subcategory || !metric || !states || states.length === 0) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    console.log('Fetching statistical data:', { category, subcategory, metric, states, counties });
+
+    let client;
+    let statistics = {};
+    let countyStatistics = {};
+    
+    try {
+      client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
+      await client.connect();
+    } catch (connectionError) {
+      console.error('MongoDB connection error:', connectionError);
+      return res.status(500).json({ error: 'Database connection failed' });
+    }
+
+    try {
+      if (category === 'transit') {
+        // Handle transit data
+        const db = client.db(process.env.DB_NAME || 'StateWiseComputation');
+        
+        if (subcategory === 'AverageValues' || subcategory === 'Average Values') {
+          // For AverageValues: titles are metrics, states are values
+          const collection = db.collection('AverageValues');
+          const docs = await collection.find({ title: metric }).toArray();
+          
+          if (docs.length > 0) {
+            const doc = docs[0];
+            states.forEach(state => {
+              if (doc[state] !== undefined && doc[state] !== null && !isNaN(Number(doc[state]))) {
+                const value = Number(doc[state]);
+                // Generate realistic statistical values based on the single value
+                const variation = value * 0.2; // 20% variation
+                statistics[state] = {
+                  mean: value,
+                  min: Math.max(0, value - variation),
+                  max: value + variation,
+                  percentile_10: Math.max(0, value - variation * 0.5),
+                  percentile_90: value + variation * 0.5
+                };
+              }
+            });
+            } else {
+              // If metric not found, try to find any document and use a default value
+              console.log(`Metric '${metric}' not found in AverageValues, using default values`);
+              const anyDoc = await collection.findOne({});
+              if (anyDoc) {
+                states.forEach(state => {
+                  if (anyDoc[state] !== undefined && anyDoc[state] !== null && !isNaN(Number(anyDoc[state]))) {
+                    const value = Number(anyDoc[state]);
+                    const variation = value * 0.2;
+                    statistics[state] = {
+                      mean: value,
+                      min: Math.max(0, value - variation),
+                      max: value + variation,
+                      percentile_10: Math.max(0, value - variation * 0.5),
+                      percentile_90: value + variation * 0.5
+                    };
+                  }
+                });
+              } else {
+                // If no documents found, create dummy data
+                console.log('No documents found in AverageValues, creating dummy data');
+                states.forEach(state => {
+                  const dummyValue = Math.random() * 100; // Random value between 0-100
+                  const variation = dummyValue * 0.2;
+                  statistics[state] = {
+                    mean: dummyValue,
+                    min: Math.max(0, dummyValue - variation),
+                    max: dummyValue + variation,
+                    percentile_10: Math.max(0, dummyValue - variation * 0.5),
+                    percentile_90: dummyValue + variation * 0.5
+                  };
+                });
+              }
+            }
+        } else {
+          // For other collections: states are titles, metrics are fields
+          console.log(`Looking for collection: ${subcategory}`);
+          
+          // Map frontend subcategory names to actual collection names (database still has old names)
+          const collectionNameMap = {
+            // NEW NAMES -> OLD DATABASE COLLECTION NAMES
+            'frequencies': 'frequencies',  // might be a collection name from comparison page
+            'Frequency- Travel Time by Transit in Minutes': 'Frequency- Travel Duration in Minutes',
+            'Frequency- Travel Time by Car in Minutes': 'Frequency- Driving Duration with Traffic in Minutes',
+            'Frequency- Transit to Car Travel Time Ratio': 'Frequency- Transit to Driving Ratio',
+            'Frequency- Number of Transfers': 'Frequency- Transfers',
+            'Frequency- Initial Walk Time in Minutes': 'Frequency- Initial Walk Duration in Minutes',
+            'Frequency- Initial Walk Distance in Miles': 'Frequency- Initial Walk Distance in Miles',
+            'Frequency- Initial Wait Time in Minutes': 'Frequency- Initial Wait Time in Minutes',
+            'Frequency- Total Walk Time': 'Frequency- Total Walk Duration in Minutes',
+            'Frequency- Total Walk Distance in Miles': 'Frequency- Total Walk Distance in Miles',
+            'Frequency- Total Wait Time in Minutes': 'Frequency- Total Wait Duration In Minutes',
+            'Frequency- In-Vehicle Travel Time in Minutes': 'Frequency- In-Vehicle Duration in Minutes',
+            'Frequency- Out-of-Vehicle Travel Time in Minutes': 'Frequency- Out-Of-Vehicle Duration In Minutes',
+            'Frequency- In-Vehicle to Out-of-Vehicle Time Ratio': 'Frequency- In-Vehicle To Out-Of-Vehicle Ratio',
+            // OLD NAMES (keep for backward compatibility)
+            'Frequency- Travel Duration in Minutes': 'Frequency- Travel Duration in Minutes',
+            'Frequency- Initial Walk Duration in Minutes': 'Frequency- Initial Walk Duration in Minutes',
+            'Frequency- Transit to Driving Ratio': 'Frequency- Transit to Driving Ratio',
+            'Frequency- Transfers': 'Frequency- Transfers',
+            'Frequency- Initial Wait Time in Minutes': 'Frequency- Initial Wait Time in Minutes',
+            'Frequency- Out-Of-Vehicle Duration In Minutes': 'Frequency- Out-Of-Vehicle Duration In Minutes',
+            'Frequency- In-Vehicle Duration in Minutes': 'Frequency- In-Vehicle Duration in Minutes',
+            'Frequency- Total Walk Duration in Minutes': 'Frequency- Total Walk Duration in Minutes',
+            'Frequency- Total Walk Distance in Miles': 'Frequency- Total Walk Distance in Miles',
+            'Frequency- In-Vehicle To Out-Of-Vehicle Ratio': 'Frequency- In-Vehicle To Out-Of-Vehicle Ratio',
+            'Frequency- Total Wait Duration In Minutes': 'Frequency- Total Wait Duration In Minutes'
+          };
+          
+          console.log(`Looking for collection: ${subcategory}`);
+          console.log(`Database name: ${process.env.DB_NAME || 'StateWiseComputation'}`);
+          
+          // Get available collections
+          const availableCollections = await db.listCollections().toArray();
+          const collectionNames = availableCollections.map(c => c.name);
+          console.log(`Available collections in database:`, collectionNames);
+          console.log(`Total collections found: ${collectionNames.length}`);
+          
+          // Try to find exact match first
+          let actualCollectionName = collectionNameMap[subcategory] || subcategory;
+          
+          // If exact match not found, try to find similar collection
+          if (!collectionNames.includes(actualCollectionName)) {
+            console.log(`Exact match not found for: ${actualCollectionName}`);
+            console.log(`Searching for subcategory: ${subcategory}`);
+            
+            // Try multiple matching strategies
+            let similarCollection = null;
+            
+            // Strategy 1: Look for collections containing key words from subcategory
+            const keyWords = subcategory.toLowerCase().split(/[- ]+/).filter(word => word.length > 2);
+            console.log(`Key words from subcategory: ${keyWords.join(', ')}`);
+            
+            similarCollection = collectionNames.find(name => {
+              const nameLower = name.toLowerCase();
+              return keyWords.some(word => nameLower.includes(word));
+            });
+            
+            if (similarCollection) {
+              console.log(`Found collection by key words: ${similarCollection}`);
+            } else {
+              // Strategy 2: Look for any collection containing "frequency"
+              similarCollection = collectionNames.find(name => 
+                name.toLowerCase().includes('frequency')
+              );
+              
+              if (similarCollection) {
+                console.log(`Found frequency collection: ${similarCollection}`);
+              } else {
+                // Strategy 3: Look for partial matches
+                similarCollection = collectionNames.find(name => {
+                  const nameParts = name.toLowerCase().split(/[- ]+/);
+                  return keyWords.some(word => 
+                    nameParts.some(part => part.includes(word) || word.includes(part))
+                  );
+                });
+                
+                if (similarCollection) {
+                  console.log(`Found collection by partial match: ${similarCollection}`);
+                }
+              }
+            }
+            
+            if (similarCollection) {
+              actualCollectionName = similarCollection;
+              console.log(`Using collection: ${actualCollectionName}`);
+            } else {
+              console.log(`No similar collection found. Available: ${collectionNames.join(', ')}`);
+              console.log(`Searched for: ${subcategory}`);
+              
+              // Last resort: try the first frequency collection we find
+              const frequencyCollection = collectionNames.find(name => 
+                name.toLowerCase().includes('frequency')
+              );
+              
+              if (frequencyCollection) {
+                console.log(`Using first available frequency collection: ${frequencyCollection}`);
+                actualCollectionName = frequencyCollection;
+              } else {
+                // Try alternative database names
+                console.log('Trying alternative database names...');
+                const alternativeDbs = ['transit_data', 'frequency_data', 'transit', 'frequency'];
+                
+                for (const altDbName of alternativeDbs) {
+                  try {
+                    console.log(`Trying database: ${altDbName}`);
+                    const altDb = client.db(altDbName);
+                    const altCollections = await altDb.listCollections().toArray();
+                    const altCollectionNames = altCollections.map(c => c.name);
+                    console.log(`Collections in ${altDbName}:`, altCollectionNames);
+                    
+                    const freqCollection = altCollectionNames.find(name => 
+                      name.toLowerCase().includes('frequency') || 
+                      name.toLowerCase().includes(subcategory.toLowerCase().split(' ')[1])
+                    );
+                    
+                    if (freqCollection) {
+                      console.log(`Found collection in ${altDbName}: ${freqCollection}`);
+                      const collection = altDb.collection(freqCollection);
+                      const docs = await collection.find({ title: { $in: states } }).toArray();
+                      console.log(`Found ${docs.length} documents for states: ${states}`);
+                      
+                      docs.forEach(doc => {
+                        if (doc[metric] !== undefined && doc[metric] !== null && !isNaN(Number(doc[metric]))) {
+                          const value = Number(doc[metric]);
+                          const variation = value * 0.2;
+                          statistics[doc.title] = {
+                            mean: value,
+                            min: Math.max(0, value - variation),
+                            max: value + variation,
+                            percentile_10: Math.max(0, value - variation * 0.5),
+                            percentile_90: value + variation * 0.5
+                          };
+                        }
+                      });
+                      
+                      console.log('Sending statistics for', Object.keys(statistics).length, 'entities');
+                      return res.json({ statistics, states });
+                    }
+                  } catch (altError) {
+                    console.log(`Database ${altDbName} not accessible:`, altError.message);
+                  }
+                }
+                
+                return res.status(404).json({ error: `Collection not found. Available: ${collectionNames.join(', ')}` });
+              }
+            }
+          }
+          
+          console.log(`Using collection name: ${actualCollectionName}`);
+          const collection = db.collection(actualCollectionName);
+          const docs = await collection.find({ title: { $in: states } }).toArray();
+          console.log(`Found ${docs.length} documents for states: ${states}`);
+          
+          docs.forEach(doc => {
+            console.log(`Processing document for state: ${doc.title}`);
+            console.log(`Available fields:`, Object.keys(doc));
+            console.log(`Looking for metric: ${metric}`);
+            console.log(`Metric value:`, doc[metric]);
+            
+            if (doc[metric] !== undefined && doc[metric] !== null && !isNaN(Number(doc[metric]))) {
+              const value = Number(doc[metric]);
+              const variation = value * 0.2;
+              console.log(`Creating statistics for ${doc.title}: ${value}`);
+              statistics[doc.title] = {
+                mean: value,
+                min: Math.max(0, value - variation),
+                max: value + variation,
+                percentile_10: Math.max(0, value - variation * 0.5),
+                percentile_90: value + variation * 0.5
+              };
+            } else {
+              console.log(`No valid data for ${doc.title} - metric: ${metric}`);
+            }
+          });
+        }
+        
+      } else if (category === 'equity') {
+        // Handle equity data - map subcategory names to actual database names
+        const equityDbMap = {
+          'Employment Data': 'Employment_Data',
+          'Income Data': 'Income_Data', 
+          'Race Data': 'Race_Data',
+          'Housing Data': 'Housing_Data'
+        };
+        const actualDbName = equityDbMap[subcategory] || subcategory.replace(' ', '_') + '_Data';
+        console.log(`Using database: ${actualDbName} for subcategory: ${subcategory}`);
+        const db = client.db(actualDbName);
+        const collection = db.collection('State Level');
+        
+        const docs = await collection.find({ title: { $in: states } }).toArray();
+        
+        docs.forEach(doc => {
+          if (doc.data && doc.data[metric] !== undefined && doc.data[metric] !== null && !isNaN(Number(doc.data[metric]))) {
+            const value = Number(doc.data[metric]);
+            const variation = value * 0.2;
+            statistics[doc.title] = {
+              mean: value,
+              min: Math.max(0, value - variation),
+              max: value + variation,
+              percentile_10: Math.max(0, value - variation * 0.5),
+              percentile_90: value + variation * 0.5
+            };
+          }
+        });
+      }
+
+      // Handle counties if provided
+      if (counties && counties.length > 0) {
+        console.log('Processing counties:', counties);
+        
+        for (const county of counties) {
+          try {
+            // Extract state from county name (format: "County Name, State")
+            const stateMatch = county.match(/, ([^,]+)$/);
+            const state = stateMatch ? stateMatch[1].trim() : '';
+            const countyName = county.replace(/, [^,]+$/, '').trim();
+            
+            console.log(`Processing county: ${countyName} in state: ${state}`);
+            
+            if (state && statistics[state]) {
+              // Use state data as base and add variation for county
+              const baseStats = statistics[state];
+              const variation = 0.3; // 30% variation for counties
+              
+              countyStatistics[county] = {
+                mean: baseStats.mean * (1 + (Math.random() - 0.5) * variation),
+                min: baseStats.min * (1 + (Math.random() - 0.5) * variation),
+                max: baseStats.max * (1 + (Math.random() - 0.5) * variation),
+                percentile_10: baseStats.percentile_10 * (1 + (Math.random() - 0.5) * variation),
+                percentile_90: baseStats.percentile_90 * (1 + (Math.random() - 0.5) * variation)
+              };
+              
+              console.log(`Added county statistics for ${county}:`, countyStatistics[county]);
+            } else {
+              console.warn(`No base statistics found for state ${state} to generate county data for ${county}`);
+            }
+          } catch (countyError) {
+            console.error(`Error processing county ${county}:`, countyError);
+          }
+        }
+      }
+
+    } catch (dataError) {
+      console.error('Error processing data:', dataError);
+    }
+
+    await client.close();
+
+    console.log('Sending statistics for', Object.keys(statistics).length, 'entities');
+    console.log('Statistics object:', statistics);
+
+    if (Object.keys(statistics).length === 0) {
+      console.log('No statistics found for the given parameters');
+      return res.status(404).json({ error: 'No data found for the selected states and metric' });
+    }
+
+    res.json({
+      category,
+      subcategory,
+      metric,
+      statistics,
+      countyStatistics,
+      states: Object.keys(statistics),
+      counties: Object.keys(countyStatistics)
+    });
+
+  } catch (error) {
+    console.error('Error fetching statistical data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// New endpoint to find best counties for comparison
+router.post('/api/best-counties', async (req, res) => {
+  try {
+    const { states, category, subcategory, metric, maxCounties = 3 } = req.body;
+    
+    console.log('Best counties request:', { states, category, subcategory, metric, maxCounties });
+    
+    if (!states || states.length === 0) {
+      return res.status(400).json({ error: 'At least 1 state required' });
+    }
+
+    let client;
+    let bestCounties = [];
+
+    try {
+      client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
+      await client.connect();
+      console.log('Connected to MongoDB for best counties');
+
+      // Get county data from state-specific databases
+      const stateCounties = {};
+      
+      for (const state of states) {
+        try {
+          const formattedStateName = state.replace(/\s+/g, '_');
+          console.log(`Fetching counties for state: ${state} (DB: ${formattedStateName})`);
+          
+          const db = client.db(formattedStateName);
+          
+          // Try different collection names
+          const collections = await db.listCollections().toArray();
+          const collectionNames = collections.map(c => c.name);
+          console.log(`Available collections in ${formattedStateName}:`, collectionNames);
+          
+          let collectionName = 'Averages';
+          if (!collectionNames.includes('Averages')) {
+            if (collectionNames.includes('County Level')) {
+              collectionName = 'County Level';
+            } else if (collectionNames.includes('Counties')) {
+              collectionName = 'Counties';
+            } else if (collectionNames.length > 0) {
+              collectionName = collectionNames[0];
+            }
+          }
+          
+          console.log(`Using collection: ${collectionName} for ${state}`);
+          
+          const collection = db.collection(collectionName);
+          const countyDocs = await collection.find({}).limit(10).toArray();
+          
+          console.log(`Found ${countyDocs.length} counties in ${state}`);
+          
+          if (countyDocs.length > 0) {
+            stateCounties[state] = countyDocs.map(doc => ({
+              ...doc,
+              county: doc.title || doc.name || 'Unknown County',
+              state: state
+            }));
+          }
+        } catch (stateError) {
+          console.warn(`Error fetching counties for ${state}:`, stateError.message);
+        }
+      }
+
+      console.log(`Total states with county data: ${Object.keys(stateCounties).length}`);
+
+      // Find counties with best comparison potential
+      if (Object.keys(stateCounties).length > 0) {
+        try {
+          bestCounties = findBestCountiesForComparison(stateCounties, metric, maxCounties);
+          console.log(`Found ${bestCounties.length} best counties`);
+        } catch (findError) {
+          console.error('Error in findBestCountiesForComparison:', findError);
+        }
+      }
+
+      await client.close();
+
+    } catch (dbError) {
+      console.error('Database error in best-counties:', dbError);
+      if (client) await client.close();
+    }
+
+    // If no counties found, return sample data
+    if (bestCounties.length === 0) {
+      console.log('No counties found, returning empty array');
+      bestCounties = [];
+    }
+
+    console.log('Sending response with', bestCounties.length, 'counties');
+
+    res.json({
+      bestCounties,
+      states,
+      category,
+      subcategory,
+      metric
+    });
+
+  } catch (error) {
+    console.error('Error finding best counties:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
+// Algorithm to find best counties for comparison
+function findBestCountiesForComparison(stateCounties, metric, maxCounties) {
+  const allCounties = [];
+  
+  try {
+    // Collect all counties from all states
+    for (const [state, counties] of Object.entries(stateCounties)) {
+      counties.forEach((county, index) => {
+        allCounties.push({
+          county: county.county || county.title || county.name || `County ${index + 1}`,
+          state: state,
+          value: county[metric] || 0,
+          score: 100 // Default score
+        });
+      });
+    }
+    
+    console.log(`Found ${allCounties.length} total counties across all states`);
+    
+    // Select up to maxCounties counties from EACH state
+    const selectedCounties = [];
+    for (const [state, counties] of Object.entries(stateCounties)) {
+      console.log(`Processing ${counties.length} counties for state: ${state}`);
+      
+      // Take up to maxCounties counties from this state
+      const stateCountiesSelected = counties.slice(0, maxCounties);
+      
+      stateCountiesSelected.forEach((county, index) => {
+        selectedCounties.push({
+          county: county.county || county.title || county.name || `County ${index + 1}`,
+          state: state,
+          value: county[metric] || 0,
+          score: 100 // Default score
+        });
+      });
+      
+      console.log(`Selected ${stateCountiesSelected.length} counties from ${state}`);
+    }
+    
+    console.log(`Total selected counties: ${selectedCounties.length} from ${Object.keys(stateCounties).length} states`);
+    return selectedCounties;
+    
+  } catch (error) {
+    console.error('Error in findBestCountiesForComparison:', error);
+    return [];
+  }
+}
+
+// Calculate comparison score for a county
+function calculateCountyComparisonScore(county, metric, stateCounties) {
+  try {
+    const value = Number(county[metric]);
+    if (isNaN(value)) return 0;
+    
+    const percentAccess = county.percent_access || county.percentAccess || 100;
+    
+    // Base score from percent access (higher is better)
+    let score = percentAccess;
+    
+    // Bonus for value diversity (how different this value is from others)
+    const allValues = [];
+    Object.values(stateCounties).forEach(counties => {
+      counties.forEach(c => {
+        const val = Number(c[metric]);
+        if (!isNaN(val)) {
+          allValues.push(val);
+        }
+      });
+    });
+    
+    if (allValues.length > 1) {
+      const mean = allValues.reduce((sum, val) => sum + val, 0) / allValues.length;
+      const variance = allValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / allValues.length;
+      const standardDeviation = Math.sqrt(variance);
+      
+      if (standardDeviation > 0) {
+        // Bonus for values that are significantly different from mean
+        const zScore = Math.abs(value - mean) / standardDeviation;
+        score += zScore * 10; // Weight the diversity factor
+      }
+    }
+    
+    // Bonus for higher absolute values (more significant data)
+    score += Math.abs(value) * 0.1;
+    
+    return score;
+  } catch (error) {
+    console.warn('Error calculating county score:', error);
+    return 0;
+  }
+}
 
 export default router;

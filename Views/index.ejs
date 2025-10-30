@@ -106,20 +106,33 @@
               </button>
             </div>
             <div class="chatbot-container" id="chatbotContainer">
-              <div class="chat-messages" id="chatMessages">
-                <div class="chat-message bot">
-                  <i class="fas fa-robot"></i>
-                  <div class="message-content">
-                    Hi! I can help you explore transit data. Ask me about states, counties, or specific metrics!
+              <% if (locals.isAuthenticated) { %>
+                <div class="chat-messages" id="chatMessages">
+                  <div class="chat-message bot">
+                    <i class="fas fa-robot"></i>
+                    <div class="message-content">
+                      Hi! I can help you explore transit data. Ask me about states, counties, or specific metrics!
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div class="chat-input-container">
-                <input type="text" id="chatInput" placeholder="Ask about transit data...">
-                <button id="sendMessage">
-                  <i class="fas fa-paper-plane"></i>
-                </button>
-              </div>
+                <div class="chat-input-container">
+                  <input type="text" id="chatInput" placeholder="Ask about transit data...">
+                  <button id="sendMessage">
+                    <i class="fas fa-paper-plane"></i>
+                  </button>
+                </div>
+              <% } else { %>
+                <div class="chatbot-login-overlay">
+                  <div class="login-prompt">
+                    <i class="fas fa-lock"></i>
+                    <h4>Login Required</h4>
+                    <p>Please log in to use the TransitViz Assistant</p>
+                    <a href="/auth/login" class="login-button">
+                      <i class="fas fa-sign-in-alt"></i> Login
+                    </a>
+                  </div>
+                </div>
+              <% } %>
             </div>
           </div>
         </div>
@@ -250,30 +263,34 @@
   </template>
   
   <template id="countyDataTemplate">
-    <div class="template-header">
-      <button id="backToStateButton" class="back-btn">
-        <i class="fas fa-arrow-left"></i> Back to State
-      </button>
-      <h2 id="countyName" class="data-title"></h2>
+    <div class="county-fixed-header">
+      <div class="template-header">
+        <button id="backToStateButton" class="back-btn">
+          <i class="fas fa-arrow-left"></i> Back to State
+        </button>
+        <h2 id="countyName" class="data-title"></h2>
+      </div>
+      
+      <div class="data-tabs">
+        <button id="averagesOption" class="data-tab active">
+          <i class="fas fa-chart-line"></i> Averages
+        </button>
+        <button id="frequencyOption" class="data-tab">
+          <i class="fas fa-chart-bar"></i> Frequency
+        </button>
+      </div>
     </div>
     
-    <div class="data-tabs">
-      <button id="averagesOption" class="data-tab active">
-        <i class="fas fa-chart-line"></i> Averages
-      </button>
-      <button id="frequencyOption" class="data-tab">
-        <i class="fas fa-chart-bar"></i> Frequency
-      </button>
-    </div>
-    
-    <div id="averagesSection">
-      <h3 class="section-title">County Averages</h3>
-      <div id="countyMetricsGrid" class="metric-grid"></div>
-    </div>
-    
-    <div id="frequencySection" style="display: none;">
-      <h3 class="section-title">Distribution Charts</h3>
-      <div id="countyChartsContainer" class="county-charts-container"></div>
+    <div class="county-scrollable-content">
+      <div id="averagesSection">
+        <h3 class="section-title">County Averages</h3>
+        <div id="countyMetricsGrid" class="metric-grid"></div>
+      </div>
+      
+      <div id="frequencySection" style="display: none;">
+        <h3 class="section-title">Distribution Charts</h3>
+        <div id="countyChartsContainer" class="county-charts-container"></div>
+      </div>
     </div>
   </template>
   
@@ -333,7 +350,10 @@
         this.chatbotToggle = document.getElementById('chatbotToggle');
         this.chatbotContainer = document.getElementById('chatbotContainer');
         
-        this.setupEventListeners();
+        // Only setup event listeners if elements exist (user is authenticated)
+        if (this.chatMessages && this.chatInput && this.sendButton) {
+          this.setupEventListeners();
+        }
       }
 
       setupEventListeners() {
