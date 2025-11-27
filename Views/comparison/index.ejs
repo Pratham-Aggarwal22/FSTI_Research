@@ -1,0 +1,193 @@
+<!-- Views/comparison/index.ejs -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TransitHub - Data Comparison</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/comparison.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Navbar -->
+    <nav class="navbar">
+      <div class="navbar-brand">
+        <a href="/" class="logo">
+          <i class="fas fa-bus"></i> TransitHub
+        </a>
+        <span class="tagline">Modern Transit Data Explorer</span>
+      </div>
+      
+      <div class="navbar-controls">
+        <div class="user-profile">
+          <i class="fas fa-user-circle"></i>
+          <span><%= user.username %></span>
+          <div class="user-dropdown">
+            <a href="/auth/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+          </div>
+        </div>
+        
+        <a href="/" class="nav-button">
+          <i class="fas fa-globe-americas"></i>
+          <span>Map View</span>
+        </a>
+        
+        <div class="theme-toggle">
+          <input type="checkbox" id="themeToggle" class="toggle-checkbox">
+          <label for="themeToggle" class="toggle-label">
+            <i class="fas fa-sun"></i>
+            <i class="fas fa-moon"></i>
+            <span class="toggle-ball"></span>
+          </label>
+        </div>
+      </div>
+    </nav>
+    
+    <!-- Comparison content -->
+    <div class="comparison-container">
+      <div class="comparison-sidebar">
+        <div class="sidebar-header">
+          <h2><i class="fas fa-chart-bar"></i> Statistical Comparison</h2>
+        </div>
+        
+        <div class="sidebar-content">
+          <div class="comparison-controls">
+            <div class="control-group">
+              <label><i class="fas fa-map-marked-alt"></i> Selected States</label>
+              <div id="selectedStatesDisplay" class="selected-states-display">
+                <!-- Selected states will be shown here -->
+              </div>
+            </div>
+            
+            <!-- Metrics Selection Controls in Sidebar -->
+            <div class="metrics-selection-sidebar">
+              <div class="control-group">
+                <label><i class="fas fa-layer-group"></i> Main Category</label>
+                <select id="mainCategorySelect" class="custom-select">
+                  <option value="">Select main category...</option>
+                  <option value="equity">Equity Data</option>
+                  <option value="transit">Transit Data</option>
+                </select>
+              </div>
+              
+              <div class="control-group">
+                <label><i class="fas fa-tags"></i> Subcategory</label>
+                <select id="subcategorySelect" class="custom-select" disabled>
+                  <option value="">Select subcategory...</option>
+                </select>
+              </div>
+              
+              <div class="control-group">
+                <label><i class="fas fa-chart-line"></i> Metric</label>
+                <select id="metricSelect" class="custom-select" disabled>
+                  <option value="">Select metric...</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="comparison-content">
+        <div class="comparison-header">
+          <h1>Statistical Data Comparison</h1>
+          <p class="subtitle">Compare statistical metrics across selected states</p>
+        </div>
+        
+        <!-- New Comparison Interface -->
+        <div class="new-comparison-interface" id="newComparisonInterface">
+          <div class="comparison-controls-panel">
+            <!-- County Selection Controls -->
+            <div class="county-controls" id="countyControls" style="display: none;">
+              <div class="control-group">
+                <label><i class="fas fa-map-marker-alt"></i> County Selection</label>
+                <div class="county-selection">
+                  <div class="selected-counties" id="selectedCounties">
+                    <div class="placeholder">No counties selected</div>
+                  </div>
+                  <button type="button" class="add-county-btn" id="addCountyBtn" disabled>
+                    <i class="fas fa-plus"></i> Add Counties
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="chart-visualization-area" id="chartVisualizationArea">
+            <div class="chart-container-full">
+              <div id="chartPlaceholder" class="chart-placeholder">
+                <i class="fas fa-chart-line"></i>
+                <p>Please select the metrics first</p>
+              </div>
+              <canvas id="statisticalChart" style="display: none;"></canvas>
+            </div>
+            
+            <div class="chart-legend" id="chartLegend">
+              <div class="legend-title">
+                <i class="fas fa-info-circle"></i>
+                Statistical Values Legend
+              </div>
+              <div class="legend-items">
+                <div class="legend-item">
+                  <div class="legend-symbol min triangle"></div>
+                  <span>Minimum</span>
+                </div>
+                <div class="legend-item">
+                  <div class="legend-symbol percentile-10 square"></div>
+                  <span>10th Percentile</span>
+                </div>
+                <div class="legend-item">
+                  <div class="legend-symbol mean"></div>
+                  <span>Mean</span>
+                </div>
+                <div class="legend-item">
+                  <div class="legend-symbol percentile-90 diamond"></div>
+                  <span>90th Percentile</span>
+                </div>
+                <div class="legend-item">
+                  <div class="legend-symbol max triangle-down"></div>
+                  <span>Maximum</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- County Selection Modal -->
+  <div class="county-modal" id="countyModal" style="display: none;">
+    <div class="county-modal-content">
+      <div class="county-modal-header">
+        <h3><i class="fas fa-map-marker-alt"></i> Select Counties</h3>
+        <button type="button" class="close-county-modal" id="closeCountyModal">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="county-modal-body">
+        <div class="county-search">
+          <input type="text" id="countySearch" placeholder="Search counties..." class="county-search-input">
+        </div>
+        <div class="county-list" id="countyList">
+          <!-- Counties will be populated here -->
+        </div>
+        <div class="county-selection-info">
+          <p>Select up to 3 counties per state. <span id="countyCount">0</span> counties selected.</p>
+        </div>
+      </div>
+      <div class="county-modal-footer">
+        <button type="button" class="btn-secondary" id="cancelCountySelection">Cancel</button>
+        <button type="button" class="btn-primary" id="confirmCountySelection">Confirm Selection</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/comparison.js"></script>
+</body>
+</html>

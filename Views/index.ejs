@@ -1,0 +1,514 @@
+<!-- Views/index.ejs -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TransitHub - Modern Transit Data Explorer</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/chatbot.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" integrity="sha512-GWzVrcGlo0TxTRvz9ttioyYJ+Wwk9Ck0G81D+eO63BaqHaJ3YZX9wuqjwgfcV/MrB2PhaVX9DkYVhbFpStnqpQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://d3js.org/topojson.v3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body data-authenticated="<%= locals.isAuthenticated ? 'true' : 'false' %>">
+  <div class="app-container">
+    <nav class="navbar">
+      <div class="navbar-brand">
+        <div class="logo">
+          <i class="fas fa-bus"></i> TransitHub
+        </div>
+        <span class="tagline">Modern Transit Data Explorer</span>
+      </div>
+      
+      <!-- In the navbar section of Views/index.ejs -->
+        <div class="navbar-controls">
+          <div class="location-indicator">
+            <i class="fas fa-map-marker-alt"></i>
+            <span id="mapTitle">United States</span>
+          </div>
+          
+          <% if (locals.isAuthenticated) { %>
+            <div class="user-profile">
+              <i class="fas fa-user-circle"></i>
+              <span><%= user ? user.username : 'User' %></span>
+              <div class="user-dropdown">
+                <a href="/auth/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+              </div>
+            </div>
+          <% } else { %>
+            <a href="/auth/login" class="nav-button">
+              <i class="fas fa-sign-in-alt"></i>
+              <span>Login</span>
+            </a>
+          <% } %>
+          
+          <div class="theme-toggle">
+            <input type="checkbox" id="themeToggle" class="toggle-checkbox">
+            <label for="themeToggle" class="toggle-label">
+              <i class="fas fa-sun"></i>
+              <i class="fas fa-moon"></i>
+              <span class="toggle-ball"></span>
+            </label>
+          </div>
+        </div>
+    </nav>
+    
+    <div class="content-wrapper">
+      <div class="sidebar analytics-panel" id="leftPanel">
+        <div class="sidebar-header">
+          <h2><i class="fas fa-chart-bar"></i> Analytics</h2>
+          <button class="collapse-btn" id="leftCollapseBtn">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+        </div>
+        <div class="sidebar-content">
+          <!-- Views/index.ejs (continued) -->
+          <div class="selection-container" id="metricSelection">
+            <div class="metric-header">
+              <h3>Transit Metrics</h3>
+              <p>Select a metric to visualize on the map</p>
+            </div>
+            <div class="selection-group">
+              <label for="metricSelect"><i class="fas fa-chart-line"></i> Metric</label>
+              <div class="custom-select-wrapper">
+                <select id="metricSelect" class="custom-select">
+                  <!-- This will be populated by JavaScript -->
+                </select>
+                <i class="fas fa-chevron-down"></i>
+              </div>
+            </div>
+          </div>
+          
+          <div class="selection-container" id="countyMetricSelection" style="display: none;">
+            <div class="metric-header">
+              <h3>County Transit Metrics</h3>
+              <p>Select a metric to visualize county data</p>
+            </div>
+            <div class="selection-group">
+              <label for="countyMetricSelect"><i class="fas fa-chart-line"></i> Metric</label>
+              <div class="custom-select-wrapper">
+                <select id="countyMetricSelect" class="custom-select">
+                  <!-- This will be populated by JavaScript -->
+                </select>
+                <i class="fas fa-chevron-down"></i>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Chatbot has been moved to floating bottom-right corner -->
+        </div>
+      </div>
+      
+      <div class="main-content">
+        <div class="view-tabs">
+          <button id="mapViewTab" class="view-tab active">
+            <i class="fas fa-map-marked-alt"></i> Map View
+          </button>
+          <% if (locals.isAuthenticated) { %>
+            <button id="compareStatesButton" class="view-tab">
+              <i class="fas fa-chart-bar"></i> Compare States
+            </button>
+          <% } %>
+          <button id="equityComparisonTab" class="view-tab" style="display: none;">
+            <i class="fas fa-balance-scale"></i> Equity Comparison
+          </button>
+        </div>
+        
+        <div class="map-content">
+          <div id="mapView" class="map-container">
+            <!-- Map will be rendered here by D3.js -->
+            <div class="loading">
+              <div class="spinner"></div>
+              <p>Loading map data...</p>
+            </div>
+          </div>
+          
+          <div id="legend" class="map-legend">
+            <!-- Legend will be populated by JavaScript -->
+          </div>
+        </div>
+        
+        <div id="equityComparisonContent" class="equity-comparison-container">
+          <div class="equity-state-header">
+            <h2 id="equityStateTitle">Equity Analysis</h2>
+            <button id="backToMapFromEquity" class="back-btn">
+              <i class="fas fa-arrow-left"></i> Back to Map
+            </button>
+          </div>
+          
+          <div class="equity-controls">
+            <div class="equity-control-group">
+              <label><i class="fas fa-layer-group"></i> Equity Category</label>
+              <div class="equity-category-hover-menu">
+                <div class="equity-category-display" id="equityCategoryDisplay">
+                  <span id="equityCategoryDisplayText">Select a category...</span>
+                  <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="equity-category-options">
+                  <div class="equity-category-option" data-category="Employment_Data" data-label="Employment Data">
+                    <span>Employment Data</span>
+                    <i class="fas fa-chevron-right"></i>
+                    <div class="equity-metrics-menu" id="metricsMenu_Employment_Data">
+                      <!-- Metrics will be populated by JavaScript -->
+                    </div>
+                  </div>
+                  <div class="equity-category-option" data-category="Income_Data" data-label="Income Data">
+                    <span>Income Data</span>
+                    <i class="fas fa-chevron-right"></i>
+                    <div class="equity-metrics-menu" id="metricsMenu_Income_Data">
+                      <!-- Metrics will be populated by JavaScript -->
+                    </div>
+                  </div>
+                  <div class="equity-category-option" data-category="Race_Data" data-label="Race Data">
+                    <span>Race Data</span>
+                    <i class="fas fa-chevron-right"></i>
+                    <div class="equity-metrics-menu" id="metricsMenu_Race_Data">
+                      <!-- Metrics will be populated by JavaScript -->
+                    </div>
+                  </div>
+                  <div class="equity-category-option" data-category="Housing_Data" data-label="Housing Data">
+                    <span>Housing Data</span>
+                    <i class="fas fa-chevron-right"></i>
+                    <div class="equity-metrics-menu" id="metricsMenu_Housing_Data">
+                      <!-- Metrics will be populated by JavaScript -->
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Hidden select for compatibility -->
+              <select id="equityCategorySelect" style="display: none;">
+                <option value="Employment_Data">Employment Data</option>
+                <option value="Income_Data">Income Data</option>
+                <option value="Race_Data">Race Data</option>
+                <option value="Housing_Data">Housing Data</option>
+              </select>
+              <select id="equityMetricSelect" style="display: none;"></select>
+            </div>
+            
+            <div class="equity-control-group">
+              <label for="transitMetricSelect"><i class="fas fa-bus"></i> Transit Metric</label>
+              <div class="custom-select-wrapper">
+                <select id="transitMetricSelect" class="custom-select">
+                  <!-- This will be populated by JavaScript -->
+                </select>
+                <i class="fas fa-chevron-down"></i>
+              </div>
+            </div>
+          </div>
+          
+          <div class="comparison-chart-container">
+            <canvas id="comparisonChart"></canvas>
+          </div>
+        </div>
+      </div>
+      
+      <div class="sidebar data-panel" id="rightPanel">
+        <div class="sidebar-header">
+          <h2><i class="fas fa-database"></i> Data</h2>
+          <button class="collapse-btn" id="rightCollapseBtn">
+            <i class="fas fa-chevron-right"></i>
+          </button>
+        </div>
+        <div class="sidebar-content" id="dataPanelContent">
+          <!-- Content will be dynamically updated by JavaScript -->
+          <h2 class="section-title">United States</h2>
+          <h3>Averages</h3>
+          <div id="countryMetricsGrid" class="metric-grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Templates for rendering data panels -->
+  <template id="stateDataTemplate">
+    <div class="template-header">
+      <button id="backButton" class="back-btn">
+        <i class="fas fa-arrow-left"></i> Back to Map
+      </button>
+      <h2 id="stateName" class="data-title"></h2>
+    </div>
+    
+    <div class="data-tabs">
+      <button id="stateAveragesOption" class="data-tab">
+        <i class="fas fa-chart-line"></i> Averages
+      </button>
+      <button id="stateFrequencyOption" class="data-tab active">
+        <i class="fas fa-chart-bar"></i> Frequency
+      </button>
+    </div>
+    
+    <div id="stateAveragesSection" style="display: none;">
+      <h3 class="section-title">State Averages</h3>
+      <div id="stateMetricsGrid" class="metric-grid"></div>
+    </div>
+    
+    <div id="stateFrequencySection">
+      <h3 class="section-title">Distribution Charts</h3>
+      <div id="chartsContainer" class="state-charts-container"></div>
+    </div>
+  </template>
+  
+  <template id="countyDataTemplate">
+    <div class="county-fixed-header">
+      <div class="template-header">
+        <button id="backToStateButton" class="back-btn">
+          <i class="fas fa-arrow-left"></i> Back to State
+        </button>
+        <h2 id="countyName" class="data-title"></h2>
+      </div>
+      
+      <div class="data-tabs">
+        <button id="averagesOption" class="data-tab active">
+          <i class="fas fa-chart-line"></i> Averages
+        </button>
+        <button id="frequencyOption" class="data-tab">
+          <i class="fas fa-chart-bar"></i> Frequency
+        </button>
+      </div>
+    </div>
+    
+    <div class="county-scrollable-content">
+      <div id="averagesSection">
+        <h3 class="section-title">County Averages</h3>
+        <div id="countyMetricsGrid" class="metric-grid"></div>
+      </div>
+      
+      <div id="frequencySection" style="display: none;">
+        <h3 class="section-title">Distribution Charts</h3>
+        <div id="countyChartsContainer" class="county-charts-container"></div>
+      </div>
+    </div>
+  </template>
+  
+  <!-- Auth check modal for guests -->
+<!-- Auth check modal for guests in Views/index.ejs -->
+  <% if (!user) { %>
+  <div id="authRequiredModal" class="modal">
+    <div class="modal-content auth-modal-content">
+      <div class="modal-header">
+        <h3>Login Required</h3>
+        <button class="close-btn" id="closeAuthModal">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="auth-prompt">
+          <i class="fas fa-lock"></i>
+          <h4>Access Restricted</h4>
+          <p>You need to be logged in to view detailed state and county data.</p>
+          
+          <div class="auth-features">
+            <h5>Premium Features Available After Login:</h5>
+            <ul class="feature-list">
+              <li><i class="fas fa-chart-area"></i> <span>Detailed State & County Transit Metrics</span></li>
+              <li><i class="fas fa-chart-bar"></i> <span>Data Comparison Tools</span></li>
+              <li><i class="fas fa-balance-scale"></i> <span>Equity Analysis</span></li>
+              <li><i class="fas fa-download"></i> <span>Data Export Options</span></li>
+            </ul>
+          </div>
+          
+          <div class="auth-actions">
+            <a href="/auth/login" class="btn-primary">
+              <i class="fas fa-sign-in-alt"></i> Login
+            </a>
+            <a href="/auth/signup" class="btn-primary">
+              <i class="fas fa-user-plus"></i> Sign Up
+            </a>
+            <button class="btn-text" id="continueAsGuest">
+              <i class="fas fa-eye"></i> Continue as Guest
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <% } %>
+  
+  <script src="/js/app.js"></script>
+  <script src="/js/chatbot.js"></script>
+  
+  <% if (!user) { %>
+    <script>
+      // This script will be included only for non-logged in users
+      document.addEventListener('DOMContentLoaded', () => {
+        // Guest user initialization
+      });
+    </script>
+    <% } else { %>
+    <script>
+      // This script will be included only for logged in users
+      document.addEventListener('DOMContentLoaded', () => {
+        // Authenticated user initialization
+      });
+    </script>
+    <% } %>
+
+    <!-- Add this before the closing body tag in Views/index.ejs -->
+<!-- Comparison Modal -->
+<!-- Comparison Modal -->
+<div id="comparisonModal" class="modal">
+  <div class="modal-content comparison-modal-content">
+    <div class="modal-header">
+      <h3 id="comparisonModalTitle">Chart Comparison Tool</h3>
+      <button class="close-btn" id="closeComparisonModal">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="comparison-info">
+        <div class="selected-entities-container">
+          <h4><i class="fas fa-map-marker-alt"></i> Selected Entities</h4>
+          <div id="selectedEntitiesList" class="selected-entities-list">
+            <div class="empty-selection">Select entities on the map to compare</div>
+          </div>
+        </div>
+        
+        <div class="ai-analysis-preview">
+          <div class="analysis-features">
+            <h4><i class="fas fa-chart-line"></i> Chart Comparison Features</h4>
+            <ul class="feature-list">
+              <li><i class="fas fa-chart-scatter"></i> <span>Interactive Dot Plot Visualization</span></li>
+              <li><i class="fas fa-balance-scale"></i> <span>Equity and Transit Metrics</span></li>
+              <li><i class="fas fa-eye"></i> <span>Multi-Category Data Analysis</span></li>
+              <li><i class="fas fa-filter"></i> <span>Customizable Legend Selection</span></li>
+              <li><i class="fas fa-expand"></i> <span>Full-Screen Chart Experience</span></li>
+            </ul>
+          </div>
+          
+          <div class="analysis-scope">
+            <h5><i class="fas fa-info-circle"></i> Comparison Scope</h5>
+            <p>The chart will display <strong>all available metrics</strong> for your selected entities, 
+            allowing you to compare performance across transit accessibility and equity indicators 
+            through an interactive visualization interface.</p>
+          </div>
+        </div>
+        
+        <button id="generateComprehensiveReportBtn" class="btn-primary comprehensive-btn">
+          <i class="fas fa-chart-line"></i> Generate Chart Comparison
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Comparison Selection Overlay -->
+<div id="comparisonOverlay" class="comparison-overlay">
+  <div class="comparison-overlay-header">
+    <h3 id="comparisonOverlayTitle">Select Entities for Chart Comparison</h3>
+    <div class="selection-count">
+      <span id="selectionCount">0</span> selected
+    </div>
+    <div class="overlay-actions">
+      <button id="cancelComparisonBtn" class="btn-secondary">
+        <i class="fas fa-times"></i> Cancel
+      </button>
+      <button id="proceedToCompareBtn" class="btn-primary">
+        <i class="fas fa-chart-line"></i> Proceed to Chart Comparison
+      </button>
+    </div>
+  </div>
+  <div class="selected-preview" id="selectedPreview"></div>
+</div>
+<style>
+/* Additional styles for the updated modal */
+.ai-analysis-preview {
+  background-color: var(--bg-light);
+  border-radius: var(--border-radius-md);
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.analysis-features h4,
+.analysis-scope h5 {
+  color: var(--primary);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.feature-list {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 1.5rem;
+}
+
+.feature-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.feature-list li:last-child {
+  border-bottom: none;
+}
+
+.feature-list i {
+  color: var(--primary);
+  font-size: 1.125rem;
+  width: 1.5rem;
+  text-align: center;
+}
+
+.analysis-scope {
+  border-top: 1px solid var(--border-color);
+  padding-top: 1.5rem;
+}
+
+.analysis-scope p {
+  color: var(--text-medium);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.comprehensive-btn {
+  width: 100%;
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  border: none;
+  border-radius: var(--border-radius-md);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.comprehensive-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.comprehensive-btn:active {
+  transform: translateY(0);
+}
+
+.comprehensive-btn i {
+  font-size: 1.25rem;
+}
+
+/* Dark mode adjustments */
+.dark-mode .ai-analysis-preview {
+  background-color: var(--bg-darker);
+}
+
+.dark-mode .feature-list li {
+  border-bottom-color: var(--border-color);
+}
+
+.dark-mode .analysis-scope {
+  border-top-color: var(--border-color);
+}
+</style>
+</body>
+</html>
