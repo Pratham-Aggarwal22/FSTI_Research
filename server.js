@@ -484,6 +484,38 @@ app.get('/api/equityCountyAverageValues/:category/:state', async (req, res) => {
   }
 });
 
+// API endpoint for equity state average values (used for national cluster analysis)
+app.get('/api/equityStateAverageValues/:category', async (req, res) => {
+  try {
+    let { category } = req.params;
+    category = decodeURIComponent(category);
+
+    // Support both friendly labels and raw database names
+    const normalizedCategory = category.replace(/\s+/g, '_');
+    const dbEquity = client.db(normalizedCategory);
+
+    const collections = await dbEquity.listCollections().toArray();
+    const collectionNames = collections.map(c => c.name);
+
+    const preferredNames = ['State Level', 'State_Level', 'state_level', 'StateLevel', 'states', 'State'];
+    let collectionName = preferredNames.find(name => collectionNames.includes(name));
+    if (!collectionName) {
+      collectionName = collectionNames[0];
+    }
+
+    if (!collectionName) {
+      return res.status(404).json({ error: `No collections found for ${category}` });
+    }
+
+    const collection = dbEquity.collection(collectionName);
+    const data = await collection.find({}).toArray();
+    const formattedData = formatNumberInObject(data);
+    res.json(formattedData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start the server after connecting to MongoDB
 async function startServer() {
   await connectToMongoDB();

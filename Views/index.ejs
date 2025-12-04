@@ -60,9 +60,6 @@
       <div class="sidebar analytics-panel" id="leftPanel">
         <div class="sidebar-header">
           <h2><i class="fas fa-chart-bar"></i> Analytics</h2>
-          <button class="collapse-btn" id="leftCollapseBtn">
-            <i class="fas fa-chevron-left"></i>
-          </button>
         </div>
         <div class="sidebar-content">
           <!-- Views/index.ejs (continued) -->
@@ -97,6 +94,45 @@
               </div>
             </div>
           </div>
+
+          <div class="selection-container cluster-sidebar-panel cluster-analysis-panel" id="clusterAnalysisPanel">
+            <div class="cluster-panel-header">
+              <div>
+                <h3><i class="fas fa-project-diagram"></i> Cluster Analysis</h3>
+                <p id="clusterPanelContext" class="cluster-context-label">Analyzing United States (states)</p>
+              </div>
+              <button type="button" id="closeClusterPanel" class="panel-close-btn">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <div class="cluster-panel-body">
+              <div class="cluster-control-group">
+                <label><i class="fas fa-bus"></i> Transit Metric</label>
+                <select id="clusterTransitSelect" class="custom-select"></select>
+              </div>
+              <div class="cluster-control-group">
+                <label><i class="fas fa-layer-group"></i> Equity Category</label>
+                <select id="clusterEquityCategorySelect" class="custom-select">
+                  <option value="Employment_Data">Employment Data</option>
+                  <option value="Income_Data">Income Data</option>
+                  <option value="Race_Data">Race Data</option>
+                  <option value="Housing_Data">Housing Data</option>
+                </select>
+              </div>
+              <div class="cluster-control-group">
+                <label><i class="fas fa-chart-line"></i> Equity Metric</label>
+                <select id="clusterEquityMetricSelect" class="custom-select">
+                  <option value="">Select a category</option>
+                </select>
+              </div>
+              <div class="cluster-panel-actions">
+                <button type="button" id="runClusterAnalysisBtn" class="btn-primary">
+                  <i class="fas fa-project-diagram"></i> Run Analysis
+                </button>
+              </div>
+              <div id="clusterPanelLegendSlot" class="cluster-panel-legend-slot"></div>
+            </div>
+          </div>
           
           <!-- Chatbot has been moved to floating bottom-right corner -->
         </div>
@@ -115,6 +151,11 @@
           <button id="equityComparisonTab" class="view-tab" style="display: none;">
             <i class="fas fa-balance-scale"></i> Equity Comparison
           </button>
+          <% if (locals.isAuthenticated) { %>
+            <button id="clusterAnalysisButton" class="view-tab">
+              <i class="fas fa-project-diagram"></i> Cluster Analysis
+            </button>
+          <% } %>
         </div>
         
         <div class="map-content">
@@ -139,68 +180,102 @@
             </button>
           </div>
           
-          <div class="equity-controls">
-            <div class="equity-control-group">
-              <label><i class="fas fa-layer-group"></i> Equity Category</label>
-              <div class="equity-category-hover-menu">
-                <div class="equity-category-display" id="equityCategoryDisplay">
-                  <span id="equityCategoryDisplayText">Select a category...</span>
+          <div class="equity-view-toggle">
+            <button type="button" class="equity-view-btn active" data-view="scatter">
+              <i class="fas fa-braille"></i> Scatter Plot
+            </button>
+            <button type="button" class="equity-view-btn" data-view="cluster">
+              <i class="fas fa-project-diagram"></i> Cluster Analysis
+            </button>
+          </div>
+          
+          <div id="equityScatterView" class="equity-view-section">
+            <div class="equity-controls">
+              <div class="equity-control-group">
+                <label><i class="fas fa-layer-group"></i> Equity Category</label>
+                <div class="equity-category-hover-menu">
+                  <div class="equity-category-display" id="equityCategoryDisplay">
+                    <span id="equityCategoryDisplayText">Select a category...</span>
+                    <i class="fas fa-chevron-down"></i>
+                  </div>
+                  <div class="equity-category-options">
+                    <div class="equity-category-option" data-category="Employment_Data" data-label="Employment Data">
+                      <span>Employment Data</span>
+                      <i class="fas fa-chevron-right"></i>
+                      <div class="equity-metrics-menu" id="metricsMenu_Employment_Data">
+                        <!-- Metrics will be populated by JavaScript -->
+                      </div>
+                    </div>
+                    <div class="equity-category-option" data-category="Income_Data" data-label="Income Data">
+                      <span>Income Data</span>
+                      <i class="fas fa-chevron-right"></i>
+                      <div class="equity-metrics-menu" id="metricsMenu_Income_Data">
+                        <!-- Metrics will be populated by JavaScript -->
+                      </div>
+                    </div>
+                    <div class="equity-category-option" data-category="Race_Data" data-label="Race Data">
+                      <span>Race Data</span>
+                      <i class="fas fa-chevron-right"></i>
+                      <div class="equity-metrics-menu" id="metricsMenu_Race_Data">
+                        <!-- Metrics will be populated by JavaScript -->
+                      </div>
+                    </div>
+                    <div class="equity-category-option" data-category="Housing_Data" data-label="Housing Data">
+                      <span>Housing Data</span>
+                      <i class="fas fa-chevron-right"></i>
+                      <div class="equity-metrics-menu" id="metricsMenu_Housing_Data">
+                        <!-- Metrics will be populated by JavaScript -->
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Hidden select for compatibility -->
+                <select id="equityCategorySelect" style="display: none;">
+                  <option value="Employment_Data">Employment Data</option>
+                  <option value="Income_Data">Income Data</option>
+                  <option value="Race_Data">Race Data</option>
+                  <option value="Housing_Data">Housing Data</option>
+                </select>
+                <select id="equityMetricSelect" style="display: none;"></select>
+              </div>
+              
+              <div class="equity-control-group">
+                <label for="transitMetricSelect"><i class="fas fa-bus"></i> Transit Metric</label>
+                <div class="custom-select-wrapper">
+                  <select id="transitMetricSelect" class="custom-select">
+                    <!-- This will be populated by JavaScript -->
+                  </select>
                   <i class="fas fa-chevron-down"></i>
                 </div>
-                <div class="equity-category-options">
-                  <div class="equity-category-option" data-category="Employment_Data" data-label="Employment Data">
-                    <span>Employment Data</span>
-                    <i class="fas fa-chevron-right"></i>
-                    <div class="equity-metrics-menu" id="metricsMenu_Employment_Data">
-                      <!-- Metrics will be populated by JavaScript -->
-                    </div>
-                  </div>
-                  <div class="equity-category-option" data-category="Income_Data" data-label="Income Data">
-                    <span>Income Data</span>
-                    <i class="fas fa-chevron-right"></i>
-                    <div class="equity-metrics-menu" id="metricsMenu_Income_Data">
-                      <!-- Metrics will be populated by JavaScript -->
-                    </div>
-                  </div>
-                  <div class="equity-category-option" data-category="Race_Data" data-label="Race Data">
-                    <span>Race Data</span>
-                    <i class="fas fa-chevron-right"></i>
-                    <div class="equity-metrics-menu" id="metricsMenu_Race_Data">
-                      <!-- Metrics will be populated by JavaScript -->
-                    </div>
-                  </div>
-                  <div class="equity-category-option" data-category="Housing_Data" data-label="Housing Data">
-                    <span>Housing Data</span>
-                    <i class="fas fa-chevron-right"></i>
-                    <div class="equity-metrics-menu" id="metricsMenu_Housing_Data">
-                      <!-- Metrics will be populated by JavaScript -->
-                    </div>
-                  </div>
-                </div>
               </div>
-              <!-- Hidden select for compatibility -->
-              <select id="equityCategorySelect" style="display: none;">
-                <option value="Employment_Data">Employment Data</option>
-                <option value="Income_Data">Income Data</option>
-                <option value="Race_Data">Race Data</option>
-                <option value="Housing_Data">Housing Data</option>
-              </select>
-              <select id="equityMetricSelect" style="display: none;"></select>
             </div>
             
-            <div class="equity-control-group">
-              <label for="transitMetricSelect"><i class="fas fa-bus"></i> Transit Metric</label>
-              <div class="custom-select-wrapper">
-                <select id="transitMetricSelect" class="custom-select">
-                  <!-- This will be populated by JavaScript -->
-                </select>
-                <i class="fas fa-chevron-down"></i>
-              </div>
+            <div class="comparison-chart-container">
+              <canvas id="comparisonChart"></canvas>
             </div>
           </div>
           
-          <div class="comparison-chart-container">
-            <canvas id="comparisonChart"></canvas>
+          <div id="equityClusterView" class="equity-view-section" style="display: none;">
+            <div class="equity-cluster-layout">
+              <div class="equity-cluster-main">
+                <div class="equity-cluster-hint">
+                  <i class="fas fa-info-circle"></i>
+                  <p>Use the controls to refresh the clustered map or switch back to Scatter Plot anytime.</p>
+                  <div class="equity-cluster-actions">
+                    <button type="button" id="equityClusterBackBtn" class="btn-secondary btn-sm">
+                      <i class="fas fa-arrow-left"></i> Back to Scatter Plot
+                    </button>
+                  </div>
+                </div>
+                <div class="equity-cluster-map-host" id="equityClusterMapHost">
+                  <div class="equity-cluster-map-frame">
+                    <div id="equityClusterMapSlot" class="equity-cluster-map-slot"></div>
+                    <div id="equityClusterLegendSlot" class="equity-cluster-legend-slot"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="equity-cluster-controls" id="equityClusterPanelHost"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -208,9 +283,6 @@
       <div class="sidebar data-panel" id="rightPanel">
         <div class="sidebar-header">
           <h2><i class="fas fa-database"></i> Data</h2>
-          <button class="collapse-btn" id="rightCollapseBtn">
-            <i class="fas fa-chevron-right"></i>
-          </button>
         </div>
         <div class="sidebar-content" id="dataPanelContent">
           <!-- Content will be dynamically updated by JavaScript -->

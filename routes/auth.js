@@ -1,10 +1,21 @@
 // routes/auth.js
 import express from 'express';
 import User from '../models/User.js';
-import jwt from 'jsonwebtoken';
 import { generateTokens, verifyToken, setAuthCookies, clearAuthCookies } from '../utils/jwt.js';
 
 const router = express.Router();
+
+const escapeRegExp = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const sanitizeFormData = (body = {}) => {
+  const { password, confirmPassword, ...rest } = body;
+  return {
+    ...rest,
+    newsletter: Boolean(body.newsletter)
+  };
+};
+
+const supportedUserTypes = ['student', 'professional', 'researcher', 'administrator', 'other'];
 
 // Render login page
 router.get('/login', (req, res) => {
@@ -13,7 +24,34 @@ router.get('/login', (req, res) => {
 
 // Render signup page
 router.get('/signup', (req, res) => {
-  res.render('auth/signup', { title: 'Sign Up', error: null });
+  res.render('auth/signup', { title: 'Sign Up', error: null, formData: {} });
+});
+
+// Real-time username/email availability check
+router.get('/check-availability', async (req, res) => {
+  try {
+    const { field, value } = req.query;
+    const normalizedField = field?.toLowerCase();
+    const trimmedValue = value?.trim();
+
+    if (!['username', 'email'].includes(normalizedField) || !trimmedValue || trimmedValue.length > 150) {
+      return res.status(400).json({ error: 'Invalid field or value' });
+    }
+
+    const query = normalizedField === 'username'
+      ? { username: new RegExp(`^${escapeRegExp(trimmedValue)}$`, 'i') }
+      : { email: new RegExp(`^${escapeRegExp(trimmedValue)}$`, 'i') };
+
+    const exists = await User.exists(query);
+    res.json({
+      field: normalizedField,
+      value: trimmedValue,
+      available: !exists
+    });
+  } catch (error) {
+    console.error('Availability check error:', error);
+    res.status(500).json({ error: 'Unable to check availability right now' });
+  }
 });
 
 // Handle login
@@ -65,6 +103,7 @@ router.post('/login', async (req, res) => {
 
 // Handle signup
 router.post('/signup', async (req, res) => {
+  const safeFormData = sanitizeFormData(req.body);
   try {
     const { 
       firstName,
@@ -78,45 +117,89 @@ router.post('/signup', async (req, res) => {
       country,
       userType,
       researchInterest,
-      preferredLanguage
+      jobTitle,
+      newsletter
     } = req.body;
+
+    const trimmedFirstName = firstName?.trim();
+    const trimmedLastName = lastName?.trim();
+    const normalizedCountry = country?.trim();
+    const normalizedUsername = username?.trim();
+    const normalizedEmail = email?.toLowerCase();
+    const trimmedOrganization = organization?.trim();
+    const trimmedPhone = phone?.trim();
+    const trimmedJobTitle = jobTitle?.trim();
+    const trimmedResearchInterest = researchInterest?.trim();
+    const normalizedUserType = supportedUserTypes.includes((userType || '').toLowerCase())
+      ? userType.toLowerCase()
+      : 'other';
+
+    safeFormData.firstName = trimmedFirstName;
+    safeFormData.lastName = trimmedLastName;
+    safeFormData.username = normalizedUsername;
+    safeFormData.email = normalizedEmail;
+    safeFormData.phone = trimmedPhone;
+    safeFormData.organization = trimmedOrganization;
+    safeFormData.country = normalizedCountry;
+    safeFormData.userType = normalizedUserType;
+    safeFormData.researchInterest = trimmedResearchInterest;
+    safeFormData.jobTitle = trimmedJobTitle;
     
     // Validate password match
     if (password !== confirmPassword) {
       return res.render('auth/signup', { 
         title: 'Sign Up', 
-        error: 'Passwords do not match'
+        error: 'Passwords do not match',
+        formData: safeFormData
+      });
+    }
+
+    if (!normalizedUsername) {
+      return res.render('auth/signup', {
+        title: 'Sign Up',
+        error: 'Username is required.',
+        formData: safeFormData
+      });
+    }
+
+    if (!normalizedEmail) {
+      return res.render('auth/signup', {
+        title: 'Sign Up',
+        error: 'Email address is required.',
+        formData: safeFormData
       });
     }
     
     // Check if user already exists (case-insensitive for username)
     const existingUser = await User.findOne({ 
       $or: [
-        { username: new RegExp(`^${username}$`, 'i') }, 
-        { email: email.toLowerCase() }
+        { username: new RegExp(`^${escapeRegExp(normalizedUsername)}$`, 'i') }, 
+        { email: new RegExp(`^${escapeRegExp(normalizedEmail)}$`, 'i') }
       ]
     });
     
     if (existingUser) {
       return res.render('auth/signup', { 
         title: 'Sign Up', 
-        error: 'Username or email already exists'
+        error: 'Username or email already exists',
+        formData: safeFormData
       });
     }
     
     // Create new user with all fields
     const user = new User({
-      firstName,
-      lastName,
-      username,
-      email,
+      firstName: trimmedFirstName,
+      lastName: trimmedLastName,
+      username: normalizedUsername,
+      email: normalizedEmail,
       password,
-      phone,
-      organization,
-      country,
-      userType,
-      researchInterest,
-      preferredLanguage: preferredLanguage || 'english'
+      phone: trimmedPhone,
+      organization: trimmedOrganization,
+      country: normalizedCountry,
+      userType: normalizedUserType,
+      researchInterest: trimmedResearchInterest,
+      jobTitle: trimmedJobTitle,
+      newsletterOptIn: Boolean(newsletter)
     });
     
     await user.save();
@@ -133,7 +216,8 @@ router.post('/signup', async (req, res) => {
     console.error('Signup error:', error);
     res.render('auth/signup', { 
       title: 'Sign Up', 
-      error: 'An error occurred during signup: ' + error.message
+      error: 'An error occurred during signup: ' + error.message,
+      formData: safeFormData
     });
   }
 });

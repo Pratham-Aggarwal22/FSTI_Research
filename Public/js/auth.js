@@ -1,5 +1,20 @@
 // Public/js/auth.js
 document.addEventListener('DOMContentLoaded', () => {
+    // Enable dismiss buttons for auth cards
+    const closeButtons = document.querySelectorAll('[data-close-auth]');
+    if (closeButtons.length) {
+      closeButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const canGoBack = document.referrer && document.referrer.startsWith(window.location.origin) && window.history.length > 1;
+          if (canGoBack) {
+            window.history.back();
+          } else {
+            window.location.href = '/';
+          }
+        });
+      });
+    }
+
     // Password strength checker (only for signup page)
     const passwordInput = document.getElementById('password');
     const confirmPasswordInput = document.getElementById('confirmPassword');
@@ -123,6 +138,113 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
     
+    // Real-time username/email availability feedback
+    const usernameInput = document.getElementById('username');
+    const emailInput = document.getElementById('email');
+    const usernameFeedback = document.getElementById('usernameFeedback');
+    const emailFeedback = document.getElementById('emailFeedback');
+
+    const debounce = (fn, delay = 350) => {
+      let timer;
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+      };
+    };
+
+    const setFieldFeedback = (element, state, message) => {
+      if (!element) return;
+      element.textContent = message || '';
+      element.classList.remove('error', 'success', 'checking');
+      if (state) {
+        element.classList.add(state);
+      }
+    };
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    const availabilityFields = [
+      {
+        field: 'username',
+        input: usernameInput,
+        feedback: usernameFeedback,
+        minLength: 3,
+        availableMessage: 'Username is available.',
+        takenMessage: 'Username already exists.'
+      },
+      {
+        field: 'email',
+        input: emailInput,
+        feedback: emailFeedback,
+        minLength: 5,
+        validator: (value) => emailPattern.test(value),
+        availableMessage: 'Email looks good to use.',
+        takenMessage: 'Email is already registered.'
+      }
+    ];
+
+    availabilityFields.forEach((config) => {
+      const { field, input, feedback, minLength = 1, validator, availableMessage, takenMessage } = config;
+      if (!input || !feedback) return;
+
+      let controller;
+      let requestId = 0;
+
+      const runCheck = async () => {
+        const value = input.value.trim();
+
+        if (!value || value.length < minLength || (validator && !validator(value))) {
+          setFieldFeedback(feedback, null, '');
+          if (controller) controller.abort();
+          return;
+        }
+
+        if (controller) {
+          controller.abort();
+        }
+        const currentController = new AbortController();
+        controller = currentController;
+        const currentRequestId = ++requestId;
+
+        setFieldFeedback(feedback, 'checking', 'Checking availability...');
+
+        try {
+          const response = await fetch(`/auth/check-availability?field=${field}&value=${encodeURIComponent(value)}`, {
+            signal: currentController.signal,
+            credentials: 'same-origin'
+          });
+
+          if (!response.ok) {
+            throw new Error('Request failed');
+          }
+
+          const result = await response.json();
+
+          if (currentRequestId !== requestId || input.value.trim() !== value) {
+            return;
+          }
+
+          if (result.available) {
+            setFieldFeedback(feedback, 'success', availableMessage);
+          } else {
+            setFieldFeedback(feedback, 'error', takenMessage);
+          }
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            return;
+          }
+          if (currentRequestId !== requestId) {
+            return;
+          }
+          setFieldFeedback(feedback, 'error', 'Unable to verify right now.');
+        }
+      };
+
+      const debouncedCheck = debounce(runCheck, 400);
+      input.addEventListener('input', debouncedCheck);
+      input.addEventListener('blur', runCheck);
+    });
+
     // Client-side token refresh mechanism
     function setupTokenRefresh() {
         // Only run if the user is logged in (check for access token)

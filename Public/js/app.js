@@ -68,6 +68,44 @@ const DEFAULT_USA_METRIC_TOKENS = [
   'initial wait time'
 ];
 
+const NATIONAL_AGGREGATE_KEYS = new Set([
+  'unitedstates',
+  'us',
+  'usa',
+  'u.s.',
+  'nationwide',
+  'allstates',
+  'nationalaverage',
+  'entireunitedstates'
+]);
+
+function normalizeAggregateKey(key = '') {
+  return key
+    .toString()
+    .toLowerCase()
+    .replace(/[\s._-]+/g, '');
+}
+
+function isAggregateKey(key = '') {
+  const normalized = normalizeAggregateKey(key);
+  return normalized && NATIONAL_AGGREGATE_KEYS.has(normalized);
+}
+
+function sanitizeMetricDocuments(documents = []) {
+  return documents.map(metric => {
+    if (!metric || typeof metric !== 'object') {
+      return metric;
+    }
+    const cleanedMetric = { ...metric };
+    Object.keys(cleanedMetric).forEach(key => {
+      if (key !== '_id' && key !== 'title' && isAggregateKey(key)) {
+        delete cleanedMetric[key];
+      }
+    });
+    return cleanedMetric;
+  });
+}
+
 function getMetricColorLogic(title) {
   if (!title) {
     return null;
@@ -292,6 +330,71 @@ let dotplotTab = 'equity'; // 'equity' or 'transit'
 let selectedMetricIndexes = { equity: 0, transit: 0 };
 let selectedLegends = { equity: [], transit: [] };
 
+const DEFAULT_PERCENT_ACCESS_METRIC = 'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)';
+const SAMPLE_SIZE_KEYWORD = 'sample size';
+const TRANSIT_INDEPENDENT_KEYWORDS = ['driving', 'car'];
+const EQUITY_GOOD_KEYWORDS = ['median', 'average', 'mean', 'per capita', 'income', 'earnings', 'bachelor', 'graduate'];
+
+const CLUSTER_K = 4;
+const CLUSTER_MIN_INTENSITY = 0.35;
+const CLUSTER_REFERENCE_POINTS = {
+  critical: { x: 1, y: 1 },
+  synergy: { x: 1, y: 0 },
+  service_gap: { x: 0, y: 1 },
+  high_access: { x: 0, y: 0 }
+};
+
+const CLUSTER_TYPE_DETAILS = {
+  critical: {
+    label: 'High Need + Poor Service',
+    color: '#D94352',
+    description: 'High equity vulnerability with limited transit performance'
+  },
+  synergy: {
+    label: 'High Need + Good Service',
+    color: '#F4C361',
+    description: 'High equity need supported by strong transit performance'
+  },
+  service_gap: {
+    label: 'Low Need + Poor Service',
+    color: '#4F80FF',
+    description: 'Lower equity need but underperforming transit service'
+  },
+  high_access: {
+    label: 'Low Need + Good Service',
+    color: '#35A574',
+    description: 'Lower equity need with high-performing transit access'
+  }
+};
+
+const EQUITY_METADATA_FIELDS = ['_id', 'title', 'Title', 'state', 'State', 'county', 'County', 'data', 'Population'];
+
+let clusterState = {
+  active: false,
+  level: null,
+  assignments: {},
+  context: null,
+  legend: [],
+  inputs: null
+};
+
+let clusterPanelOpening = false;
+let clusterPanelPlaceholder = null;
+let clusterPanelSource = 'map';
+let mapViewHomePlaceholder = null;
+let legendHomePlaceholder = null;
+const clusterPanelDrag = {
+  active: false,
+  offsetX: 0,
+  offsetY: 0,
+  hostRect: null,
+  panel: null
+};
+
+let stateEquityStore = {};
+let countyEquityStore = {};
+let statePercentAccessCache = null;
+
 function normalizeMetricTitle(title) {
   return (title || '')
     .toString()
@@ -306,6 +409,1205 @@ function findMetricDataByTitle(title) {
   }
   const normalizedTitle = normalizeMetricTitle(title);
   return allStateData.find(metric => normalizeMetricTitle(metric.title) === normalizedTitle) || null;
+}
+
+// -----------------------------------------------------------------------------
+// CLUSTER ANALYSIS HELPERS
+// -----------------------------------------------------------------------------
+function resetClusterState(options = { refresh: true }) {
+  clusterState = {
+    active: false,
+    level: null,
+    assignments: {},
+    context: null,
+    legend: [],
+    inputs: null
+  };
+  if (options.refresh) {
+    updateMapColors();
+    updateCountyMapColors();
+    const legend = document.getElementById('legend');
+    if (legend) {
+      legend.classList.remove('cluster-legend');
+    }
+  }
+}
+
+function isClusterPanelOpen() {
+  const panel = document.getElementById('clusterAnalysisPanel');
+  return Boolean(panel && panel.classList.contains('open'));
+}
+
+function shouldUseClusterOverlay() {
+  return Boolean(selectedState);
+}
+
+function ensureClusterPanelPlaceholder() {
+  const panel = document.getElementById('clusterAnalysisPanel');
+  if (!panel || clusterPanelPlaceholder) {
+    return;
+  }
+  clusterPanelPlaceholder = document.createElement('div');
+  clusterPanelPlaceholder.id = 'clusterPanelHome';
+  panel.parentNode.insertBefore(clusterPanelPlaceholder, panel);
+}
+
+function moveClusterPanelToSidebar() {
+  const panel = document.getElementById('clusterAnalysisPanel');
+  if (!panel || !clusterPanelPlaceholder) {
+    return;
+  }
+  if (panel.previousSibling !== clusterPanelPlaceholder) {
+    clusterPanelPlaceholder.parentNode.insertBefore(panel, clusterPanelPlaceholder.nextSibling);
+  }
+  panel.classList.remove('overlay');
+}
+
+function moveClusterPanelToOverlay() {
+  const panel = document.getElementById('clusterAnalysisPanel');
+  const host = getClusterOverlayHost();
+  if (!panel || !host) {
+    return;
+  }
+  if (panel.parentElement !== host) {
+    host.appendChild(panel);
+  }
+  panel.classList.add('overlay');
+}
+
+function syncClusterPanelPlacement() {
+  const panel = document.getElementById('clusterAnalysisPanel');
+  if (!panel) {
+    return;
+  }
+  if (shouldUseClusterOverlay()) {
+    moveClusterPanelToOverlay();
+    setClusterPanelDraggable(panel, clusterPanelSource === 'map');
+  } else {
+    moveClusterPanelToSidebar();
+    setClusterPanelDraggable(panel, false);
+  }
+}
+
+function getClusterOverlayHost() {
+  if (clusterPanelSource === 'equity') {
+    return document.getElementById('equityClusterPanelHost') || document.getElementById('equityClusterView');
+  }
+  return document.querySelector('.map-content');
+}
+
+function ensureMapLegendPlaceholders() {
+  const mapView = document.getElementById('mapView');
+  if (mapView && !mapViewHomePlaceholder) {
+    mapViewHomePlaceholder = document.createElement('div');
+    mapViewHomePlaceholder.id = 'mapViewHomePlaceholder';
+    mapView.parentNode.insertBefore(mapViewHomePlaceholder, mapView);
+  }
+  const legend = document.getElementById('legend');
+  if (legend && !legendHomePlaceholder) {
+    legendHomePlaceholder = document.createElement('div');
+    legendHomePlaceholder.id = 'legendHomePlaceholder';
+    legend.parentNode.insertBefore(legendHomePlaceholder, legend);
+  }
+}
+
+function moveMapIntoEquityCluster() {
+  if (!selectedState) {
+    return;
+  }
+  ensureMapLegendPlaceholders();
+  const mapView = document.getElementById('mapView');
+  const legend = document.getElementById('legend');
+  const mapSlot = document.getElementById('equityClusterMapSlot');
+  const legendSlot = document.getElementById('equityClusterLegendSlot');
+  let moved = false;
+  if (mapView && mapSlot && mapView.parentNode !== mapSlot) {
+    mapSlot.appendChild(mapView);
+    mapView.classList.add('equity-cluster-map-active');
+    moved = true;
+  }
+  if (legend && legendSlot && legend.parentNode !== legendSlot) {
+    legendSlot.appendChild(legend);
+    moved = true;
+  }
+  if (moved) {
+    const mapContent = document.querySelector('.map-content');
+    if (mapContent) {
+      mapContent.style.display = 'none';
+    }
+  }
+  syncClusterPanelPlacement();
+}
+
+function restoreMapToMainLayout() {
+  ensureMapLegendPlaceholders();
+  const mapView = document.getElementById('mapView');
+  const legend = document.getElementById('legend');
+  if (mapView && mapViewHomePlaceholder && mapViewHomePlaceholder.parentNode && mapView.parentNode !== mapViewHomePlaceholder.parentNode) {
+    mapViewHomePlaceholder.parentNode.insertBefore(mapView, mapViewHomePlaceholder.nextSibling);
+    mapView.classList.remove('equity-cluster-map-active');
+  }
+  if (legend && legendHomePlaceholder && legendHomePlaceholder.parentNode && legend.parentNode !== legendHomePlaceholder.parentNode) {
+    legendHomePlaceholder.parentNode.insertBefore(legend, legendHomePlaceholder.nextSibling);
+  }
+  const mapContent = document.querySelector('.map-content');
+  if (mapContent) {
+    mapContent.style.display = '';
+  }
+  syncClusterPanelPlacement();
+}
+
+function setClusterPanelDraggable(panel, enabled) {
+  const header = panel?.querySelector('.cluster-panel-header');
+  if (!header) {
+    return;
+  }
+  if (enabled) {
+    header.classList.add('cluster-panel-draggable');
+    if (!header._clusterDragBound) {
+      header._clusterDragBound = true;
+      header.addEventListener('pointerdown', handleClusterPanelPointerDown);
+    }
+  } else {
+    header.classList.remove('cluster-panel-draggable');
+    if (header._clusterDragBound) {
+      header.removeEventListener('pointerdown', handleClusterPanelPointerDown);
+      header._clusterDragBound = false;
+    }
+    panel.style.left = '';
+    panel.style.top = '';
+    panel.style.right = '';
+  }
+}
+
+function handleClusterPanelPointerDown(event) {
+  const panel = document.getElementById('clusterAnalysisPanel');
+  if (!panel || !panel.classList.contains('overlay')) {
+    return;
+  }
+  event.preventDefault();
+  const host = panel.parentElement;
+  const hostRect = host.getBoundingClientRect();
+  const panelRect = panel.getBoundingClientRect();
+  clusterPanelDrag.active = true;
+  clusterPanelDrag.panel = panel;
+  clusterPanelDrag.hostRect = hostRect;
+  clusterPanelDrag.offsetX = event.clientX - panelRect.left;
+  clusterPanelDrag.offsetY = event.clientY - panelRect.top;
+  panel.style.right = 'auto';
+  panel.style.left = `${panelRect.left - hostRect.left}px`;
+  panel.style.top = `${panelRect.top - hostRect.top}px`;
+  document.addEventListener('pointermove', handleClusterPanelPointerMove);
+  document.addEventListener('pointerup', handleClusterPanelPointerUp);
+}
+
+function handleClusterPanelPointerMove(event) {
+  if (!clusterPanelDrag.active || !clusterPanelDrag.panel) {
+    return;
+  }
+  const panel = clusterPanelDrag.panel;
+  const hostRect = clusterPanelDrag.hostRect;
+  const nextLeft = event.clientX - hostRect.left - clusterPanelDrag.offsetX;
+  const nextTop = event.clientY - hostRect.top - clusterPanelDrag.offsetY;
+  panel.style.left = `${Math.max(0, nextLeft)}px`;
+  panel.style.top = `${Math.max(0, nextTop)}px`;
+}
+
+function handleClusterPanelPointerUp() {
+  clusterPanelDrag.active = false;
+  document.removeEventListener('pointermove', handleClusterPanelPointerMove);
+  document.removeEventListener('pointerup', handleClusterPanelPointerUp);
+}
+
+function updateClusterAnalysisButtonVisibility() {
+  const clusterBtn = document.getElementById('clusterAnalysisButton');
+  if (!clusterBtn) {
+    return;
+  }
+  const shouldShow = !selectedState;
+  clusterBtn.style.display = shouldShow ? 'block' : 'none';
+  clusterBtn.classList.toggle('active', isClusterPanelOpen());
+}
+
+function isTransitMetricAllowed(metricName) {
+  if (!metricName) return false;
+  return !metricName.toLowerCase().includes(SAMPLE_SIZE_KEYWORD);
+}
+
+function isTransitMetricIndependent(metricName) {
+  if (!metricName) return false;
+  const normalized = metricName.toLowerCase();
+  return TRANSIT_INDEPENDENT_KEYWORDS.some(keyword => normalized.includes(keyword));
+}
+
+function getTransitMetricDirection(metricName) {
+  const logic = getMetricColorLogic(metricName);
+  return logic === 'high_is_good' ? 'high_is_good' : 'high_is_bad';
+}
+
+function getEquityMetricDirection(metricName) {
+  if (!metricName) return 'high_is_need';
+  const normalized = metricName.toLowerCase();
+  if (EQUITY_GOOD_KEYWORDS.some(keyword => normalized.includes(keyword))) {
+    return 'high_is_good';
+  }
+  return 'high_is_need';
+}
+
+function getStatePercentAccessMap() {
+  if (statePercentAccessCache) {
+    return statePercentAccessCache;
+  }
+  const metricData = findMetricDataByTitle(DEFAULT_PERCENT_ACCESS_METRIC);
+  const map = {};
+  if (metricData) {
+    Object.entries(metricData).forEach(([key, value]) => {
+      if (key === '_id' || key === 'title') return;
+      const numericValue = Number(value);
+      if (!isNaN(numericValue)) {
+        map[key] = numericValue;
+      }
+    });
+  }
+  statePercentAccessCache = map;
+  return map;
+}
+
+function getSelectedStateDatabaseName() {
+  if (!selectedState || !statesData[selectedState]) {
+    return null;
+  }
+  const stateName = statesData[selectedState].name;
+  const corrected = getCountyDbName(stateName);
+  return formatStateNameForDb(corrected);
+}
+
+function extractEquityMetricsFromDocument(doc, category) {
+  if (!doc || typeof doc !== 'object') {
+    return {};
+  }
+  let source = null;
+  if (doc.data && typeof doc.data === 'object') {
+    source = doc.data;
+  } else if (category === 'Housing_Data' && doc.Population && typeof doc.Population === 'object') {
+    source = doc.Population;
+  } else {
+    source = doc;
+  }
+
+  const metrics = {};
+  Object.entries(source).forEach(([key, value]) => {
+    if (EQUITY_METADATA_FIELDS.includes(key)) {
+      return;
+    }
+    const numericValue = Number(value);
+    if (!isNaN(numericValue)) {
+      metrics[key] = numericValue;
+    }
+  });
+  return metrics;
+}
+
+function buildEquityMetricStore(documents = [], category) {
+  const valuesByMetric = {};
+  documents.forEach(doc => {
+    const stateName = doc.title || doc.State || doc.state || doc.name;
+    if (!stateName) return;
+    const metrics = extractEquityMetricsFromDocument(doc, category);
+    Object.entries(metrics).forEach(([metricName, value]) => {
+      if (!valuesByMetric[metricName]) {
+        valuesByMetric[metricName] = {};
+      }
+      valuesByMetric[metricName][stateName] = value;
+    });
+  });
+  const metrics = Object.keys(valuesByMetric);
+  return {
+    metrics,
+    valuesByMetric
+  };
+}
+
+async function ensureStateEquityCategoryLoaded(category) {
+  if (!category) return null;
+  if (stateEquityStore[category] && stateEquityStore[category].metrics?.length) {
+    return stateEquityStore[category];
+  }
+
+  const response = await fetch(`/api/equityStateAverageValues/${encodeURIComponent(category)}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load state equity data for ${category}`);
+  }
+  const data = await response.json();
+  const store = buildEquityMetricStore(Array.isArray(data) ? data : [], category);
+  stateEquityStore[category] = store;
+  return store;
+}
+
+function buildCountyMetricLookup(documents = [], category) {
+  const lookup = {};
+  documents.forEach(doc => {
+    const countyRaw = doc.title || doc.county || doc.County;
+    if (!countyRaw) return;
+    const normalized = normalizeCountyNameForComparison(
+      countyRaw.replace(/\s+county$/i, '')
+    );
+    const metrics = extractEquityMetricsFromDocument(doc, category);
+    Object.entries(metrics).forEach(([metricName, value]) => {
+      if (!lookup[metricName]) {
+        lookup[metricName] = {};
+      }
+      lookup[metricName][normalized] = value;
+    });
+  });
+  return lookup;
+}
+
+function buildStateClusterDataset(transitMetric, equityCategory, equityMetric) {
+  const transitDoc = findMetricDataByTitle(transitMetric);
+  const equityStore = stateEquityStore[equityCategory];
+  if (!transitDoc || !equityStore || !equityStore.valuesByMetric || !equityStore.valuesByMetric[equityMetric]) {
+    return [];
+  }
+  const equityValues = equityStore.valuesByMetric[equityMetric];
+  const percentAccessMap = getStatePercentAccessMap();
+  const dataset = [];
+
+  Object.entries(statesData).forEach(([stateId, meta]) => {
+    const stateName = meta.name;
+    const transitValue = Number(transitDoc[stateName]);
+    const equityValue = Number(equityValues[stateName]);
+    if (isNaN(transitValue) || isNaN(equityValue)) {
+      return;
+    }
+    dataset.push({
+      id: stateId,
+      label: stateName,
+      geography: stateName,
+      transitValue,
+      equityValue,
+      percentAccess: percentAccessMap[stateName] !== undefined ? percentAccessMap[stateName] : null
+    });
+  });
+
+  return dataset;
+}
+
+function buildCountyClusterDataset(stateDbName, transitMetric, equityCategory, equityMetric) {
+  if (!stateDbName || !Array.isArray(allCountyData) || allCountyData.length === 0) {
+    return [];
+  }
+  const store = countyEquityStore[stateDbName] && countyEquityStore[stateDbName][equityCategory];
+  if (!store || !store.lookup || !store.lookup[equityMetric]) {
+    return [];
+  }
+  const equityLookup = store.lookup[equityMetric];
+  const dataset = [];
+
+  allCountyData.forEach(doc => {
+    const countyTitle = doc.title;
+    if (!countyTitle) return;
+    const normalized = normalizeCountyNameForComparison(countyTitle.replace(/\s+county$/i, ''));
+    if (equityLookup[normalized] === undefined) {
+      return;
+    }
+    const transitValue = Number(doc[transitMetric]);
+    const equityValue = Number(equityLookup[normalized]);
+    if (isNaN(transitValue) || isNaN(equityValue)) {
+      return;
+    }
+    const percentAccessValue = doc['Percent Access'];
+    dataset.push({
+      id: normalized,
+      label: countyTitle,
+      geography: countyTitle,
+      transitValue,
+      equityValue,
+      percentAccess: percentAccessValue !== undefined ? Number(percentAccessValue) : null
+    });
+  });
+
+  return dataset;
+}
+
+function prepareClusterDataset(level, transitMetric, equityCategory, equityMetric) {
+  if (level === 'state') {
+    return buildStateClusterDataset(transitMetric, equityCategory, equityMetric);
+  }
+  const stateDbName = getSelectedStateDatabaseName();
+  return buildCountyClusterDataset(stateDbName, transitMetric, equityCategory, equityMetric);
+}
+
+function computeValueStats(points, key) {
+  const values = points
+    .map(point => Number(point[key]))
+    .filter(value => !isNaN(value));
+  if (values.length === 0) {
+    return { min: 0, max: 1 };
+  }
+  return {
+    min: Math.min(...values),
+    max: Math.max(...values)
+  };
+}
+
+function normalizeValue(value, stats, invert = false) {
+  const numericValue = Number(value);
+  if (isNaN(numericValue)) {
+    return null;
+  }
+  const range = stats.max - stats.min;
+  let normalized;
+  if (range === 0) {
+    normalized = 0.5;
+  } else {
+    normalized = (numericValue - stats.min) / range;
+  }
+  normalized = Math.min(Math.max(normalized, 0), 1);
+  if (invert) {
+    normalized = 1 - normalized;
+  }
+  return Number(normalized.toFixed(4));
+}
+
+function normalizeClusterPoints(points, transitMetric, equityMetric) {
+  if (!points || points.length === 0) {
+    return [];
+  }
+
+  const independentTransit = isTransitMetricIndependent(transitMetric);
+  if (!independentTransit) {
+    const stats = computeValueStats(points, 'transitValue');
+    const penalty = (stats.max || 1) * 0.15 + 1;
+    points.forEach(point => {
+      if (point.percentAccess !== null && Number(point.percentAccess) === 0) {
+        point.transitValue = stats.max + penalty;
+        point.noAccess = true;
+      }
+    });
+  }
+
+  const transitStats = computeValueStats(points, 'transitValue');
+  const equityStats = computeValueStats(points, 'equityValue');
+  const transitDirection = getTransitMetricDirection(transitMetric);
+  const equityDirection = getEquityMetricDirection(equityMetric);
+
+  return points.map(point => ({
+    ...point,
+    normX: normalizeValue(point.equityValue, equityStats, equityDirection === 'high_is_good'),
+    normY: normalizeValue(point.transitValue, transitStats, transitDirection === 'high_is_good')
+  }));
+}
+
+function runKMeans(points, k = CLUSTER_K) {
+  if (!points || points.length === 0) {
+    return [];
+  }
+  const centroids = [];
+  for (let i = 0; i < k; i++) {
+    const seed = points[Math.floor(Math.random() * points.length)];
+    centroids.push({
+      x: seed.normX !== null ? seed.normX : Math.random(),
+      y: seed.normY !== null ? seed.normY : Math.random()
+    });
+  }
+
+  const assignments = new Array(points.length).fill(-1);
+  let iterations = 0;
+  let changed = true;
+
+  while (changed && iterations < 30) {
+    changed = false;
+    iterations += 1;
+
+    points.forEach((point, index) => {
+      if (point.normX === null || point.normY === null) {
+        return;
+      }
+      let bestIndex = 0;
+      let bestDistance = Infinity;
+      centroids.forEach((centroid, centroidIndex) => {
+        const distance = Math.hypot(point.normX - centroid.x, point.normY - centroid.y);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = centroidIndex;
+        }
+      });
+
+      if (assignments[index] !== bestIndex) {
+        assignments[index] = bestIndex;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      centroids.forEach((centroid, centroidIndex) => {
+        const assignedPoints = points.filter((_, pointIndex) => assignments[pointIndex] === centroidIndex);
+        if (assignedPoints.length === 0) {
+          const seed = points[Math.floor(Math.random() * points.length)];
+          centroid.x = seed.normX !== null ? seed.normX : Math.random();
+          centroid.y = seed.normY !== null ? seed.normY : Math.random();
+          return;
+        }
+        centroid.x = assignedPoints.reduce((sum, point) => sum + (point.normX || 0), 0) / assignedPoints.length;
+        centroid.y = assignedPoints.reduce((sum, point) => sum + (point.normY || 0), 0) / assignedPoints.length;
+      });
+    }
+  }
+
+  return centroids.map((centroid, index) => ({
+    id: index,
+    centroid,
+    points: points.filter((_, pointIndex) => assignments[pointIndex] === index)
+  }));
+}
+
+function assignClusterTypes(clusters = []) {
+  const availableTypes = new Set(Object.keys(CLUSTER_REFERENCE_POINTS));
+  const orderedClusters = [...clusters].sort(
+    (a, b) => (b.centroid.x + b.centroid.y) - (a.centroid.x + a.centroid.y)
+  );
+
+  orderedClusters.forEach(cluster => {
+    let bestType = null;
+    let bestDistance = Infinity;
+    availableTypes.forEach(type => {
+      const ref = CLUSTER_REFERENCE_POINTS[type];
+      const distance = Math.hypot(cluster.centroid.x - ref.x, cluster.centroid.y - ref.y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestType = type;
+      }
+    });
+    if (!bestType) {
+      bestType = Object.keys(CLUSTER_REFERENCE_POINTS)[0];
+    }
+    cluster.type = bestType;
+    availableTypes.delete(bestType);
+  });
+
+  // Assign any remaining clusters (if any) to the closest reference
+  clusters.forEach(cluster => {
+    if (cluster.type) return;
+    let bestType = null;
+    let bestDistance = Infinity;
+    Object.entries(CLUSTER_REFERENCE_POINTS).forEach(([type, ref]) => {
+      const distance = Math.hypot(cluster.centroid.x - ref.x, cluster.centroid.y - ref.y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestType = type;
+      }
+    });
+    cluster.type = bestType || 'critical';
+  });
+
+  return clusters;
+}
+
+function applyClusterIntensities(clusters = []) {
+  clusters.forEach(cluster => {
+    const reference = CLUSTER_REFERENCE_POINTS[cluster.type] || { x: 0.5, y: 0.5 };
+    if (!Array.isArray(cluster.points) || cluster.points.length === 0) {
+      return;
+    }
+    const scores = cluster.points.map(point => {
+      if (point.normX === null || point.normY === null) {
+        point.intensity = CLUSTER_MIN_INTENSITY;
+        return CLUSTER_MIN_INTENSITY;
+      }
+      const distance = Math.hypot(point.normX - reference.x, point.normY - reference.y);
+      const normalizedDistance = Math.min(distance / Math.sqrt(2), 1);
+      const score = 1 - normalizedDistance;
+      point.__clusterScore = score;
+      return score;
+    });
+    const minScore = Math.min(...scores);
+    const maxScore = Math.max(...scores);
+    const scoreRange = maxScore - minScore || 1;
+    cluster.points.forEach(point => {
+      const normalizedScore = point.__clusterScore !== undefined
+        ? (point.__clusterScore - minScore) / scoreRange
+        : 0;
+      const scaled = CLUSTER_MIN_INTENSITY + (1 - CLUSTER_MIN_INTENSITY) * normalizedScore;
+      point.intensity = Number(scaled.toFixed(3));
+      delete point.__clusterScore;
+    });
+  });
+}
+
+function getClusterFillColor(type, intensity = 1) {
+  const detail = CLUSTER_TYPE_DETAILS[type];
+  if (!detail) {
+    return '#999999';
+  }
+  const clamped = Math.min(Math.max(intensity, CLUSTER_MIN_INTENSITY), 1);
+  if (window.d3 && typeof d3.interpolateRgb === 'function') {
+    return d3.interpolateRgb('#f7f7f7', detail.color)(clamped);
+  }
+  // Fallback: manual blend with white
+  const base = detail.color.replace('#', '');
+  const r = parseInt(base.substring(0, 2), 16);
+  const g = parseInt(base.substring(2, 4), 16);
+  const b = parseInt(base.substring(4, 6), 16);
+  const mixChannel = (channel) => Math.round(255 - (255 - channel) * clamped);
+  return `rgb(${mixChannel(r)}, ${mixChannel(g)}, ${mixChannel(b)})`;
+}
+
+function buildClusterDescription(type, equityLabel, transitLabel) {
+  switch (type) {
+    case 'critical':
+      return `High ${equityLabel} need with limited ${transitLabel} performance`;
+    case 'synergy':
+      return `High ${equityLabel} need supported by strong ${transitLabel}`;
+    case 'service_gap':
+      return `Lower ${equityLabel} need but weak ${transitLabel} delivery`;
+    case 'high_access':
+      return `Lower ${equityLabel} need with strong ${transitLabel}`;
+    default:
+      return `${equityLabel} vs ${transitLabel}`;
+  }
+}
+
+function formatClusterMetricValue(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 'N/A';
+  }
+  if (Math.abs(value) >= 1000) {
+    return `${value.toFixed(0)}`;
+  }
+  return `${value.toFixed(2)}`;
+}
+
+function summarizeClusterStats(cluster, equityLabel, transitLabel) {
+  const count = cluster.points.length;
+  if (count === 0) {
+    return `No areas in this cluster`;
+  }
+  const sumEquity = cluster.points.reduce((sum, point) => sum + (Number(point.equityValue) || 0), 0);
+  const sumTransit = cluster.points.reduce((sum, point) => sum + (Number(point.transitValue) || 0), 0);
+  const avgEquity = sumEquity / count;
+  const avgTransit = sumTransit / count;
+  return `${count} areas · Avg ${equityLabel}: ${formatClusterMetricValue(avgEquity)} · Avg ${transitLabel}: ${formatClusterMetricValue(avgTransit)}`;
+}
+
+function renderClusterLegend() {
+  const legend = document.getElementById('legend');
+  if (!legend || !clusterState.active || !clusterState.inputs) {
+    return;
+  }
+
+  const equityLabel = mapEquityMetricName(clusterState.inputs.equityMetric, clusterState.inputs.equityCategory);
+  const transitLabel = clusterState.inputs.transitMetric;
+  legend.classList.add('cluster-legend');
+  const showExit = clusterState.context !== 'equity';
+
+  const legendItems = Object.keys(CLUSTER_TYPE_DETAILS).map(type => {
+    const detail = CLUSTER_TYPE_DETAILS[type];
+    return `
+      <div class="cluster-legend-item cluster-legend-chip">
+        <span class="cluster-legend-swatch" style="background:${detail.color};"></span>
+        <div>
+          <strong>${detail.label}</strong>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  legend.innerHTML = `
+    <div class="cluster-legend-header">
+      <div>
+        <h4>Cluster Analysis</h4>
+      </div>
+      <div class="cluster-legend-actions">
+      </div>
+    </div>
+    <div class="cluster-legend-body cluster-legend-simple">
+      ${legendItems}
+    </div>
+  `;
+
+  const infoButton = createInfoButton(
+    'Cluster Analysis',
+    buildClusterLegendInfoText(equityLabel, transitLabel)
+  );
+  const legendActions = legend.querySelector('.cluster-legend-actions');
+  if (legendActions && infoButton) {
+    legendActions.insertBefore(infoButton, legendActions.firstChild);
+  }
+
+  repositionClusterLegend();
+}
+
+function buildClusterLegendInfoText(equityLabel, transitLabel) {
+  const detailText = Object.keys(CLUSTER_TYPE_DETAILS).map(type => {
+    const detail = CLUSTER_TYPE_DETAILS[type];
+    const stats = clusterState.legend.find(l => l.type === type)?.stats || '';
+    return `<strong>${detail.label}</strong>: ${detail.description}${stats ? `<br>${stats}` : ''}`;
+  }).join('<br><br>');
+  return `
+    ${equityLabel} vs ${transitLabel}<br><br>
+    ${detailText}<br><br>
+    Shade intensity moves from light to dark within each color to show relative severity inside the cluster.
+  `;
+}
+
+function applyStateClusterColors() {
+  if (!usMap || !usMap.svg || !clusterState.active || clusterState.level !== 'state') {
+    return;
+  }
+  usMap.svg.selectAll('.state')
+    .attr('fill', d => {
+      const assignment = clusterState.assignments[d.id];
+      if (!assignment) {
+        return '#bdc3c7';
+      }
+      return getClusterFillColor(assignment.type, assignment.intensity);
+    });
+  renderClusterLegend();
+}
+
+function applyCountyClusterColors() {
+  if (!countyMap || !countyMap.svg || !clusterState.active || clusterState.level !== 'county') {
+    return;
+  }
+  countyMap.svg.selectAll('.county-path')
+    .attr('fill', function() {
+      const countyName = d3.select(this).attr('data-county-name') || '';
+      const normalized = normalizeCountyNameForComparison(countyName.replace(/\s+county$/i, ''));
+      const assignment = clusterState.assignments[normalized];
+      if (!assignment) {
+        return d3.select(this).attr('original-fill') || '#d5d8dc';
+      }
+      return getClusterFillColor(assignment.type, assignment.intensity);
+    });
+  renderClusterLegend();
+}
+
+function exitClusterMode() {
+  const wasActive = clusterState.active;
+  resetClusterState({ refresh: wasActive });
+  const panel = document.getElementById('clusterAnalysisPanel');
+  const leftPanel = document.getElementById('leftPanel');
+  if (panel) {
+    panel.classList.remove('open');
+    panel.classList.remove('overlay');
+  }
+  moveClusterPanelToSidebar();
+  clusterPanelSource = 'map';
+  if (leftPanel) {
+    leftPanel.classList.remove('cluster-mode');
+  }
+  restoreMapToMainLayout();
+  updateLeftPanel();
+  updateCompareStatesButtonVisibility();
+  updateClusterAnalysisButtonVisibility();
+}
+
+async function performClusterAnalysis({ level, transitMetric, equityCategory, equityMetric, source = 'map' }) {
+  try {
+    if (!transitMetric || !equityCategory || !equityMetric) {
+      alert('Please select both transit and equity metrics.');
+      return;
+    }
+
+    if (level === 'state') {
+      await ensureStateEquityCategoryLoaded(equityCategory);
+    } else {
+      await ensureCountyEquityCategoryLoaded(equityCategory);
+    }
+
+    const dataset = prepareClusterDataset(level, transitMetric, equityCategory, equityMetric);
+    if (!dataset || dataset.length < CLUSTER_K) {
+      alert('Not enough data available to create clusters.');
+      return;
+    }
+
+    const normalizedPoints = normalizeClusterPoints(dataset, transitMetric, equityMetric)
+      .filter(point => point.normX !== null && point.normY !== null);
+    if (normalizedPoints.length < CLUSTER_K) {
+      alert('Not enough comparable data after normalization.');
+      return;
+    }
+
+    const clusters = assignClusterTypes(runKMeans(normalizedPoints, CLUSTER_K));
+    applyClusterIntensities(clusters);
+
+    const assignments = {};
+    clusters.forEach(cluster => {
+      cluster.points.forEach(point => {
+        assignments[point.id] = {
+          type: cluster.type,
+          intensity: point.intensity,
+          label: point.label,
+          rawTransit: point.transitValue,
+          rawEquity: point.equityValue,
+          percentAccess: point.percentAccess
+        };
+      });
+    });
+
+    clusterState = {
+      active: true,
+      level,
+      context: source,
+      assignments,
+      legend: clusters.map(cluster => ({
+        type: cluster.type,
+        label: CLUSTER_TYPE_DETAILS[cluster.type]?.label,
+        description: buildClusterDescription(
+          cluster.type,
+          mapEquityMetricName(equityMetric, equityCategory),
+          transitMetric
+        ),
+        stats: summarizeClusterStats(cluster, mapEquityMetricName(equityMetric, equityCategory), transitMetric)
+      })),
+      inputs: { level, transitMetric, equityCategory, equityMetric }
+    };
+
+    if (level === 'state') {
+      applyStateClusterColors();
+    } else {
+      applyCountyClusterColors();
+    }
+  } catch (error) {
+    console.error('Cluster analysis error:', error);
+    alert('Unable to run cluster analysis right now. Please try again.');
+  }
+}
+
+function initializeClusterAnalysisUI() {
+  const openBtn = document.getElementById('clusterAnalysisButton');
+  const panel = document.getElementById('clusterAnalysisPanel');
+  const closeBtn = document.getElementById('closeClusterPanel');
+  const runBtn = document.getElementById('runClusterAnalysisBtn');
+  const categorySelect = document.getElementById('clusterEquityCategorySelect');
+
+  if (panel) {
+    ensureClusterPanelPlaceholder();
+  }
+
+  if (openBtn) {
+    openBtn.addEventListener('click', () => {
+      openClusterPanel({ resetSelections: true, autoRun: true, source: 'map' });
+    });
+  }
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => exitClusterMode());
+  }
+  if (runBtn) {
+    runBtn.addEventListener('click', () => {
+      runClusterAnalysisFromControls();
+    });
+  }
+  if (categorySelect) {
+    categorySelect.addEventListener('change', () => {
+      loadClusterEquityMetrics(categorySelect.value);
+    });
+  }
+}
+
+async function runClusterAnalysisFromControls() {
+  const transitMetric = document.getElementById('clusterTransitSelect')?.value;
+  const equityCategory = document.getElementById('clusterEquityCategorySelect')?.value;
+  const equityMetric = document.getElementById('clusterEquityMetricSelect')?.value;
+  const level = selectedState ? 'county' : 'state';
+  await performClusterAnalysis({ level, transitMetric, equityCategory, equityMetric, source: clusterPanelSource });
+}
+
+async function openClusterPanel(options = {}) {
+  const panel = document.getElementById('clusterAnalysisPanel');
+  if (!panel || clusterPanelOpening) {
+    return;
+  }
+  ensureClusterPanelPlaceholder();
+  clusterPanelOpening = true;
+  clusterPanelSource = options.source || 'map';
+  try {
+    if (shouldUseClusterOverlay()) {
+      moveClusterPanelToOverlay();
+    } else {
+      moveClusterPanelToSidebar();
+    }
+    panel.classList.add('open');
+    const leftPanel = document.getElementById('leftPanel');
+    if (leftPanel) {
+      leftPanel.classList.toggle('cluster-mode', !shouldUseClusterOverlay());
+    }
+    updateLeftPanel();
+    updateClusterPanelContext();
+    populateClusterTransitOptions({ preferFirstOption: options.resetSelections });
+    const categorySelect = document.getElementById('clusterEquityCategorySelect');
+    if (options.resetSelections && categorySelect && categorySelect.options.length) {
+      categorySelect.value = categorySelect.options[0].value;
+    }
+    const category = categorySelect?.value;
+    if (category) {
+      await loadClusterEquityMetrics(category, { autoSelectFirst: options.resetSelections });
+    }
+    if (options.autoRun) {
+      await runClusterAnalysisFromControls();
+    }
+  } finally {
+    clusterPanelOpening = false;
+    updateCompareStatesButtonVisibility();
+    updateClusterAnalysisButtonVisibility();
+  }
+}
+
+function updateClusterPanelContext() {
+  const contextLabel = document.getElementById('clusterPanelContext');
+  if (!contextLabel) return;
+  if (selectedState && statesData[selectedState]) {
+    contextLabel.textContent = `Analyzing ${statesData[selectedState].name} counties`;
+  } else {
+    contextLabel.textContent = 'Analyzing United States (states)';
+  }
+}
+
+function populateClusterTransitOptions(config = {}) {
+  const select = document.getElementById('clusterTransitSelect');
+  if (!select) return;
+  const previousValue = select.value;
+  select.innerHTML = '';
+
+  const level = selectedState ? 'county' : 'state';
+  let metrics = [];
+
+  if (level === 'state') {
+    metrics = (allStateData || [])
+      .map(metric => metric.title)
+      .filter(metric => metric && isTransitMetricAllowed(metric));
+  } else if (Array.isArray(transitMetricKeys)) {
+    metrics = transitMetricKeys.filter(metric => isTransitMetricAllowed(metric));
+  }
+
+  if (metrics.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Metrics unavailable';
+    select.appendChild(option);
+    select.disabled = true;
+    return;
+  }
+
+  const metricMapping = createMetricMappingFromTitles(metrics);
+  const reverseMapping = Object.entries(metricMapping).reduce((acc, [display, actual]) => {
+    acc[actual] = display;
+    return acc;
+  }, {});
+
+  let currentGroup = null;
+  let currentOptgroup = null;
+  let optionCount = 0;
+
+  ORDERED_TRANSIT_METRICS.forEach(displayName => {
+    if (!displayName) return;
+    const actualName = metricMapping[displayName];
+    if (!actualName) return;
+
+    const group = getMetricGroup(displayName);
+    if (group !== currentGroup) {
+      currentOptgroup = document.createElement('optgroup');
+      currentOptgroup.label = group;
+      currentOptgroup.style.fontWeight = 'bold';
+      currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+      select.appendChild(currentOptgroup);
+      currentGroup = group;
+    }
+
+    const option = document.createElement('option');
+    option.value = actualName;
+    option.textContent = displayName;
+    option.dataset.displayName = displayName;
+    option.dataset.group = group;
+    currentOptgroup.appendChild(option);
+    optionCount += 1;
+  });
+
+  if (optionCount === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Metrics unavailable';
+    option.disabled = true;
+    select.appendChild(option);
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  const desiredSelection = level === 'state' ? selectedMetric : selectedCountyMetric;
+  const preferredValue = desiredSelection && Array.from(select.options).some(option => option.value === desiredSelection)
+    ? desiredSelection
+    : previousValue;
+
+  if (preferredValue && Array.from(select.options).some(option => option.value === preferredValue)) {
+    select.value = preferredValue;
+  } else if (config.preferFirstOption && select.options.length > 0) {
+    select.value = select.options[0].value;
+  } else if (select.options.length > 0) {
+    select.value = select.options[0].value;
+  }
+}
+
+async function loadClusterEquityMetrics(category, options = {}) {
+  const metricSelect = document.getElementById('clusterEquityMetricSelect');
+  if (!metricSelect || !category) return;
+  metricSelect.innerHTML = '<option>Loading metrics...</option>';
+  metricSelect.disabled = true;
+
+  try {
+    let metrics = [];
+    if (selectedState) {
+      const store = await ensureCountyEquityCategoryLoaded(category);
+      metrics = store?.metrics || [];
+    } else {
+      const store = await ensureStateEquityCategoryLoaded(category);
+      metrics = store?.metrics || [];
+    }
+
+    metricSelect.innerHTML = '';
+    if (metrics.length === 0) {
+      metricSelect.innerHTML = '<option value="">No metrics available</option>';
+      return;
+    }
+
+    metrics.forEach(metric => {
+      const option = document.createElement('option');
+      option.value = metric;
+      option.textContent = mapEquityMetricName(metric, category);
+      metricSelect.appendChild(option);
+    });
+    metricSelect.disabled = false;
+    if (options.autoSelectFirst && metricSelect.options.length > 0) {
+      metricSelect.value = metricSelect.options[0].value;
+    }
+  } catch (error) {
+    console.error('Failed to load equity metrics:', error);
+    metricSelect.innerHTML = '<option value="">Unable to load metrics</option>';
+  }
+}
+
+function refreshClusterControlsOnStateChange() {
+  if (!isClusterPanelOpen()) {
+    return;
+  }
+  updateClusterPanelContext();
+  populateClusterTransitOptions();
+  const category = document.getElementById('clusterEquityCategorySelect')?.value;
+  if (category) {
+    loadClusterEquityMetrics(category);
+  }
+  syncClusterPanelPlacement();
+}
+
+function repositionClusterLegend() {
+  ensureMapLegendPlaceholders();
+  const legend = document.getElementById('legend');
+  if (!legend) {
+    return;
+  }
+  if (clusterState.active && clusterState.context === 'equity') {
+    // Handled by moveMapIntoEquityCluster
+    return;
+  }
+  if (clusterState.active && clusterState.context === 'map' && !selectedState) {
+    const panelSlot = document.getElementById('clusterPanelLegendSlot');
+    if (panelSlot && legend.parentNode !== panelSlot) {
+      panelSlot.appendChild(legend);
+    }
+  } else if (legendHomePlaceholder && legendHomePlaceholder.parentNode && legend.parentNode !== legendHomePlaceholder.parentNode) {
+    legendHomePlaceholder.parentNode.insertBefore(legend, legendHomePlaceholder.nextSibling);
+  }
+}
+
+let equityViewMode = 'scatter';
+
+function initializeEquityViewToggle() {
+  const buttons = document.querySelectorAll('.equity-view-btn');
+  buttons.forEach(button => {
+    button.addEventListener('click', () => {
+      const mode = button.dataset.view;
+      if (mode) {
+        setEquityViewMode(mode);
+      }
+    });
+  });
+  setEquityViewMode('scatter');
+}
+
+function setEquityViewMode(mode) {
+  equityViewMode = mode;
+  const scatterView = document.getElementById('equityScatterView');
+  const clusterView = document.getElementById('equityClusterView');
+  const mapElement = document.getElementById('mapView');
+  const legend = document.getElementById('legend');
+  const isEquityActive = activeView === 'equity';
+
+  document.querySelectorAll('.equity-view-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === mode);
+  });
+
+  if (scatterView && clusterView) {
+    const showScatter = mode === 'scatter';
+    scatterView.style.display = showScatter ? 'block' : 'none';
+    clusterView.style.display = showScatter ? 'none' : 'block';
+    if (isEquityActive) {
+      if (mapElement) mapElement.style.display = showScatter ? 'none' : 'block';
+      if (legend) legend.style.display = showScatter ? 'none' : 'block';
+      if (showScatter) {
+        restoreMapToMainLayout();
+      } else {
+        moveMapIntoEquityCluster();
+      }
+    }
+  }
+
+  if (mode === 'cluster') {
+    const desiredLevel = selectedState ? 'county' : 'state';
+    const shouldReset = !isClusterPanelOpen() || clusterState.level !== desiredLevel;
+    const needsRun = shouldReset || !clusterState.active || clusterState.level !== desiredLevel;
+    openClusterPanel({
+      resetSelections: shouldReset,
+      autoRun: needsRun,
+      source: 'equity'
+    });
+  } else {
+    if (clusterState.active && clusterState.context === 'equity') {
+      exitClusterMode();
+    } else if (shouldUseClusterOverlay() && isClusterPanelOpen()) {
+      exitClusterMode();
+    }
+  }
+}
+
+async function ensureCountyEquityCategoryLoaded(category) {
+  const stateDbName = getSelectedStateDatabaseName();
+  if (!category || !stateDbName) {
+    return null;
+  }
+
+  countyEquityStore[stateDbName] = countyEquityStore[stateDbName] || {};
+  if (countyEquityStore[stateDbName][category]) {
+    equityCountyData = countyEquityStore[stateDbName][category].raw;
+    return countyEquityStore[stateDbName][category];
+  }
+
+  const url = `/api/equityCountyAverageValues/${encodeURIComponent(category)}/${encodeURIComponent(stateDbName)}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load county equity data for ${category}`);
+  }
+  const data = await response.json();
+  const lookup = buildCountyMetricLookup(Array.isArray(data) ? data : [], category);
+  const metrics = Object.keys(lookup);
+  countyEquityStore[stateDbName][category] = {
+    raw: data,
+    lookup,
+    metrics
+  };
+  equityCountyData = data;
+  equityMetricsByCategory[category] = metrics;
+  return countyEquityStore[stateDbName][category];
 }
 
 function getDefaultUSAMetricTitle() {
@@ -356,7 +1658,8 @@ function updateCompareStatesButtonVisibility() {
   }
   const mapView = document.getElementById('mapView');
   const isMapVisible = !mapView || mapView.style.display !== 'none';
-  const shouldShow = isMapVisible && selectedState === null && activeView === 'state';
+  const clusterOpen = isClusterPanelOpen();
+  const shouldShow = isMapVisible && selectedState === null && activeView === 'state' && !clusterOpen;
   compareBtn.style.display = shouldShow ? 'block' : 'none';
   if (shouldShow) {
     compareBtn.textContent = 'Compare States';
@@ -848,6 +2151,17 @@ function createMetricMapping(data) {
   return mapping;
 }
 
+// Helper to build metric mapping when we only have raw titles/keys
+function createMetricMappingFromTitles(titles = []) {
+  if (!Array.isArray(titles) || titles.length === 0) {
+    return {};
+  }
+  const syntheticData = titles
+    .filter(title => typeof title === 'string' && title.trim().length > 0)
+    .map(title => ({ title }));
+  return createMetricMapping(syntheticData);
+}
+
 // Add this helper function at the beginning of your app.js file
 function formatNumberToTwoDecimals(value) {
   // Check if value is a number
@@ -870,6 +2184,10 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Add event listener for back button in equity comparison
   document.getElementById('backToMapFromEquity').addEventListener('click', switchToMapView);
+  const equityClusterBackBtn = document.getElementById('equityClusterBackBtn');
+  if (equityClusterBackBtn) {
+    equityClusterBackBtn.addEventListener('click', () => setEquityViewMode('scatter'));
+  }
   
   // New event listener: update equity metrics immediately when equity category changes
   document.getElementById('equityCategorySelect').addEventListener('change', () => {
@@ -877,6 +2195,8 @@ document.addEventListener('DOMContentLoaded', () => {
       loadComparisonData();
     }
   });
+  initializeClusterAnalysisUI();
+  initializeEquityViewToggle();
 });
 
 function formatStateNameForDb(name) {
@@ -948,32 +2268,51 @@ document.addEventListener('DOMContentLoaded', () => {
 // UPDATE LEFT PANEL FUNCTION (Modified for Equity Comparison button disable)
 function updateLeftPanel() {
   const equityBtn = document.getElementById('equityComparisonTab');
+  const metricSelection = document.getElementById('metricSelection');
+  const countySelection = document.getElementById('countyMetricSelection');
+  const leftPanel = document.getElementById('leftPanel');
+  const clusterVisible = isClusterPanelOpen() && !shouldUseClusterOverlay();
+
+  if (leftPanel) {
+    leftPanel.classList.toggle('cluster-mode', clusterVisible);
+  }
+  if (clusterVisible) {
+    if (metricSelection) metricSelection.style.display = 'none';
+    if (countySelection) countySelection.style.display = 'none';
+    return;
+  }
+
   if (!selectedState) {
-    document.getElementById('metricSelection').style.display = 'block';
-    // Charts removed - chatbot is always visible
-    document.getElementById('countyMetricSelection').style.display = 'none';
-    equityBtn.style.display = 'none';
+    if (metricSelection) metricSelection.style.display = 'block';
+    if (countySelection) countySelection.style.display = 'none';
+    if (equityBtn) {
+      equityBtn.style.display = 'none';
+    }
   } else {
-    document.getElementById('metricSelection').style.display = 'none';
-    document.getElementById('countyMetricSelection').style.display = 'block';
+    if (metricSelection) metricSelection.style.display = 'none';
+    if (countySelection) countySelection.style.display = 'block';
     // If county data is displayed, disable the equity comparison button
     if (selectedCounty) {
-      equityBtn.style.display = 'block';
-      equityBtn.style.backgroundColor = '#555';
-      equityBtn.style.cursor = 'not-allowed';
-      equityBtn.setAttribute('title', 'Switch to State Data to view the comparison');
-      equityBtn.disabled = true;
-      equityBtn.classList.add('disabled-tab');
-      equityBtn.onclick = function(e) { e.preventDefault(); return false; };
+      if (equityBtn) {
+        equityBtn.style.display = 'block';
+        equityBtn.style.backgroundColor = '#555';
+        equityBtn.style.cursor = 'not-allowed';
+        equityBtn.setAttribute('title', 'Switch to State Data to view the comparison');
+        equityBtn.disabled = true;
+        equityBtn.classList.add('disabled-tab');
+        equityBtn.onclick = function(e) { e.preventDefault(); return false; };
+      }
     } else {
       // Enable equity comparison button when in state view
-      equityBtn.style.display = 'block';
-      equityBtn.style.backgroundColor = '';
-      equityBtn.style.cursor = 'pointer';
-      equityBtn.removeAttribute('title');
-      equityBtn.disabled = false;
-      equityBtn.classList.remove('disabled-tab');
-      equityBtn.onclick = switchToEquityComparison;
+      if (equityBtn) {
+        equityBtn.style.display = 'block';
+        equityBtn.style.backgroundColor = '';
+        equityBtn.style.cursor = 'pointer';
+        equityBtn.removeAttribute('title');
+        equityBtn.disabled = false;
+        equityBtn.classList.remove('disabled-tab');
+        equityBtn.onclick = switchToEquityComparison;
+      }
     }
   }
 }
@@ -1000,6 +2339,7 @@ function initApp() {
     applyDefaultUSAMetric(true);
     updateCompareStatesButtonVisibility();
     updateLeftPanel();
+    updateClusterAnalysisButtonVisibility();
   });
 }
 
@@ -1008,6 +2348,8 @@ async function fetchAllStateDataForCountryAverage() {
     const response = await fetch(`/api/averageValues`);
     if (!response.ok) throw new Error('Network response was not ok');
     allStateData = await response.json();
+    allStateData = sanitizeMetricDocuments(allStateData);
+    statePercentAccessCache = null;
   } catch (error) {
     console.error('Error fetching country data:', error);
   }
@@ -1067,62 +2409,6 @@ function populateMetricSelect() {
   // Remove any existing event listeners to prevent duplicates
   select.removeEventListener('change', handleMetricChange);
   select.addEventListener('change', handleMetricChange);
-  
-  // Add info button for USA map metrics
-  addInfoButtonToMetricSelection('usa_map');
-}
-
-function addInfoButtonToMetricSelection(mapType) {
-  const metricSelection = document.getElementById('metricSelection');
-  if (!metricSelection) return;
-  
-  // Remove existing info button if it exists
-  const existingInfoBtn = metricSelection.querySelector('.metric-info-btn');
-  if (existingInfoBtn) {
-    existingInfoBtn.remove();
-  }
-  
-  // Create info button
-  const infoBtn = document.createElement('button');
-  infoBtn.className = 'metric-info-btn';
-  infoBtn.innerHTML = '<i class="fas fa-info-circle"></i>';
-  infoBtn.title = 'Click for metric information';
-  infoBtn.style.cssText = `
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: #3498db;
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-  `;
-  
-  infoBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const currentMetric = document.getElementById('metricSelect').value;
-    if (currentMetric) {
-      // Find the display name for the current metric
-      const metricMapping = createMetricMapping(allStateData);
-      const displayName = Object.keys(metricMapping).find(key => metricMapping[key] === currentMetric);
-      if (displayName) {
-        showInfoPopup(displayName, mapType);
-      }
-    } else {
-      showInfoPopup('Select a metric first', 'Please select a metric from the dropdown to view its information.');
-    }
-  });
-  
-  // Add the button to the metric selection container
-  metricSelection.style.position = 'relative';
-  metricSelection.appendChild(infoBtn);
 }
 
 function handleMetricChange(event) {
@@ -1147,6 +2433,10 @@ function handleMetricChange(event) {
 }
 
 function updateMapColors() {
+  if (clusterState.active && clusterState.level === 'state') {
+    applyStateClusterColors();
+    return;
+  }
   if (!usMap) return;
   const metricData = findMetricDataByTitle(selectedMetric);
   if (!metricData) return;
@@ -1644,6 +2934,10 @@ function handleStateClick(stateId) {
     return;
   }
   
+  if (clusterState.active || isClusterPanelOpen()) {
+    exitClusterMode();
+  }
+
   console.log("User is logged in, processing state click:", stateId);
   
   // Clear any existing tooltips
@@ -1653,6 +2947,7 @@ function handleStateClick(stateId) {
   selectedCounty = null;
   activeView = 'county';
   updateCompareStatesButtonVisibility();
+  updateClusterAnalysisButtonVisibility();
   
   // Hide state-level elements and show county-level elements
   document.getElementById('metricSelection').style.display = 'none';
@@ -1662,6 +2957,7 @@ function handleStateClick(stateId) {
   }
   document.getElementById('countyMetricSelection').style.display = 'block';
   document.getElementById('legend').innerHTML = '';
+  refreshClusterControlsOnStateChange();
   
   // Create county map immediately
   createCountyMap(stateId);
@@ -1690,6 +2986,14 @@ function handleStateClick(stateId) {
         selectedCountyMetric = transitMetricKeys[0];
         populateCountyMetricSelect(transitMetricKeys);
         populateTransitMetricDropdown();
+        const panel = document.getElementById('clusterAnalysisPanel');
+        if (panel && panel.classList.contains('open')) {
+          populateClusterTransitOptions();
+          const category = document.getElementById('clusterEquityCategorySelect')?.value;
+          if (category) {
+            loadClusterEquityMetrics(category);
+          }
+        }
         
         // Update county map colors with the first metric
         setTimeout(() => {
@@ -1968,6 +3272,9 @@ function handleCountyClick(countyName) {
 
 function handleBackToStates() {
   console.log('🏠 [NAV] handleBackToStates called - returning to homepage');
+  if (clusterState.active || isClusterPanelOpen()) {
+    exitClusterMode();
+  }
   selectedState = null;
   selectedCounty = null;
   activeView = 'state';
@@ -1986,6 +3293,8 @@ function handleBackToStates() {
   applyDefaultUSAMetric(true);
   updateCompareStatesButtonVisibility();
   updateLeftPanel();
+  refreshClusterControlsOnStateChange();
+  updateClusterAnalysisButtonVisibility();
   
   // Fix scrollbar issue: Ensure scrollbar is restored when returning to homepage
   console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from handleBackToStates (delayed)');
@@ -2032,6 +3341,7 @@ function handleBackToState() {
     // Keep compare counties button hidden for state maps
     updateLeftPanel();
     updateCompareStatesButtonVisibility();
+    updateClusterAnalysisButtonVisibility();
   } else {
     selectedState = null;
     activeView = 'state';
@@ -2052,6 +3362,7 @@ function handleBackToState() {
     applyDefaultUSAMetric(true);
     updateCompareStatesButtonVisibility();
     updateLeftPanel();
+    updateClusterAnalysisButtonVisibility();
     
     // Fix scrollbar issue: Ensure scrollbar is restored when returning to state view
     setTimeout(() => {
@@ -2200,9 +3511,6 @@ function displayCountryMetrics(data) {
       const displayName = formatMetricName(desiredName);
       label.textContent = displayName;
       
-      const infoButton = createInfoButton(desiredName, 'usa');
-      label.appendChild(infoButton);
-      
       const value = document.createElement('span');
       value.className = 'metric-value';
       const formattedValue = formatMetricValue(desiredName, metrics[actualName]);
@@ -2266,9 +3574,6 @@ function displayStateMetrics(data, stateName) {
       label.className = 'metric-label';
       const displayName = formatMetricName(desiredName);
       label.textContent = displayName;
-      
-      const infoButton = createInfoButton(desiredName, 'state');
-      label.appendChild(infoButton);
       
       const value = document.createElement('span');
       value.className = 'metric-value';
@@ -2428,21 +3733,7 @@ function displayFrequencyDistributions(data) {
     const title = document.createElement('h4');
     title.textContent = displayTitle;
     title.style.margin = '0';
-    
-    // Create info button
-    const infoButton = document.createElement('button');
-    infoButton.className = 'info-button';
-    infoButton.innerHTML = 'i';
-    infoButton.title = 'Click for more information';
-    
-    // Add click handler for info button
-    infoButton.addEventListener('click', () => {
-      // Try to load from frequency_metrics.txt file first, fallback to hardcoded text
-      showInfoPopup(displayTitle, 'frequency');
-    });
-    
     titleContainer.appendChild(title);
-    titleContainer.appendChild(infoButton);
     wrapper.appendChild(titleContainer);
     
     const chartContainer = document.createElement('div');
@@ -2458,15 +3749,12 @@ function displayFrequencyDistributions(data) {
         range: key,
         count: typeof value === 'number' ? value : parseInt(value, 10) || 0
       }));
-    chartData.sort((a, b) => {
-      const aNum = parseInt(a.range.match(/\d+/)?.[0] || '0', 10);
-      const bNum = parseInt(b.range.match(/\d+/)?.[0] || '0', 10);
-      return aNum - bNum;
-    });
     
-    // Create different colors for each bar
-    const backgroundColor = chartData.map((_, index) => colorPalette[index % colorPalette.length]);
-    const borderColor = backgroundColor;
+    // Preserve MongoDB insertion order for labels and force No Access bars to be red
+    const barColors = chartData.map((entry, index) => {
+      const label = (entry.range || '').toString().toLowerCase();
+      return label.includes('no access') ? '#e74c3c' : colorPalette[index % colorPalette.length];
+    });
     
     // Determine units for x-axis title
     let xAxisTitle = 'Range';
@@ -2483,8 +3771,8 @@ function displayFrequencyDistributions(data) {
         datasets: [{
           label: cleanTitle,
           data: chartData.map(d => d.count),
-          backgroundColor: backgroundColor,
-          borderColor: borderColor,
+          backgroundColor: barColors,
+          borderColor: barColors,
           borderWidth: 1,
           borderRadius: 4,
           barPercentage: 0.8,
@@ -2506,12 +3794,25 @@ function displayFrequencyDistributions(data) {
         scales: {
           y: { 
             beginAtZero: true, 
-            title: { display: true, text: 'Frequency (Number of addresses)', color: chartTextColor }, 
-            ticks: { color: chartTextColor } 
+            title: { 
+              display: true, 
+              text: 'Frequency (Number of addresses) (%)', 
+              color: chartTextColor,
+              font: { size: 10 }
+            }, 
+            ticks: { 
+              color: chartTextColor,
+              font: { size: 9 }
+            } 
           },
           x: { 
             title: { display: true, text: xAxisTitle, color: chartTextColor }, 
-            ticks: { color: chartTextColor } 
+            ticks: { 
+              color: chartTextColor,
+              autoSkip: false,
+              maxRotation: 65,
+              minRotation: 65
+            } 
           }
         },
         animation: { duration: 1000 }
@@ -2632,9 +3933,6 @@ function displayCountyData(data, countyName) {
         const displayName = formatMetricName(desiredName);
         label.textContent = displayName;
         
-        const infoButton = createInfoButton(databaseFieldName, 'county');
-        label.appendChild(infoButton);
-        
         const value = document.createElement('span');
         value.className = 'metric-value';
         
@@ -2741,6 +4039,7 @@ function displayCountyData(data, countyName) {
     
     // If no ordered data found, fall back to original data
     const dataToProcess = orderedData.length > 0 ? orderedData : Object.entries(data.frequencies);
+    const displayedCountyCharts = new Set();
     
     dataToProcess.forEach(([collectionName, freqData]) => {
       const wrapper = document.createElement('div');
@@ -2758,21 +4057,13 @@ function displayCountyData(data, countyName) {
       const cleanTitle = frequencyChartMapping[collectionName] || collectionName.replace(/^Frequency-\s*/, '');
       title.textContent = cleanTitle;
       title.style.margin = '0';
-      
-      // Create info button
-      const infoButton = document.createElement('button');
-      infoButton.className = 'info-button';
-      infoButton.innerHTML = 'i';
-      infoButton.title = 'Click for more information';
-      
-      // Add click handler for info button
-      infoButton.addEventListener('click', () => {
-        showInfoPopup(cleanTitle, 'county_frequency');
-      });
-      
       titleContainer.appendChild(title);
-      titleContainer.appendChild(infoButton);
       wrapper.appendChild(titleContainer);
+      
+      if (displayedCountyCharts.has(cleanTitle)) {
+        return;
+      }
+      displayedCountyCharts.add(cleanTitle);
       
       const chartContainer = document.createElement('div');
       chartContainer.className = 'chart-container';
@@ -2787,15 +4078,12 @@ function displayCountyData(data, countyName) {
           range: key,
           count: typeof value === 'number' ? value : parseInt(value, 10) || 0
         }));
-      chartData.sort((a, b) => {
-        const aNum = parseInt(a.range.match(/\d+/)?.[0] || '0', 10);
-        const bNum = parseInt(b.range.match(/\d+/)?.[0] || '0', 10);
-        return aNum - bNum;
-      });
       
-      // Create different colors for each bar
-      const backgroundColor = chartData.map((_, index) => colorPalette[index % colorPalette.length]);
-      const borderColor = backgroundColor;
+      // Preserve source ordering and highlight No Access buckets in red
+      const barColors = chartData.map((entry, index) => {
+        const label = (entry.range || '').toString().toLowerCase();
+        return label.includes('no access') ? '#e74c3c' : colorPalette[index % colorPalette.length];
+      });
       
       // Determine units for x-axis title
       let xAxisTitle = 'Range';
@@ -2805,15 +4093,18 @@ function displayCountyData(data, countyName) {
         xAxisTitle = 'Range (in miles)';
       }
       
+      const yValueMultiplier = 100;
+      const chartValues = chartData.map(d => d.count * yValueMultiplier);
+      
       const chart = new Chart(canvas, {
         type: 'bar',
         data: {
           labels: chartData.map(d => d.range),
           datasets: [{
             label: cleanTitle,
-            data: chartData.map(d => d.count),
-            backgroundColor: backgroundColor,
-            borderColor: borderColor,
+            data: chartValues,
+            backgroundColor: barColors,
+            borderColor: barColors,
             borderWidth: 1,
             borderRadius: 4,
             barPercentage: 0.8,
@@ -2835,12 +4126,25 @@ function displayCountyData(data, countyName) {
           scales: {
             y: { 
               beginAtZero: true, 
-              title: { display: true, text: 'Frequency (Number of addresses)', color: chartTextColor }, 
-              ticks: { color: chartTextColor } 
+              title: { 
+                display: true, 
+                text: 'Frequency (Number of addresses) (%)', 
+                color: chartTextColor,
+                font: { size: 10 }
+              }, 
+              ticks: { 
+                color: chartTextColor,
+                font: { size: 9 }
+              } 
             },
             x: { 
               title: { display: true, text: xAxisTitle, color: chartTextColor }, 
-              ticks: { color: chartTextColor } 
+              ticks: { 
+                color: chartTextColor,
+                autoSkip: false,
+                maxRotation: 65,
+                minRotation: 65
+              } 
             }
           },
           animation: { duration: 1000 }
@@ -2910,189 +4214,58 @@ function createCountyTopBottomChart() {
 function populateCountyMetricSelect(availableMetrics) {
   const select = document.getElementById('countyMetricSelect');
   select.innerHTML = '';
-  
-  // Create mapping between new display names and old database names
-  const metricPatterns = {
-    "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)": [
-      "Percent Access", "percent access", "Percent_Access", "percent_access"
-    ],
-    "Average Travel Time by Transit in Minutes": [
-      "Average Travel Time by Transit in Minutes", "Average Travel Duration in Minutes",
-      "travel duration", "Travel_Duration", "travel_duration"
-    ],
-    "Average Travel Time by Car in Minutes": [
-      "Average Travel Time by Car in Minutes", "Average Driving Duration with Traffic in Minutes",
-      "driving duration with traffic", "Driving_Duration_with_Traffic", "driving_duration_with_traffic"
-    ],
-    "Transit to Car Travel Time Ratio": [
-      "Transit to Car Travel Time Ratio", "Transit: Driving", "Transit to Driving Ratio",
-      "transit driving", "Transit_Driving", "transit_driving"
-    ],
-    "Number of Transfers": [
-      "Number of Transfers", "Transfers", "transfers", "TRANSFERS"
-    ],
-    "Average Initial Walk Distance in Miles": [
-      "Average Initial Walk Distance in Miles", "initial walk distance", "Initial_Walk_Distance"
-    ],
-    "Average Initial Walk Time in Minutes": [
-      "Average Initial Walk Time in Minutes", "Average Initial Walk Duration in Minutes",
-      "initial walk time", "initial walk duration", "Initial_Walk_Duration", "Initial_Walk_Time"
-    ],
-    "Average Initial Wait Time in Minutes": [
-      "Average Initial Wait Time in Minutes", "initial wait time", "Initial_Wait_Time"
-    ],
-    "Average Total Walk Distance in Miles": [
-      "Average Total Walk Distance in Miles", "total walk distance", "Total_Walk_Distance"
-    ],
-    "Average Total Walk Time": [
-      "Average Total Walk Time in Minutes", "Average Total Walk Duration in Minutes", "Average Total Walk Duration in minutes",
-      "total walk duration", "Total_Walk_Duration", "total walk time"
-    ],
-    "Average Total Wait Time in Minutes": [
-      "Average Total Wait Time in Minutes", "Average Total Wait Duration in Minutes",
-      "total wait duration", "Total_Wait_Duration", "total wait time"
-    ],
-    "Average In-Vehicle Travel Time in Minutes": [
-      "Average In-Vehicle Travel Time in Minutes", "Average In-Vehicle Duration in Minutes",
-      "in-vehicle duration", "In_Vehicle_Duration", "in-vehicle travel time"
-    ],
-    "Average Out-of-Vehicle Travel Time in Minutes": [
-      "Average Out-of-Vehicle Travel Time in Minutes", "Average Out-of-Vehicle Duration in Minutes",
-      "out-of-vehicle duration", "Out_of_Vehicle_Duration", "out-of-vehicle travel time"
-    ],
-    "In-Vehicle to Out-of-Vehicle Time Ratio": [
-      "In-Vehicle to Out-of-Vehicle Time Ratio", "In-Vehicle:Out-of-Vehicle",
-      "in-vehicle:out-of-vehicle", "In_Vehicle_Out_of_Vehicle"
-    ],
-    "Sample Size": [
-      "Sample Size", "sample size", "Sample_Size", "sample_size"
-    ]
-  };
-  
-  // Group metrics by category
+
+  const safeMetrics = Array.isArray(availableMetrics) ? availableMetrics : [];
+  const metricMapping = createMetricMappingFromTitles(safeMetrics);
+
   let currentGroup = null;
   let currentOptgroup = null;
-  
-  // Use ordered metrics with Average prefix for county data
-  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(displayName => {
-    // Skip empty strings (visual breaks)
+  let optionCount = 0;
+
+  ORDERED_TRANSIT_METRICS.forEach(displayName => {
     if (!displayName) return;
-    
-    // Try to find matching database field name
-    let databaseFieldName = null;
-    
-    // First try exact match
-    if (availableMetrics.includes(displayName)) {
-      databaseFieldName = displayName;
-    } else if (metricPatterns[displayName]) {
-      // Try pattern variations
-      for (const pattern of metricPatterns[displayName]) {
-        const match = availableMetrics.find(dbField => 
-          dbField === pattern ||
-          dbField.toLowerCase().includes(pattern.toLowerCase()) ||
-          pattern.toLowerCase().includes(dbField.toLowerCase()) ||
-          dbField.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === pattern.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
-        );
-        if (match) {
-          databaseFieldName = match;
-          break;
-        }
-      }
+    const databaseFieldName = metricMapping[displayName];
+    if (!databaseFieldName) return;
+
+    const group = getMetricGroup(displayName);
+    if (group !== currentGroup) {
+      currentOptgroup = document.createElement('optgroup');
+      currentOptgroup.label = group;
+      currentOptgroup.style.fontWeight = 'bold';
+      currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+      select.appendChild(currentOptgroup);
+      currentGroup = group;
     }
-    
-    // If we found a match, add to dropdown with grouping
-    if (databaseFieldName) {
-      const group = getMetricGroup(displayName);
-      
-      // Create new optgroup if group changed
-      if (group !== currentGroup) {
-        currentOptgroup = document.createElement('optgroup');
-        currentOptgroup.label = group;
-        currentOptgroup.style.fontWeight = 'bold';
-        currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
-        select.appendChild(currentOptgroup);
-        currentGroup = group;
-      }
-      
-      const option = document.createElement('option');
-      option.value = databaseFieldName;  // Use database field name for data lookup
-      option.textContent = displayName;   // Show new display name to user
-      option.dataset.displayName = displayName;
-      option.dataset.group = group;
-      currentOptgroup.appendChild(option);
-    }
+
+    const option = document.createElement('option');
+    option.value = databaseFieldName;
+    option.textContent = displayName;
+    option.dataset.displayName = displayName;
+    option.dataset.group = group;
+    currentOptgroup.appendChild(option);
+    optionCount += 1;
   });
-  
-  // Set default to "Percent Access" if available, otherwise first option
-  if (select.options.length > 0) {
-    const percentAccessOption = Array.from(select.options).find(option => 
-      option.textContent === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
-    );
-    if (percentAccessOption) {
-      select.value = percentAccessOption.value;
-      selectedCountyMetric = percentAccessOption.value;
-    } else {
-      select.value = select.options[0].value;
-      selectedCountyMetric = select.options[0].value;
-    }
+
+  if (optionCount === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Metrics unavailable';
+    option.disabled = true;
+    select.appendChild(option);
+    select.disabled = true;
+    return;
   }
-  
+
+  select.disabled = false;
+  const percentAccessOption = Array.from(select.options).find(option =>
+    option.textContent === DEFAULT_USA_METRIC_TITLE
+  );
+  const chosenOption = percentAccessOption || select.options[0];
+  select.value = chosenOption.value;
+  selectedCountyMetric = chosenOption.value;
+
   select.removeEventListener('change', countyHandleMetricChange);
   select.addEventListener('change', countyHandleMetricChange);
-  
-  // Add info button for county map metrics
-  addInfoButtonToCountyMetricSelection('county_map');
-}
-
-function addInfoButtonToCountyMetricSelection(mapType) {
-  const countyMetricSelection = document.getElementById('countyMetricSelection');
-  if (!countyMetricSelection) return;
-  
-  // Remove existing info button if it exists
-  const existingInfoBtn = countyMetricSelection.querySelector('.county-metric-info-btn');
-  if (existingInfoBtn) {
-    existingInfoBtn.remove();
-  }
-  
-  // Create info button
-  const infoBtn = document.createElement('button');
-  infoBtn.className = 'county-metric-info-btn';
-  infoBtn.innerHTML = '<i class="fas fa-info-circle"></i>';
-  infoBtn.title = 'Click for metric information';
-  infoBtn.style.cssText = `
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: #3498db;
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-  `;
-  
-  infoBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const select = document.getElementById('countyMetricSelect');
-    const selectedOption = select.options[select.selectedIndex];
-    if (selectedOption) {
-      // Use the display name from the option's dataset, or fall back to textContent
-      const displayName = selectedOption.dataset.displayName || selectedOption.textContent;
-      showInfoPopup(displayName, mapType);
-    } else {
-      showInfoPopup('Select a metric first', 'Please select a metric from the dropdown to view its information.');
-    }
-  });
-  
-  // Add the button to the county metric selection container
-  countyMetricSelection.style.position = 'relative';
-  countyMetricSelection.appendChild(infoBtn);
 }
 
 function countyHandleMetricChange(event) {
@@ -3103,6 +4276,10 @@ function countyHandleMetricChange(event) {
 }
 
 function updateCountyMapColors() {
+  if (clusterState.active && clusterState.level === 'county') {
+    applyCountyClusterColors();
+    return;
+  }
   if (!countyMap || !countyMap.svg) {
     console.warn('County map or SVG not available');
     return;
@@ -3620,6 +4797,14 @@ function restoreScrollbarFunctionality() {
 // EQUITY COMPARISON FUNCTIONS
 function switchToMapView() {
   console.log('🗺️ [NAV] switchToMapView called');
+  if (
+    (clusterState.active && clusterState.context === 'equity') ||
+    (!selectedState && clusterState.active) ||
+    (shouldUseClusterOverlay() && isClusterPanelOpen())
+  ) {
+    exitClusterMode();
+  }
+  restoreMapToMainLayout();
   activeView = selectedState ? 'county' : 'state';
   document.getElementById('mapView').style.display = 'block';
   document.getElementById('legend').style.display = 'block';
@@ -3648,6 +4833,7 @@ function switchToMapView() {
     applyDefaultUSAMetric(true);
   }
   updateCompareStatesButtonVisibility();
+  updateClusterAnalysisButtonVisibility();
 }
 
 function switchToEquityComparison() {
@@ -3656,10 +4842,7 @@ function switchToEquityComparison() {
   }
   activeView = 'equity';
   loadComparisonData();
-  
-  // Hide map and legend
-  document.getElementById('mapView').style.display = 'none';
-  document.getElementById('legend').style.display = 'none';
+  setEquityViewMode('scatter');
   
   // Show equity comparison content
   document.getElementById('equityComparisonContent').style.display = 'block';
@@ -3813,120 +4996,59 @@ function loadEquityComparisonData(category, stateName) {
 
 function populateTransitMetricDropdown() {
   const select = document.getElementById('transitMetricSelect');
+  if (!select) return;
   select.innerHTML = '';
-  
+
   console.log("Populating transit metrics:", transitMetricKeys);
-  
-  // Create mapping patterns (similar to county metrics) - COMPLETE LIST
-  const metricPatterns = {
-    "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)": [
-      "Percent Access", "percent access", "Percent_Access"
-    ],
-    "Average Travel Time by Transit in Minutes": [
-      "Average Travel Time by Transit in Minutes", "Average Travel Duration in Minutes", "Travel Duration in Minutes"
-    ],
-    "Average Travel Time by Car in Minutes": [
-      "Average Travel Time by Car in Minutes", "Average Driving Duration with Traffic in Minutes", "Driving Duration with Traffic in Minutes"
-    ],
-    "Transit to Car Travel Time Ratio": [
-      "Transit to Car Travel Time Ratio", "Transit: Driving", "Transit to Driving Ratio"
-    ],
-    "Number of Transfers": [
-      "Number of Transfers", "Transfers", "transfers"
-    ],
-    "Average Initial Walk Distance in Miles": [
-      "Average Initial Walk Distance in Miles", "Initial Walk Distance in Miles"
-    ],
-    "Average Initial Walk Time in Minutes": [
-      "Average Initial Walk Time in Minutes", "Average Initial Walk Duration in Minutes", "Initial Walk Duration in Minutes"
-    ],
-    "Average Initial Wait Time in Minutes": [
-      "Average Initial Wait Time in Minutes", "Initial Wait Time in Minutes"
-    ],
-    "Average Total Walk Distance in Miles": [
-      "Average Total Walk Distance in Miles", "Total Walk Distance in Miles"
-    ],
-    "Average Total Walk Time": [
-      "Average Total Walk Time in Minutes", "Average Total Walk Duration in Minutes", "Total Walk Duration in Minutes"
-    ],
-    "Average Total Wait Time in Minutes": [
-      "Average Total Wait Time in Minutes", "Average Total Wait Duration in Minutes", "Total Wait Duration in Minutes"
-    ],
-    "Average In-Vehicle Travel Time in Minutes": [
-      "Average In-Vehicle Travel Time in Minutes", "Average In-Vehicle Duration in Minutes", "In-Vehicle Duration in Minutes"
-    ],
-    "Average Out-of-Vehicle Travel Time in Minutes": [
-      "Average Out-of-Vehicle Travel Time in Minutes", "Average Out-of-Vehicle Duration in Minutes", "Out-of-Vehicle Duration in Minutes"
-    ],
-    "In-Vehicle to Out-of-Vehicle Time Ratio": [
-      "In-Vehicle to Out-of-Vehicle Time Ratio", "In-Vehicle:Out-of-Vehicle"
-    ],
-    "Sample Size": [
-      "Sample Size", "sample size"
-    ]
-  };
-  
-  // Group metrics by category
+
+  const metricMapping = createMetricMappingFromTitles(transitMetricKeys || []);
   let currentGroup = null;
   let currentOptgroup = null;
-  
-  // Use ordered metrics with Average prefix for equity comparison
-  ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(displayName => {
-    // Skip empty strings
+  let optionCount = 0;
+
+  ORDERED_TRANSIT_METRICS.forEach(displayName => {
     if (!displayName) return;
-    
-    // Try to find matching database field
-    let databaseFieldName = null;
-    if (transitMetricKeys.includes(displayName)) {
-      databaseFieldName = displayName;
-    } else if (metricPatterns[displayName]) {
-      for (const pattern of metricPatterns[displayName]) {
-        const match = transitMetricKeys.find(dbField => 
-          dbField === pattern ||
-          dbField.toLowerCase().includes(pattern.toLowerCase()) ||
-          pattern.toLowerCase().includes(dbField.toLowerCase())
-        );
-        if (match) {
-          databaseFieldName = match;
-          break;
-        }
-      }
+    const databaseFieldName = metricMapping[displayName];
+    if (!databaseFieldName) return;
+
+    const group = getMetricGroup(displayName);
+    if (group !== currentGroup) {
+      currentOptgroup = document.createElement('optgroup');
+      currentOptgroup.label = group;
+      currentOptgroup.style.fontWeight = 'bold';
+      currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+      select.appendChild(currentOptgroup);
+      currentGroup = group;
     }
-    
-    // If found, add with grouping
-    if (databaseFieldName) {
-      const group = getMetricGroup(displayName);
-      
-      // Create new optgroup if group changed
-      if (group !== currentGroup) {
-        currentOptgroup = document.createElement('optgroup');
-        currentOptgroup.label = group;
-        currentOptgroup.style.fontWeight = 'bold';
-        currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
-        select.appendChild(currentOptgroup);
-        currentGroup = group;
-      }
-      
-      const option = document.createElement('option');
-      option.value = databaseFieldName;
-      option.textContent = displayName;
-      option.dataset.displayName = displayName;
-      option.dataset.group = group;
-      currentOptgroup.appendChild(option);
-    }
+
+    const option = document.createElement('option');
+    option.value = databaseFieldName;
+    option.textContent = displayName;
+    option.dataset.displayName = displayName;
+    option.dataset.group = group;
+    currentOptgroup.appendChild(option);
+    optionCount += 1;
   });
-  
-  if (select.options.length > 0) {
-    // Set default to "Percent Access" if available, otherwise first option
-    const percentAccessOption = Array.from(select.options).find(option => 
-      option.textContent === "Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)"
-    );
-    select.value = percentAccessOption ? percentAccessOption.value : select.options[0].value;
-    selectedCountyMetric = select.value;
-    
-    console.log("Default transit metric selected:", selectedCountyMetric);
+
+  if (optionCount === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Metrics unavailable';
+    option.disabled = true;
+    select.appendChild(option);
+    select.disabled = true;
+    return;
   }
-  
+
+  select.disabled = false;
+  const percentAccessOption = Array.from(select.options).find(option =>
+    option.textContent === DEFAULT_USA_METRIC_TITLE
+  );
+  const chosenOption = percentAccessOption || select.options[0];
+  select.value = chosenOption.value;
+  selectedCountyMetric = chosenOption.value;
+
+  select.removeEventListener('change', createComparisonScatterPlotFull);
   select.addEventListener('change', createComparisonScatterPlotFull);
 }
 
@@ -6906,49 +8028,6 @@ function resetMapSelections() {
   }
 }
 
-function populateComparisonMetricDropdown() {
-  const metricSelect = document.getElementById('comparisonMetric');
-  metricSelect.innerHTML = '';
-  
-  if (selectedState) {
-    // County metrics - use ordered metrics with Average prefix
-    if (transitMetricKeys && transitMetricKeys.length > 0) {
-      ORDERED_TRANSIT_METRICS_WITH_AVERAGE.forEach(metricName => {
-        if (transitMetricKeys.includes(metricName)) {
-          const option = document.createElement('option');
-          option.value = metricName;
-          option.textContent = metricName;
-          metricSelect.appendChild(option);
-        }
-      });
-    } else {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No metrics available';
-      option.disabled = true;
-      metricSelect.appendChild(option);
-    }
-  } else {
-    // State metrics - use ordered metrics without Average prefix
-    if (allStateData && allStateData.length > 0) {
-      ORDERED_TRANSIT_METRICS.forEach(metricName => {
-        const metricExists = allStateData.some(metric => metric.title === metricName);
-        if (metricExists) {
-          const option = document.createElement('option');
-          option.value = metricName;
-          option.textContent = metricName;
-          metricSelect.appendChild(option);
-        }
-      });
-    } else {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No metrics available';
-      option.disabled = true;
-      metricSelect.appendChild(option);
-    }
-  }
-}
 function generateComparisonChart() {
   const chartType = document.getElementById('comparisonChartType').value;
   const metricName = document.getElementById('comparisonMetric').value;
@@ -7150,40 +8229,87 @@ document.addEventListener('DOMContentLoaded', function() {
 function populateComparisonMetricDropdown() {
   const metricSelect = document.getElementById('comparisonMetric');
   if (!metricSelect) return;
-  
+
+  const previousValue = metricSelect.value;
   metricSelect.innerHTML = '';
-  
-  if (selectedState) {
-    // County metrics
-    if (transitMetricKeys && transitMetricKeys.length > 0) {
-      transitMetricKeys.forEach(metric => {
-        const option = document.createElement('option');
-        option.value = metric;
-        option.textContent = metric;
-        metricSelect.appendChild(option);
-      });
-    } else {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No metrics available';
-      option.disabled = true;
-      metricSelect.appendChild(option);
+
+  const isCountyLevel = Boolean(selectedState);
+  let availableMetrics = [];
+
+  if (isCountyLevel && Array.isArray(transitMetricKeys)) {
+    availableMetrics = [...transitMetricKeys];
+  } else if (!isCountyLevel && Array.isArray(allStateData)) {
+    availableMetrics = allStateData.map(metric => metric.title).filter(Boolean);
+  }
+
+  if (availableMetrics.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No metrics available';
+    option.disabled = true;
+    metricSelect.appendChild(option);
+    metricSelect.disabled = true;
+    return;
+  }
+
+  const metricMapping = createMetricMappingFromTitles(availableMetrics);
+  let currentGroup = null;
+  let currentOptgroup = null;
+  let optionCount = 0;
+
+  ORDERED_TRANSIT_METRICS.forEach(displayName => {
+    if (!displayName) return;
+    const actualName = metricMapping[displayName];
+    if (!actualName) return;
+
+    const group = getMetricGroup(displayName);
+    if (group !== currentGroup) {
+      currentOptgroup = document.createElement('optgroup');
+      currentOptgroup.label = group;
+      currentOptgroup.style.fontWeight = 'bold';
+      currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+      metricSelect.appendChild(currentOptgroup);
+      currentGroup = group;
     }
-  } else {
-    // State metrics
-    if (allStateData && allStateData.length > 0) {
-      allStateData.forEach(metricData => {
-        const option = document.createElement('option');
-        option.value = metricData.title;
-        option.textContent = metricData.title;
-        metricSelect.appendChild(option);
-      });
-    } else {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No metrics available';
-      option.disabled = true;
-      metricSelect.appendChild(option);
+
+    const option = document.createElement('option');
+    option.value = actualName;
+    option.textContent = displayName;
+    option.dataset.displayName = displayName;
+    option.dataset.group = group;
+    currentOptgroup.appendChild(option);
+    optionCount += 1;
+  });
+
+  if (optionCount === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No metrics available';
+    option.disabled = true;
+    metricSelect.appendChild(option);
+    metricSelect.disabled = true;
+    return;
+  }
+
+  metricSelect.disabled = false;
+  const preferredValue = (() => {
+    if (previousValue && Array.from(metricSelect.options).some(option => option.value === previousValue)) {
+      return previousValue;
     }
+    const contextValue = isCountyLevel ? selectedCountyMetric : selectedMetric;
+    if (contextValue && Array.from(metricSelect.options).some(option => option.value === contextValue)) {
+      return contextValue;
+    }
+    const percentAccessOption = Array.from(metricSelect.options).find(option =>
+      option.textContent === DEFAULT_USA_METRIC_TITLE
+    );
+    if (percentAccessOption) {
+      return percentAccessOption.value;
+    }
+    return metricSelect.options[0]?.value || '';
+  })();
+
+  if (preferredValue) {
+    metricSelect.value = preferredValue;
   }
 }

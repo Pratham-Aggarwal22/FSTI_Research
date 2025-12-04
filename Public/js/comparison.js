@@ -11,6 +11,7 @@ let availableStates = [];
 let availableCounties = [];
 let countyModalOpen = false;
 let currentChartData = null; // Store chart data globally for callbacks
+let chartHoverResetCleanup = null;
 
 const COMPARISON_DEBUG = false;
 const comparisonLog = (...args) => {
@@ -597,7 +598,11 @@ function createStatisticalChart(data) {
   
   comparisonLog('Canvas found:', canvas);
   const ctx = canvas.getContext('2d');
-  
+  if (chartHoverResetCleanup) {
+    chartHoverResetCleanup();
+    chartHoverResetCleanup = null;
+  }
+
   if (statisticalChart) {
     comparisonLog('Destroying existing chart');
     statisticalChart.destroy();
@@ -1067,6 +1072,8 @@ function createStatisticalChart(data) {
     return;
   }
   
+  chartHoverResetCleanup = attachChartHoverReset(canvas);
+  
   // Adjust chart size based on number of entities
   adjustChartSize();
   
@@ -1078,6 +1085,31 @@ function createStatisticalChart(data) {
     applyCustomYAxisStyling();
     // No scroll indicator needed - all states are visible with dynamic height
   }, 200);
+}
+
+function resetStatisticalChartHover() {
+  if (!statisticalChart) return;
+  if (typeof statisticalChart.setActiveElements === 'function') {
+    statisticalChart.setActiveElements([]);
+  }
+  if (statisticalChart.tooltip) {
+    if (typeof statisticalChart.tooltip.setActiveElements === 'function') {
+      statisticalChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+    } else if (Array.isArray(statisticalChart.tooltip._active)) {
+      statisticalChart.tooltip._active = [];
+    }
+  }
+  statisticalChart.update('none');
+}
+
+function attachChartHoverReset(canvas) {
+  if (!canvas) return null;
+  const handler = () => resetStatisticalChartHover();
+  const events = ['mouseleave', 'pointerleave', 'touchend', 'touchcancel'];
+  events.forEach(evt => canvas.addEventListener(evt, handler));
+  return () => {
+    events.forEach(evt => canvas.removeEventListener(evt, handler));
+  };
 }
 
 // Prepare statistical chart data

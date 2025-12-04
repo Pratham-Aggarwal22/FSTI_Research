@@ -41,22 +41,25 @@ const userSchema = new mongoose.Schema({
   },
   country: {
     type: String,
-    required: true,
+    required: false,
     trim: true
   },
   userType: {
     type: String,
-    enum: ['student', 'professional', 'researcher', 'administrator'],
+    enum: ['student', 'professional', 'researcher', 'administrator', 'other'],
     required: true
   },
   researchInterest: {
     type: String,
     trim: true
   },
-  preferredLanguage: {
+  jobTitle: {
     type: String,
-    default: 'english',
     trim: true
+  },
+  newsletterOptIn: {
+    type: Boolean,
+    default: false
   },
   role: {
     type: String,

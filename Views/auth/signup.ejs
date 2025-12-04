@@ -18,8 +18,24 @@
   </style>
 </head>
 <body>
+  <% const data = typeof formData !== 'undefined' ? formData : {}; %>
   <div class="auth-container">
+    <div class="transit-background" aria-hidden="true">
+      <div class="transit-gradient"></div>
+      <div class="transit-grid"></div>
+      <div class="transit-line line-1"><span class="line-glow"></span></div>
+      <div class="transit-line line-2"><span class="line-glow"></span></div>
+      <div class="transit-line line-3"><span class="line-glow"></span></div>
+      <div class="transit-train">
+        <span class="train-car car-1"></span>
+        <span class="train-car car-2"></span>
+        <span class="train-car car-3"></span>
+      </div>
+    </div>
     <div class="auth-card">
+      <button type="button" class="auth-close" data-close-auth aria-label="Close signup form">
+        <i class="fas fa-times"></i>
+      </button>
       <div class="auth-header">
         <h1><i class="fas fa-bus"></i> TransitHub</h1>
         <p class="tagline">Modern Transit Data Explorer</p>
@@ -42,26 +58,66 @@
           
           <div class="form-row">
             <div class="form-group">
-              <label for="firstName"><i class="fas fa-user"></i> First Name</label>
-              <input type="text" id="firstName" name="firstName" placeholder="Enter your first name" required>
+              <label for="firstName"><i class="fas fa-user"></i> First Name <span class="required-indicator">*</span></label>
+              <input type="text" id="firstName" name="firstName" placeholder="Enter your first name" required value="<%= data.firstName || '' %>">
             </div>
             
             <div class="form-group">
-              <label for="lastName"><i class="fas fa-user"></i> Last Name</label>
-              <input type="text" id="lastName" name="lastName" placeholder="Enter your last name" required>
+              <label for="lastName"><i class="fas fa-user"></i> Last Name <span class="required-indicator">*</span></label>
+              <input type="text" id="lastName" name="lastName" placeholder="Enter your last name" required value="<%= data.lastName || '' %>">
             </div>
           </div>
           
           <div class="form-row">
             <div class="form-group">
-              <label for="username"><i class="fas fa-at"></i> Username</label>
-              <input type="text" id="username" name="username" placeholder="Choose a unique username" required minlength="3">
+              <label for="username"><i class="fas fa-at"></i> Username <span class="required-indicator">*</span></label>
+              <input type="text" id="username" name="username" placeholder="Choose a unique username" required minlength="3" value="<%= data.username || '' %>">
               <small class="form-hint">At least 3 characters</small>
+              <small id="usernameFeedback" class="field-feedback" aria-live="polite"></small>
             </div>
             
             <div class="form-group">
-              <label for="email"><i class="fas fa-envelope"></i> Email Address</label>
-              <input type="email" id="email" name="email" placeholder="your.email@example.com" required>
+              <label for="email"><i class="fas fa-envelope"></i> Email Address <span class="required-indicator">*</span></label>
+              <input type="email" id="email" name="email" placeholder="your.email@example.com" required value="<%= data.email || '' %>">
+              <small id="emailFeedback" class="field-feedback" aria-live="polite"></small>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="phone"><i class="fas fa-phone"></i> Phone Number <span class="optional-label">(Optional)</span></label>
+              <input type="tel" id="phone" name="phone" placeholder="Enter a contact number" value="<%= data.phone || '' %>">
+            </div>
+            
+            <div class="form-group">
+              <label for="country"><i class="fas fa-globe-americas"></i> Country <span class="optional-label">(Optional)</span></label>
+              <input type="text" id="country" name="country" placeholder="Select or type your country" value="<%= data.country || '' %>" list="countryOptions">
+              <datalist id="countryOptions">
+                <option value="United States"></option>
+                <option value="Canada"></option>
+                <option value="Mexico"></option>
+                <option value="United Kingdom"></option>
+                <option value="Germany"></option>
+                <option value="France"></option>
+                <option value="Spain"></option>
+                <option value="Italy"></option>
+                <option value="Australia"></option>
+                <option value="New Zealand"></option>
+                <option value="Brazil"></option>
+                <option value="Argentina"></option>
+                <option value="Colombia"></option>
+                <option value="South Africa"></option>
+                <option value="Nigeria"></option>
+                <option value="Kenya"></option>
+                <option value="India"></option>
+                <option value="China"></option>
+                <option value="Japan"></option>
+                <option value="South Korea"></option>
+                <option value="Singapore"></option>
+                <option value="United Arab Emirates"></option>
+                <option value="Saudi Arabia"></option>
+                <option value="Other"></option>
+              </datalist>
             </div>
           </div>
         </div>
@@ -71,13 +127,13 @@
           
           <div class="form-row">
             <div class="form-group">
-              <label for="password"><i class="fas fa-key"></i> Password</label>
+              <label for="password"><i class="fas fa-key"></i> Password <span class="required-indicator">*</span></label>
               <input type="password" id="password" name="password" placeholder="Create a strong password" required minlength="8">
               <small class="form-hint">Minimum 8 characters</small>
             </div>
             
             <div class="form-group">
-              <label for="confirmPassword"><i class="fas fa-check-circle"></i> Confirm Password</label>
+              <label for="confirmPassword"><i class="fas fa-check-circle"></i> Confirm Password <span class="required-indicator">*</span></label>
               <input type="password" id="confirmPassword" name="confirmPassword" placeholder="Re-enter your password" required>
             </div>
           </div>
@@ -88,26 +144,26 @@
           
           <div class="form-row">
             <div class="form-group">
-              <label for="userType"><i class="fas fa-id-badge"></i> User Type</label>
+              <label for="userType"><i class="fas fa-id-badge"></i> User Type <span class="required-indicator">*</span></label>
               <select id="userType" name="userType" required>
-                <option value="">Select your role...</option>
-                <option value="student">Student</option>
-                <option value="professional">Professional</option>
-                <option value="researcher">Researcher</option>
-                <option value="administrator">Administrator</option>
-                <option value="other">Other</option>
+                <option value="" <%= data.userType ? '' : 'selected' %>>Select your role...</option>
+                <option value="student" <%= data.userType === 'student' ? 'selected' : '' %>>Student</option>
+                <option value="professional" <%= data.userType === 'professional' ? 'selected' : '' %>>Professional</option>
+                <option value="researcher" <%= data.userType === 'researcher' ? 'selected' : '' %>>Researcher</option>
+                <option value="administrator" <%= data.userType === 'administrator' ? 'selected' : '' %>>Administrator</option>
+                <option value="other" <%= data.userType === 'other' ? 'selected' : '' %>>Other</option>
               </select>
             </div>
             
             <div class="form-group">
-              <label for="organization"><i class="fas fa-building"></i> Organization</label>
-              <input type="text" id="organization" name="organization" placeholder="University, Company, Agency, etc." required>
+              <label for="organization"><i class="fas fa-building"></i> Organization <span class="required-indicator">*</span></label>
+              <input type="text" id="organization" name="organization" placeholder="University, Company, Agency, etc." required value="<%= data.organization || '' %>">
             </div>
           </div>
           
           <div class="form-group">
             <label for="jobTitle"><i class="fas fa-user-tag"></i> Job Title / Role (Optional)</label>
-            <input type="text" id="jobTitle" name="jobTitle" placeholder="e.g., Transportation Planner, Graduate Student">
+            <input type="text" id="jobTitle" name="jobTitle" placeholder="e.g., Transportation Planner, Graduate Student" value="<%= data.jobTitle || '' %>">
           </div>
         </div>
         
@@ -116,19 +172,12 @@
           
           <div class="form-group">
             <label for="researchInterest"><i class="fas fa-lightbulb"></i> Research Interest / Purpose (Optional)</label>
-            <textarea id="researchInterest" name="researchInterest" rows="3" placeholder="Tell us about your interest in transit data and equity research..."></textarea>
+            <textarea id="researchInterest" name="researchInterest" rows="3" placeholder="Tell us about your interest in transit data and equity research..."><%= data.researchInterest || '' %></textarea>
           </div>
-          
+
           <div class="form-group checkbox-group">
             <label class="checkbox-label">
-              <input type="checkbox" id="agreeTerms" name="agreeTerms" required>
-              <span class="checkbox-text">I agree to the <a href="/terms" target="_blank">Terms of Service</a> and <a href="/privacy" target="_blank">Privacy Policy</a></span>
-            </label>
-          </div>
-          
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="newsletter" name="newsletter">
+              <input type="checkbox" id="newsletter" name="newsletter" <%= data.newsletter ? 'checked' : '' %>>
               <span class="checkbox-text">Send me updates about new features and research insights</span>
             </label>
           </div>

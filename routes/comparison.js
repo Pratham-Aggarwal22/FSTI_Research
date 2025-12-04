@@ -19,6 +19,33 @@ const STATE_VARIANT_LOOKUP = Object.entries(STATE_NAME_VARIANTS).reduce((acc, [c
   return acc;
 }, {});
 
+const NATIONAL_AGGREGATE_STATE_KEYS = new Set([
+  'unitedstates',
+  'us',
+  'usa',
+  'u.s.',
+  'nationwide',
+  'allstates',
+  'entireunitedstates',
+  'nationalaverage'
+]);
+
+function normalizeAggregateStateName(value = '') {
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s._-]+/g, '');
+}
+
+function isAggregateStateName(value = '') {
+  return NATIONAL_AGGREGATE_STATE_KEYS.has(normalizeAggregateStateName(value));
+}
+
+function filterAggregateStates(states = []) {
+  return states.filter(state => !isAggregateStateName(state));
+}
+
 function extractNumericValue(value) {
   if (value === null || value === undefined) {
     return null;
@@ -288,7 +315,9 @@ router.get('/api/states', async (req, res) => {
     }
     
     // Extract state names (excluding _id and title fields)
-    const stateNames = Object.keys(doc).filter(key => key !== '_id' && key !== 'title');
+    const stateNames = Object.keys(doc)
+      .filter(key => key !== '_id' && key !== 'title')
+      .filter(key => !isAggregateStateName(key));
     
     res.json(stateNames);
   } catch (error) {
@@ -300,10 +329,13 @@ router.get('/api/states', async (req, res) => {
 // Get metrics for selected states
 router.post('/api/metrics', async (req, res) => {
   try {
-    const { states } = req.body;
-    
-    if (!states || !Array.isArray(states) || states.length === 0) {
+    let { states } = req.body;
+    if (!Array.isArray(states) || states.length === 0) {
       return res.status(400).json({ error: 'At least one state must be selected' });
+    }
+    states = filterAggregateStates(states);
+    if (states.length === 0) {
+      return res.status(400).json({ error: 'At least one valid state must be selected' });
     }
     
     const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
@@ -363,10 +395,13 @@ router.get('/api/counties/:stateName', async (req, res) => {
 // Get counties for multiple states
 router.post('/api/counties', async (req, res) => {
   try {
-    const { states } = req.body;
-    
-    if (!states || !Array.isArray(states) || states.length === 0) {
+    let { states } = req.body;
+    if (!Array.isArray(states) || states.length === 0) {
       return res.status(400).json({ error: 'At least one state must be provided' });
+    }
+    states = filterAggregateStates(states);
+    if (states.length === 0) {
+      return res.status(400).json({ error: 'At least one valid state must be provided' });
     }
     
     const client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
@@ -1088,9 +1123,13 @@ function generateChartColors(count, opacity = 0.8) {
 // New endpoint for interactive dot plot chart data
 router.post('/api/comparison-dotplot', async (req, res) => {
   try {
-    const { states } = req.body;
-    if (!states || !Array.isArray(states) || states.length === 0) {
+    let { states } = req.body;
+    if (!Array.isArray(states) || states.length === 0) {
       return res.status(400).json({ error: 'At least one state must be selected' });
+    }
+    states = filterAggregateStates(states);
+    if (states.length === 0) {
+      return res.status(400).json({ error: 'At least one valid state must be selected' });
     }
 
     comparisonLog('Fetching dotplot data for states:', states);
@@ -1442,10 +1481,14 @@ router.post('/api/comparison-dotplot', async (req, res) => {
 // New endpoint for statistical data
 router.post('/api/statistical-data', async (req, res) => {
   try {
-    const { category, subcategory, metric, states, counties } = req.body;
+    let { category, subcategory, metric, states, counties } = req.body;
     
-    if (!category || !subcategory || !metric || !states || states.length === 0) {
+    if (!category || !subcategory || !metric || !Array.isArray(states) || states.length === 0) {
       return res.status(400).json({ error: 'Missing required parameters' });
+    }
+    states = filterAggregateStates(states);
+    if (states.length === 0) {
+      return res.status(400).json({ error: 'No valid states provided' });
     }
 
     comparisonLog('Fetching statistical data:', { category, subcategory, metric, states, counties });

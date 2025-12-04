@@ -2197,6 +2197,318 @@
   color: var(--text-dark);
 }
 
+/* Cluster analysis controls */
+.cluster-analysis-panel {
+  display: none;
+  background: var(--bg-light, #ffffff);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md, 0 10px 25px rgba(15, 23, 42, 0.15));
+  padding: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.cluster-analysis-panel.open {
+  display: block;
+}
+
+.cluster-analysis-panel.overlay {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 320px;
+  margin-top: 0;
+  z-index: 30;
+}
+
+.cluster-panel-body {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.cluster-analysis-panel.overlay .cluster-panel-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-light, #ffffff);
+  padding-top: 0.5rem;
+}
+
+.cluster-analysis-panel.overlay .cluster-panel-header {
+  position: sticky;
+  top: 0;
+  background: var(--bg-light, #ffffff);
+  padding-bottom: 0.5rem;
+  z-index: 1;
+}
+
+.cluster-panel-legend-slot {
+  margin-top: 1rem;
+}
+
+@media (max-width: 1280px) {
+  .cluster-analysis-panel.overlay {
+    position: fixed;
+    top: 100px;
+    right: 20px;
+    width: calc(100% - 60px);
+    max-width: 360px;
+  }
+}
+
+.analytics-panel.cluster-mode .selection-container:not(.cluster-sidebar-panel) {
+  display: none !important;
+}
+
+.analytics-panel.cluster-mode .cluster-sidebar-panel {
+  display: block;
+}
+
+.cluster-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.cluster-panel-draggable {
+  cursor: move;
+}
+
+.cluster-context-label {
+  font-size: 0.85rem;
+  color: var(--text-medium, #555);
+  margin-top: 0.25rem;
+}
+
+.panel-close-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-medium, #555);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.cluster-control-group {
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cluster-control-group label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-strong, #1f2937);
+}
+
+.cluster-panel-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.cluster-panel-actions .btn-primary,
+.cluster-panel-actions .btn-secondary {
+  flex: 1;
+  padding: 0.65rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.cluster-legend {
+  background: var(--bg-light, #ffffff);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md, 0 15px 35px rgba(15, 23, 42, 0.18));
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: visible;
+}
+
+.cluster-legend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.cluster-legend-body {
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: row;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.cluster-legend-item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.cluster-legend-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.cluster-legend-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cluster-legend-simple {
+  width: 100%;
+}
+
+.cluster-legend-simple .cluster-legend-item {
+  background: var(--bg-muted, #f8fafc);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-strong, #1f2937);
+}
+
+.cluster-legend-chip {
+  align-items: center;
+}
+
+.cluster-reset-btn {
+  border: none;
+  background: var(--bg-muted, #f3f4f6);
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.equity-view-toggle {
+  display: inline-flex;
+  background: var(--bg-light, #ffffff);
+  border-radius: 999px;
+  padding: 0.25rem;
+  box-shadow: var(--shadow-sm, 0 5px 15px rgba(15, 23, 42, 0.12));
+  margin-bottom: 1.25rem;
+}
+
+.equity-view-btn {
+  border: none;
+  background: transparent;
+  padding: 0.5rem 1.25rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-medium, #555);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.equity-view-btn.active {
+  background: var(--primary, #2c41ff);
+  color: #fff;
+}
+
+.equity-view-section {
+  display: none;
+}
+
+#equityScatterView {
+  display: block;
+}
+
+.equity-cluster-hint {
+  background: var(--bg-light, #ffffff);
+  border-radius: 14px;
+  padding: 1.5rem;
+  box-shadow: var(--shadow-md, 0 14px 30px rgba(15, 23, 42, 0.15));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.equity-cluster-map-host {
+  width: 100%;
+  margin-top: 1.5rem;
+}
+
+.equity-cluster-map-frame {
+  position: relative;
+  background: var(--bg-light, #ffffff);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg, 0 20px 45px rgba(15, 23, 42, 0.18));
+  padding: 1rem;
+}
+
+.equity-cluster-map-slot {
+  min-height: 520px;
+}
+
+.equity-cluster-legend-slot {
+  margin-top: 1rem;
+}
+
+.equity-cluster-map-frame #mapView {
+  min-height: 500px;
+}
+
+.equity-cluster-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.equity-cluster-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.equity-cluster-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.equity-cluster-controls {
+  position: relative;
+}
+
+.equity-cluster-controls .cluster-analysis-panel {
+  display: block;
+  margin-top: 0;
+  position: sticky;
+  top: 20px;
+  box-shadow: var(--shadow-lg, 0 20px 40px rgba(15, 23, 42, 0.18));
+}
+
+@media (max-width: 1200px) {
+  .equity-cluster-layout {
+    grid-template-columns: 1fr;
+  }
+  .equity-cluster-controls .cluster-analysis-panel {
+    position: static;
+  }
+}
+
+.equity-cluster-hint i {
+  font-size: 1.5rem;
+  color: var(--primary, #2c41ff);
+}
+
+.btn-sm {
+  font-size: 0.85rem;
+  padding: 0.45rem 0.85rem;
+}
+
 .section-content.active {
   display: block;
 }
