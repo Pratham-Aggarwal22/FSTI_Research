@@ -280,4 +280,31 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize token refresh once
     setupTokenRefresh();
+
+    // Handle back button navigation - prevent going back to login/signup if authenticated
+    const isAuthenticated = document.cookie.includes('access_token');
+    const currentPath = window.location.pathname;
+    const isAuthPage = currentPath === '/auth/login' || currentPath === '/auth/signup';
+    
+    // If user is authenticated and on auth page, redirect to homepage immediately
+    if (isAuthenticated && isAuthPage) {
+        window.history.replaceState(null, '', '/');
+        window.location.replace('/');
+        return; // Exit early, no need to set up other handlers
+    }
+
+    // Listen for back button navigation (only if not authenticated or not on auth page)
+    if (isAuthenticated) {
+        window.addEventListener('popstate', function(event) {
+            // Small delay to let navigation complete
+            setTimeout(() => {
+                const path = window.location.pathname;
+                if (path === '/auth/login' || path === '/auth/signup') {
+                    // Replace with homepage instead
+                    window.history.replaceState(null, '', '/');
+                    window.location.replace('/');
+                }
+            }, 0);
+        });
+    }
 });

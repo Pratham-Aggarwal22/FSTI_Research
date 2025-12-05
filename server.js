@@ -157,6 +157,11 @@ app.use('/comparison', comparisonRoutes);
 
 // Route for main page
 app.get('/', (req, res) => {
+  // Prevent caching so back button re-renders with current auth state
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+
   res.render('index', { 
     title: 'TransitHub',
     user: req.user || null

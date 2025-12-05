@@ -5,6 +5,13 @@ import { generateTokens, verifyToken, setAuthCookies, clearAuthCookies } from '.
 
 const router = express.Router();
 
+// Ensure auth pages are never cached (so back button re-requests and can redirect)
+const setNoStore = (res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+};
+
 const escapeRegExp = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const sanitizeFormData = (body = {}) => {
@@ -19,11 +26,31 @@ const supportedUserTypes = ['student', 'professional', 'researcher', 'administra
 
 // Render login page
 router.get('/login', (req, res) => {
+  setNoStore(res);
+
+  const accessToken = req.cookies.access_token;
+  const decoded = accessToken ? verifyToken(accessToken) : null;
+
+  // If already authenticated, send the user to the homepage instead of showing login
+  if (decoded && decoded.type === 'access') {
+    return res.redirect('/');
+  }
+
   res.render('auth/login', { title: 'Login', error: null });
 });
 
 // Render signup page
 router.get('/signup', (req, res) => {
+  setNoStore(res);
+
+  const accessToken = req.cookies.access_token;
+  const decoded = accessToken ? verifyToken(accessToken) : null;
+
+  // If already authenticated, send the user to the homepage instead of showing signup
+  if (decoded && decoded.type === 'access') {
+    return res.redirect('/');
+  }
+
   res.render('auth/signup', { title: 'Sign Up', error: null, formData: {} });
 });
 

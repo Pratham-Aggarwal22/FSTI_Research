@@ -8313,3 +8313,52 @@ function populateComparisonMetricDropdown() {
     metricSelect.value = preferredValue;
   }
 }
+
+// Force browser back navigation to land on homepage.
+// For this single-page experience, any back navigation inside the site should end at '/'.
+// If already on '/', the native back will proceed to the previous site/entry point.
+// Handle back button navigation - prevent going back to login/signup if authenticated
+(function() {
+  function checkAndRedirectFromAuthPages() {
+    // Check if user is authenticated
+    const isAuthenticated = document.cookie.includes('access_token');
+    
+    if (!isAuthenticated) {
+      return; // No need to handle if not authenticated
+    }
+
+    // Check if current page is login or signup
+    const currentPath = window.location.pathname;
+    const isAuthPage = currentPath === '/auth/login' || currentPath === '/auth/signup';
+    
+    if (isAuthPage) {
+      // If user is authenticated and on auth page, redirect to homepage
+      window.history.replaceState(null, '', '/');
+      window.location.replace('/');
+      return;
+    }
+  }
+
+  // Check on page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', checkAndRedirectFromAuthPages);
+  } else {
+    checkAndRedirectFromAuthPages();
+  }
+
+  // Listen for back/forward button navigation
+  window.addEventListener('popstate', function(event) {
+    // Small delay to let the navigation complete
+    setTimeout(() => {
+      const isAuthenticated = document.cookie.includes('access_token');
+      if (!isAuthenticated) return;
+
+      const currentPath = window.location.pathname;
+      if (currentPath === '/auth/login' || currentPath === '/auth/signup') {
+        // Replace with homepage instead
+        window.history.replaceState(null, '', '/');
+        window.location.replace('/');
+      }
+    }, 0);
+  });
+})();
