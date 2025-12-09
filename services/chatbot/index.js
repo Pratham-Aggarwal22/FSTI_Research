@@ -1,11 +1,10 @@
 import OpenAI from 'openai';
-import { performance } from 'perf_hooks';
+import { spawnSync } from 'child_process';
 
 const DEFAULT_TRANSIT_DB = 'StateWiseComputation2';
-const STATE_COLLECTION = 'AverageValues';
-const COUNTY_COLLECTION = 'Averages';
-const STATE_DB_PLACEHOLDER = '__STATE_DB__';
-const COUNTY_NAME_SUFFIX = / county$/i;
+const TRANSIT_STATE_COLLECTION = 'AverageValues';
+const TRANSIT_COUNTY_COLLECTION = 'Averages';
+const FREQUENCY_PREFIX = 'Frequency-';
 
 const EQUITY_DATABASES = [
   { key: 'employment', dbName: 'Employment_Data', displayName: 'Employment', stateCollection: 'State Level', countyCollection: 'County Level' },
@@ -14,14 +13,13 @@ const EQUITY_DATABASES = [
   { key: 'housing', dbName: 'Housing_Data', displayName: 'Housing', stateCollection: 'State Level', countyCollection: 'County Level' }
 ];
 
-const STATE_DB_CORRECTIONS = {
-  Alabama: 'Albama',
-  Michigan: 'MIchigan'
-};
+const STATE_DB_CORRECTIONS = { Alabama: 'Albama', Michigan: 'MIchigan' };
 
-function safeGet(obj, pathSegments) {
-  if (!obj || !pathSegments) return undefined;
-  return pathSegments.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
+const FALLBACK_MESSAGE =
+  'Please ask regarding transit accessibility of the United States.';
+
+function normalize(text) {
+  return (text || '').toString().trim().toLowerCase();
 }
 
 function normalizeName(name) {
@@ -34,27 +32,53 @@ function normalizeName(name) {
     .replace(/\s+/g, ' ');
 }
 
-function inferUnitFromTitle(title) {
-  if (!title) return null;
-  const lower = title.toLowerCase();
-  if (lower.includes('%') || lower.includes('percent')) return 'percent';
-  if (lower.includes('minutes') || lower.includes('minute')) return 'minutes';
-  if (lower.includes('miles') || lower.includes('mile')) return 'miles';
-  if (lower.includes('ratio')) return 'ratio';
-  if (lower.includes('population') || lower.includes('people')) return 'people';
-  if (lower.includes('income')) return 'usd';
-  if (lower.includes('household')) return 'people';
+function cleanCountyForTransit(name = '') {
+  return name.toString().trim().toUpperCase();
+}
+
+// Helper for fuzzy matching metric keys in documents
+function normalizeMetricKey(key) {
+  return (key || '').toString().toLowerCase()
+    .replace(/\s+/g, '') // remove spaces
+    .replace(/&/g, ',')  // FIX: Replace ampersand with comma to match DB format
+    .replace(/miles/g, 'mi') // standardize on short form
+    .replace(/minutes/g, 'min');
+}
+
+function findMetricValue(doc, metric) {
+  if (!doc) return null;
+  // 1. Exact match
+  if (doc[metric] !== undefined) return doc[metric];
+
+  // 2. Case-insensitive match
+  const lower = metric.toLowerCase();
+  const keys = Object.keys(doc);
+  let match = keys.find(k => k.toLowerCase() === lower);
+  if (match) return doc[match];
+
+  // 3. Normalized match (remove spaces, handle unit variations)
+  const normalizedMetric = normalizeMetricKey(metric);
+  match = keys.find(k => normalizeMetricKey(k) === normalizedMetric);
+  if (match) return doc[match];
+  
   return null;
 }
 
-function dedupe(list) {
-  const seen = new Set();
-  return list.filter(item => {
-    const key = JSON.stringify(item);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+// Helper to clean county name for Equity DBs: e.g. "FRESNO" -> "Fresno County"
+// Also handles cases where title case is needed.
+function toTitleCase(str) {
+  return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+}
+
+function cleanCountyForEquity(name = '') {
+  let trimmed = name.toString().trim();
+  // If it's all uppercase (like from Transit DB), convert to Title Case
+  if (trimmed === trimmed.toUpperCase() && trimmed.length > 2) {
+    trimmed = toTitleCase(trimmed);
+  }
+  
+  if (/county$/i.test(trimmed)) return trimmed; // Already has suffix
+  return `${trimmed} County`;
 }
 
 class SchemaCatalog {
@@ -63,198 +87,104 @@ class SchemaCatalog {
     this.states = [];
     this.stateAliasMap = new Map();
     this.transitMetrics = [];
+    this.frequencyMetrics = [];
     this.equityMetrics = [];
-    this.metricIndex = new Map();
-    this.dictionaryCollections = [];
+    this.equityMetricsByDb = new Map(); // dbName -> metrics[]
+    this.frequencyLookup = new Map(); // label -> { metric, bins, collection }
+    this.equityLookup = new Map(); // metric -> dbName
   }
 
   async build() {
-    await this.loadTransitCatalog();
-    await this.loadEquityCatalog();
-    await this.findDictionaryCollections();
+    await this.loadStates();
+    await this.loadTransitMetrics();
+    await this.loadFrequencyMetrics();
+    await this.loadEquityMetrics();
   }
 
-  async loadTransitCatalog() {
-    const db = this.mongoClient.db(DEFAULT_TRANSIT_DB);
-    const collection = db.collection(STATE_COLLECTION);
-    const docs = await collection.find({}, { projection: { title: 1 } }).toArray();
-
-    if (!docs || docs.length === 0) {
-      console.warn('[Chatbot] Unable to load transit catalog; AverageValues empty.');
-      return;
-    }
-
-    const sample = docs[0];
-    this.states = Object.keys(sample || {})
-      .filter(key => key && !['_id', 'title'].includes(key))
-      .sort();
-
-    this.stateAliasMap.clear();
-    this.states.forEach(state => {
-      this.stateAliasMap.set(normalizeName(state), state);
-      this.stateAliasMap.set(normalizeName(`${state} state`), state);
-    });
-
-    this.transitMetrics = docs
-      .filter(doc => doc && doc.title)
-      .map(doc => {
-        const metricId = doc.title;
-        return {
-          metricId,
-          label: metricId,
-          category: 'transit',
-          geographyLevels: ['state'],
-          unit: inferUnitFromTitle(metricId),
-          source: {
-            db: DEFAULT_TRANSIT_DB,
-            collection: STATE_COLLECTION,
-            lookup: 'metric_document',
-            metricField: 'title'
-          }
-        };
-      });
-
-    this.transitMetrics.forEach(metric => {
-      this.metricIndex.set(normalizeName(metric.metricId), metric);
-      this.metricIndex.set(normalizeName(metric.label), metric);
-    });
-  }
-
-  async loadEquityCatalog() {
-    for (const equityDb of EQUITY_DATABASES) {
-      const db = this.mongoClient.db(equityDb.dbName);
-      const collection = db.collection(equityDb.stateCollection);
-      const doc = await collection.findOne({});
-      if (!doc) continue;
-
-      const metrics = [];
-      if (doc.data && typeof doc.data === 'object') {
-        Object.keys(doc.data).forEach(key => {
-          if (key === 'NAME') return;
-          metrics.push({
-            metricId: key,
-            label: key,
-            category: 'equity',
-            geographyLevels: ['state'],
-            unit: inferUnitFromTitle(key),
-            source: {
-              db: equityDb.dbName,
-              collection: equityDb.stateCollection,
-              lookup: 'geography_document',
-              geographyField: 'title',
-              valuePath: ['data', key]
-            }
-          });
-        });
-      } else {
-        // fallback: treat direct numeric fields as metrics
-        Object.keys(doc)
-          .filter(key => !['_id', 'title'].includes(key) && typeof doc[key] === 'number')
-          .forEach(key => {
-            metrics.push({
-              metricId: key,
-              label: key,
-              category: 'equity',
-              geographyLevels: ['state'],
-              unit: inferUnitFromTitle(key),
-              source: {
-                db: equityDb.dbName,
-                collection: equityDb.stateCollection,
-                lookup: 'geography_document',
-                geographyField: 'title',
-                valuePath: [key]
-              }
-            });
-          });
-      }
-
-      metrics.forEach(metric => {
-        const alias = `${equityDb.displayName}::${metric.metricId}`;
-        this.metricIndex.set(normalizeName(metric.metricId), metric);
-        this.metricIndex.set(normalizeName(alias), metric);
-        this.metricIndex.set(normalizeName(`${equityDb.displayName} ${metric.metricId}`), metric);
-      });
-
-      this.equityMetrics.push(
-        ...metrics.map(metric => ({
-          ...metric,
-          equityCategory: equityDb.key,
-          equityDisplay: equityDb.displayName
-        }))
-      );
-    }
-  }
-
-  async findDictionaryCollections() {
-    const candidates = [];
-
+  async loadStates() {
     try {
-      const db = this.mongoClient.db(DEFAULT_TRANSIT_DB);
-      const collections = await db.listCollections().toArray();
-      collections.forEach(col => {
-        if (/dictionary/i.test(col.name)) {
-          candidates.push({ dbName: DEFAULT_TRANSIT_DB, collection: col.name });
-        }
+      const collection = this.mongoClient.db(DEFAULT_TRANSIT_DB).collection(TRANSIT_STATE_COLLECTION);
+      const sample = await collection.findOne({});
+      if (!sample) return;
+      this.states = Object.keys(sample)
+        .filter(key => key && !['_id', 'title', 'District of Columbia', 'DC', 'Washington DC', 'Washington D.C.'].includes(key))
+        .sort();
+      this.stateAliasMap.clear();
+      this.states.forEach(state => {
+        this.stateAliasMap.set(normalizeName(state), state);
+        this.stateAliasMap.set(normalizeName(`${state} state`), state);
       });
     } catch (err) {
-      console.warn('[Chatbot] Unable to list collections in transit DB for dictionary lookup:', err.message);
+      // Error handling without console logging
     }
+  }
 
-    // Common metadata databases
-    const metadataDbs = ['Metadata', 'TransitViz', 'ReferenceData'];
-    for (const dbName of metadataDbs) {
+  async loadTransitMetrics() {
+    try {
+      const titles = await this.mongoClient
+        .db(DEFAULT_TRANSIT_DB)
+        .collection(TRANSIT_STATE_COLLECTION)
+        .distinct('title');
+      this.transitMetrics = (titles || [])
+        .filter(t => t && !['Washington DC', 'DC', 'District of Columbia'].includes(t))
+        .sort();
+    } catch (err) {
+      // Error handling without console logging
+    }
+  }
+
+  async loadFrequencyMetrics() {
+    try {
+      const collections = await this.mongoClient.db(DEFAULT_TRANSIT_DB).listCollections().toArray();
+      const freqCollections = collections
+        .map(c => c.name)
+        .filter(name => name && name.startsWith(FREQUENCY_PREFIX));
+
+      for (const collName of freqCollections) {
+        const doc = await this.mongoClient.db(DEFAULT_TRANSIT_DB).collection(collName).findOne({});
+        if (!doc) continue;
+        const bins = Object.keys(doc).filter(k => k && !['_id', 'title'].includes(k));
+        const metricName = collName.replace(/^Frequency-\s*/i, '').trim();
+        const label = `${metricName} [Bins: ${bins.join(', ')}]`;
+        this.frequencyMetrics.push(label);
+        this.frequencyLookup.set(label, { metric: metricName, bins, collection: collName });
+      }
+    } catch (err) {
+      // Error handling without console logging
+    }
+  }
+
+  async loadEquityMetrics() {
+    for (const equityDb of EQUITY_DATABASES) {
       try {
-        const db = this.mongoClient.db(dbName);
-        const collections = await db.listCollections().toArray();
-        collections.forEach(col => {
-          if (/dictionary/i.test(col.name) || /definitions/i.test(col.name)) {
-            candidates.push({ dbName, collection: col.name });
-          }
-        });
+        const doc = await this.mongoClient
+          .db(equityDb.dbName)
+          .collection(equityDb.stateCollection)
+          .findOne({});
+        if (!doc || !doc.data || typeof doc.data !== 'object') continue;
+        Object.keys(doc.data)
+          .filter(k => k !== 'NAME')
+          .forEach(metric => {
+            if (!this.equityLookup.has(metric)) {
+              this.equityMetrics.push(metric);
+              this.equityLookup.set(metric, equityDb.dbName);
+            }
+            if (!this.equityMetricsByDb.has(equityDb.dbName)) {
+              this.equityMetricsByDb.set(equityDb.dbName, []);
+            }
+            const list = this.equityMetricsByDb.get(equityDb.dbName);
+            if (!list.includes(metric)) list.push(metric);
+          });
       } catch (err) {
-        // Ignore missing db
+        // Error handling without console logging
       }
     }
-
-    // Add default fallback
-    candidates.push({ dbName: DEFAULT_TRANSIT_DB, collection: 'DataDictionary' });
-
-    this.dictionaryCollections = dedupe(candidates);
-  }
-
-  getPlannerContext() {
-    return {
-      states: this.states,
-      transitMetrics: this.transitMetrics.map(metric => ({
-        metricId: metric.metricId,
-        unit: metric.unit,
-        source: metric.source
-      })),
-      equityMetrics: this.equityMetrics.map(metric => ({
-        metricId: metric.metricId,
-        category: metric.equityDisplay,
-        unit: metric.unit,
-        source: metric.source
-      }))
-    };
-  }
-
-  getMetricByName(value) {
-    if (!value) return null;
-    return this.metricIndex.get(normalizeName(value)) || null;
-  }
-
-  inferUnit(metricId) {
-    const metric = this.getMetricByName(metricId);
-    return metric ? metric.unit : inferUnitFromTitle(metricId);
   }
 
   resolveState(value) {
     if (!value) return null;
     const normalized = normalizeName(value);
-    if (this.stateAliasMap.has(normalized)) {
-      return this.stateAliasMap.get(normalized);
-    }
+    if (this.stateAliasMap.has(normalized)) return this.stateAliasMap.get(normalized);
     const match = this.states.find(state => normalizeName(state) === normalized);
     return match || null;
   }
@@ -265,1145 +195,189 @@ class SchemaCatalog {
     const corrected = STATE_DB_CORRECTIONS[canonical] || canonical;
     return corrected.replace(/\s+/g, '_');
   }
+
+  findFrequencyMetric(label) {
+    return this.frequencyLookup.get(label) || null;
+  }
+
+  findEquityDb(metric) {
+    return this.equityLookup.get(metric) || null;
+  }
 }
 
 class PlannerService {
-  constructor({ openai, catalog, model = process.env.OPENAI_PLANNER_MODEL || 'gpt-4o-mini' }) {
+  constructor({ openai, catalog, model = process.env.OPENAI_PLANNER_MODEL || 'gpt-4o' }) {
     this.openai = openai;
     this.catalog = catalog;
     this.model = model;
   }
 
-  async plan(userMessage, context = {}) {
-    const plannerContext = this.catalog.getPlannerContext();
-    const contextSnippet = JSON.stringify(
-      {
-        states: plannerContext.states,
-        transitMetrics: plannerContext.transitMetrics.slice(0, 40),
-        equityMetrics: plannerContext.equityMetrics.slice(0, 40)
-      },
-      null,
-      2
-    );
+  async plan(userMessage) {
+    const transitList = JSON.stringify(this.catalog.transitMetrics, null, 0);
+    const frequencyList = JSON.stringify(this.catalog.frequencyMetrics, null, 0);
+    const equityLines = EQUITY_DATABASES.map(db => {
+      const metrics = this.catalog.equityMetricsByDb.get(db.dbName) || [];
+      return `- Equity Metrics (${db.displayName}): ${JSON.stringify(metrics, null, 0)}`;
+    }).join('\n');
 
     const systemPrompt = `
-You are the planning module for the TransitViz chatbot. Produce a structured JSON plan describing how to satisfy the user request using the available MongoDB data. 
-Follow these rules:
-- Only reference metrics explicitly provided in the context. If something is unknown, do not guess; ask for clarification via followUps.
-- All numeric data must come from MongoDB. Plan only the retrieval; the execution layer will perform the queries.
-- Supported intents: metric_lookup, compare, rank, trend, definition, multi_geo_report.
-- Always include geographies array with resolved type/value pairs.
-- For county geographies, include stateContext when known.
-- For each metric specify source.db, source.collection, source.lookup (metric_document | geography_document | county_document | collection_metrics), and either metricField or valuePath as appropriate.
-- Use source.lookup="collection_metrics" with metricId="__ALL__" when the user requests a broad overview (e.g., "transit accessibility" or "equity metrics") so the executor can retrieve all metrics from that collection for the geography.
-- For transit overviews, set { metricId: "__ALL__", category: "transit", source.db: "StateWiseComputation2", source.collection: "AverageValues", source.lookup: "collection_metrics" }.
-- For equity overviews, include an entry for each equity database (Employment_Data, Income_Data, Race_Data, Housing_Data) using source.lookup="collection_metrics", source.collection="State Level", source.geographyField="title", source.valuePath=["data"].
-- When the user mentions both transit and equity, ensure the metrics array covers both domains (transit average values plus all relevant equity categories).
-- For county-level overviews use source.db="${STATE_DB_PLACEHOLDER}", source.collection="Averages", source.lookup="collection_metrics".
-- Only set chart.suggested=true if the user explicitly asks for a visual or chart; otherwise keep chart.suggested=false.
-- Mark needsData=false when responding only with definitions.
-- Always populate needsDefinition=true when the user explicitly asks for explanations or meanings of metrics, and include definitionTerms.
-- Add followUps when required inputs (metric, geography, time) are missing.
-Return JSON only.`;
+You are the first-stage planner for a transit & equity chatbot.
 
-    const userPrompt = `
-User question:
+User Question:
 ${userMessage}
 
-Page context (may be empty):
-${JSON.stringify(context || {}, null, 2)}
+AVAILABLE CATALOGS (choose only from these):
+- Transit Metrics: ${transitList}
+  (Transit accessibility data and its metrics define the transit access in a state/county. These metrics are computed from sampled addresses to the courthouse, where "Sample Size" is the number of addresses sampled. This refers to public transport (transit). These metrics were derived after running Google address services. Percent Access is the percentage of that sample when multiplied by 100.)
+- Frequency Metrics: ${frequencyList}
+  (Frequency metrics are the percentage of addresses for that metric lying in each bin.)
+- Equity Metrics grouped by source database (Employment, Income, Race, Housing):
+${equityLines}
+  (Pick equity metrics from the relevant category—e.g., income-related requests pick from Income, employment-related from Employment, etc.)
 
-Available data dictionary (truncated):
-${contextSnippet}
+STATUS RULES:
+- "valid": the user asks for transit/equity data comparisons or values.
+- "invalid": unrelated to transit/equity.
+- "definition": asking how metrics are calculated or data sources.
 
-Output requirements:
+If status is "invalid" or "definition", return only {"status":"invalid"}.
+
+If status is "valid", output JSON as follows. This is an EXAMPLE STRUCTURE ONLY; replace states/counties/metrics with what the user actually asked for.
+
+JSON OUTPUT FORMAT (example structure):
 {
-  "intent": "...",
-  "needsData": true|false,
-  "needsDefinition": true|false,
-  "definitionTerms": [],
-  "metrics": [
-    {
-      "metricId": "...",
-      "category": "transit|equity|other",
-      "unit": "... or null",
-      "geographyLevel": "state|county|national",
-      "time": { "grain": "year|none", "year": 2022|null, "latest": true|false },
-      "source": {
-        "db": "...",
-        "collection": "...",
-        "lookup": "metric_document|geography_document|county_document",
-        "metricField": "... optional",
-        "geographyField": "... optional",
-        "valuePath": ["..."] optional
-      }
-    }
+  "status": "valid",
+  "states": [ {"name": "ExampleState1", "var": "s1"}, {"name": "ExampleState2", "var": "s2"} ],
+  "counties": [
+      {"state": "ExampleState1", "name": "ExampleCounty", "var": "c1"},
+      {"state": "ExampleState2", "name": "__ALL__", "var": "c2"} // c2 will be a list of county names
   ],
-  "geographies": [
-    { "type": "state|county|national", "value": "...", "stateContext": "... or null" }
+  "transit_state": [ {"state": "ExampleState1", "metric": "Some Transit Metric", "var": "v1"} ],
+  "transit_county": [
+      {"state": "ExampleState1", "county": "ExampleCounty", "metric": "Some Transit Metric", "var": "v2"},
+      {"state": "ExampleState2", "county": "__ALL__", "metric": "Some Transit Metric", "var": "v3"} // v3 will be a list of numbers aligned with c2
   ],
-  "comparisons": {
-    "targets": ["..."],
-    "rank": { "direction": "highest|lowest", "limit": 5, "scope": "states|counties|nation" }
-  },
-  "chart": { "suggested": false, "type": null, "focusMetric": null, "notes": [] },
-  "report": { "requested": false, "sections": [] },
-  "followUps": [],
-  "notes": []
-}`;
+  "frequency_state": [ {"state": "ExampleState1", "metric": "Some Frequency Metric [Bins: ...]", "bin": "a-bin", "var": "v4"} ],
+  "frequency_county": [ {"state": "ExampleState1", "county": "ExampleCounty", "metric": "Some Frequency Metric [Bins: ...]", "bin": "another-bin", "var": "v5"} ],
+  "equity_state": [ {"state": "ExampleState1", "metric": "Some Equity Metric", "var": "v6"} ],
+  "equity_county": [ {"state": "ExampleState2", "county": "__ALL__", "metric": "Some Equity Metric", "var": "v7"} ],
+  "code_snippet": "if v2 is not None: print(f'ExampleCounty Wait Time: {v2}');\\nif isinstance(v3, list) and v3:\\n    nums = [x for x in v3 if isinstance(x, (int, float))]\\n    if nums:\\n        avg = sum(nums)/len(nums)\\n        print(f'Average wait in {s2} counties: {avg}')"
+}
+
+ADDITIONAL RULES:
+- Do NOT include DC in states. The input list may say "DC" or "District of Columbia", but you MUST NOT include it in your plan.
+  - If the user explicitly asks for DC/District of Columbia, set "status": "definition" and return.
+  - If the user implies all states, use "name": "__ALL__" instead of listing them.
+  - "__ALL__" counties means fetch every county in that state; metrics become lists aligned to that county list.
+- NAME FORMATTING: When adding a county/state name in the JSON (states/counties arrays), use ONLY the name. Do NOT append "County" or "State" suffixes (e.g., use "Fresno", not "Fresno County").
+- Variables (v1, v2...) are preloaded with numbers or None; always check for None before printing.
+- Frequency and percent access metrics are already scaled to 0-100 percentages. Do NOT multiply by 100 in the python code.
+  - Lists may contain None for missing data. Filter None values first (e.g., nums = [x for x in v1 if x is not None]). Check if the filtered list is empty before calling max(), min(), or calculating averages to avoid errors.
+  - When printing, include exact county/state names and metric names; if asked, include county names with their values.
+  - DATA PAIRING RULE: When the user asks to identify specific locations (e.g., "which county", "which state", "highest", "lowest", "worst", "best"), you MUST pair the name list (e.g., c1, s1) with the value list (e.g., v1, v2) in your Python code.
+    - Use zip() to combine them: pairs = zip(name_list, value_list)
+    - Filter out None values.
+    - Sort or filter the paired list to find the answer.
+    - Print BOTH the name and the value in the final output.
+  - List all selected metrics sections (transit_state, transit_county, frequency_state, frequency_county, equity_state, equity_county) before "code_snippet". The code_snippet should use the metrics you selected.
+  - Be permissive in selecting needed metrics (transit, frequency, equity) so the answer has all required data for the user’s question.
+  - COMBINED QUERIES: If the user's question combines Equity and Transit (e.g., "transit access for low income areas"), you MUST select metrics from BOTH categories. Your code snippet should be smart enough to filter or compute considering all of them.
+  - If the question mentions a specific demographic (e.g. 'low income', 'poverty', 'African American'), YOU MUST select a relevant Equity Metric for that group so we can see the context, even if the user asks about transit.
+
+  DATA UNDERSTANDING & METRIC SELECTION:
+  - This database contains transit accessibility and equity data for US states and counties.
+  - "Transit Metrics" (e.g., Percent Access, Wait Time, Walk Distance) directly measure transit accessibility. High access %, low wait times, and low walk distances indicate GOOD accessibility.
+  - "Frequency Metrics" show the distribution of service quality (e.g. % of people waiting < 5 mins vs > 30 mins).
+  - "Equity Metrics" describe the population demographics (Poverty, Race, Employment).
+  - If a user asks about "accessibility" generally, you MUST select key Transit Metrics like "Percent Access", "Initial Wait Time", and "Initial Walk Distance" to form a complete picture.
+  - If a user asks about "commute", select "Travel Duration".
+  - OVERALL/COMPREHENSIVE QUERIES:
+    - If the user asks about "overall transit accessibility" or broad performance, select ALL available Transit Metrics.
+    - If the user asks about "overall" equity or a specific category (e.g. "overall employment"), select ALL metrics from that respective category (or all Equity categories for general equity).
+
+  CODING RULES (Python):
+  1. **Handle Lists vs Scalars**:
+     - Variables like v1, s1 might be lists (if "__ALL__" used) or scalars (if specific name used).
+     - ALWAYS check types: \`if isinstance(v1, list):\` vs \`else:\`.
+  2. **Aggregation for National/Statewide Questions**:
+     - If the user asks for a total/average (e.g. "What is the US average?"), and you have a list:
+       - Filter None: \`valid = [x for x in v1 if x is not None]\`
+       - Calculate Average: \`if valid: avg = sum(valid) / len(valid)\`
+       - Print the average.
+  3. **Ranking for "Which" Questions**:
+     - Use the DATA PAIRING RULE (zip names and values) to find max/min.
+  4. **Missing Data Handling**:
+     - If a variable (scalar) is None, you MUST print a message saying: "Data not found for [Metric] in [Location]".
+     - If a list variable contains only None values or is empty, print that no data was found for that group.
+  5. **Keep it Simple**:
+     - Use basic math. Do not loop excessively. Print clear, labeled results.
+     - **Formatting**: Do NOT use semicolons or one-line \`if-else\` statements. Use standard Python indentation with \`\\n\` characters for line breaks.
+  `;
 
     const completion = await this.openai.chat.completions.create({
       model: this.model,
       temperature: 0,
       response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ]
+      messages: [{ role: 'system', content: systemPrompt }]
     });
 
-    // Store usage for cost calculation
-    this.lastUsage = completion.usage;
-
     const content = completion.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('Planner did not return a plan');
-    }
-
+    if (!content) throw new Error('Planner returned empty response');
     let plan;
     try {
       plan = JSON.parse(content);
-    } catch (error) {
-      console.error('[Chatbot] Failed to parse planner response:', content);
-      throw new Error('Planner returned invalid JSON');
+    } catch (err) {
+      throw new Error(`Failed to parse planner JSON: ${err.message}`);
     }
 
-    if (!plan.intent) {
-      plan.intent = 'metric_lookup';
-    }
+    plan.status = plan.status || 'invalid';
+    plan.states = Array.isArray(plan.states) ? plan.states : [];
+    plan.counties = Array.isArray(plan.counties) ? plan.counties : [];
+    plan.transit_state = Array.isArray(plan.transit_state) ? plan.transit_state : [];
+    plan.transit_county = Array.isArray(plan.transit_county) ? plan.transit_county : [];
+    plan.frequency_state = Array.isArray(plan.frequency_state) ? plan.frequency_state : [];
+    plan.frequency_county = Array.isArray(plan.frequency_county) ? plan.frequency_county : [];
+    plan.equity_state = Array.isArray(plan.equity_state) ? plan.equity_state : [];
+    plan.equity_county = Array.isArray(plan.equity_county) ? plan.equity_county : [];
+    plan.code_snippet = plan.code_snippet || '';
 
-    if (!Array.isArray(plan.metrics)) {
-      plan.metrics = [];
-    }
-
-    if (!Array.isArray(plan.geographies)) {
-      plan.geographies = [];
-    }
-
-    if (!Array.isArray(plan.definitionTerms)) {
-      plan.definitionTerms = [];
-    }
-
-    if (!plan.chart) {
-      plan.chart = { suggested: false };
-    }
-
-    if (!Array.isArray(plan.followUps)) {
-      plan.followUps = [];
-    }
-
-    const messageLower = userMessage.toLowerCase();
-    plan.metrics = plan.metrics || [];
-
-    const hasStateGeo = plan.geographies?.some(geo => geo.type === 'state');
-    const hasCountyGeo = plan.geographies?.some(geo => geo.type === 'county');
-    const overviewIntents = new Set(['metric_lookup', 'multi_geo_report', 'compare']);
-
-    const hasTransitAll = plan.metrics.some(
-      metric =>
-        metric.metricId === '__ALL__' &&
-        metric.category === 'transit' &&
-        metric.source?.collection === STATE_COLLECTION
-    );
-
-    if (overviewIntents.has(plan.intent) && hasStateGeo && messageLower.includes('transit')) {
-      if (!hasTransitAll) {
-        plan.metrics.push({
-          metricId: '__ALL__',
-          category: 'transit',
-          geographyLevel: 'state',
-          unit: null,
-          source: {
-            db: DEFAULT_TRANSIT_DB,
-            collection: STATE_COLLECTION,
-            lookup: 'collection_metrics',
-            metricField: 'title'
-          }
-        });
-      }
-
-      const transitHasAll = plan.metrics.some(
-        metric =>
-          metric.category === 'transit' &&
-          metric.metricId === '__ALL__' &&
-          metric.source?.collection === STATE_COLLECTION
-      );
-
-      if (transitHasAll) {
-        plan.metrics = plan.metrics.filter(
-          metric =>
-            !(
-              metric.category === 'transit' &&
-              metric.source?.collection === STATE_COLLECTION &&
-              metric.metricId !== '__ALL__'
-            )
-        );
-      }
-    }
-
-    if (overviewIntents.has(plan.intent) && hasCountyGeo && messageLower.includes('transit')) {
-      const alreadyHasCountyTransit = plan.metrics.some(
-        metric =>
-          metric.category === 'transit' &&
-          metric.metricId === '__ALL__' &&
-          metric.geographyLevel === 'county'
-      );
-
-      if (!alreadyHasCountyTransit) {
-        plan.metrics.push({
-          metricId: '__ALL__',
-          category: 'transit',
-          geographyLevel: 'county',
-          unit: null,
-          source: {
-            db: STATE_DB_PLACEHOLDER,
-            collection: COUNTY_COLLECTION,
-            lookup: 'collection_metrics',
-            metricField: 'title'
-          }
-        });
-      }
-    }
-
-    const needsEquity = messageLower.includes('equity');
-    const hasEquityMetrics = plan.metrics.some(metric => metric.category === 'equity');
-
-    if (overviewIntents.has(plan.intent) && hasStateGeo && needsEquity && !hasEquityMetrics) {
-      for (const equityDb of EQUITY_DATABASES) {
-        const alreadyIncluded = plan.metrics.some(
-          metric =>
-            metric.category === 'equity' &&
-            metric.source?.db === equityDb.dbName &&
-            metric.source?.collection === equityDb.stateCollection
-        );
-        if (!alreadyIncluded) {
-          plan.metrics.push({
-            metricId: '__ALL__',
-            category: 'equity',
-            geographyLevel: 'state',
-            unit: null,
-            source: {
-              db: equityDb.dbName,
-              collection: equityDb.stateCollection,
-              lookup: 'collection_metrics',
-              geographyField: 'title',
-              valuePath: ['data']
-            },
-            equityCategory: equityDb.key
-          });
-        }
-      }
-    }
-
-    if (overviewIntents.has(plan.intent) && hasCountyGeo && needsEquity) {
-      for (const equityDb of EQUITY_DATABASES) {
-        const alreadyIncludedCounty = plan.metrics.some(
-          metric =>
-            metric.category === 'equity' &&
-            metric.geographyLevel === 'county' &&
-            metric.source?.db === equityDb.dbName &&
-            metric.source?.collection === equityDb.countyCollection
-        );
-        if (!alreadyIncludedCounty) {
-          plan.metrics.push({
-            metricId: '__ALL__',
-            category: 'equity',
-            geographyLevel: 'county',
-            unit: null,
-            source: {
-              db: equityDb.dbName,
-              collection: equityDb.countyCollection,
-              lookup: 'collection_metrics',
-              geographyField: 'title',
-              valuePath: ['data'],
-              stateField: ['state', 'State']
-            },
-            equityCategory: equityDb.key
-          });
-        }
-      }
-    }
-
-    if (!plan.chart || plan.chart.suggested !== true || plan.chart.requested !== true) {
-      plan.chart = { suggested: false };
-    }
+    // Heuristic: if the user mentions income/poverty but no equity metrics were selected, add defaults.
+    const lowerMsg = (userMessage || '').toLowerCase();
+    const needsEquity =
+      lowerMsg.includes('income') ||
+      lowerMsg.includes('low income') ||
+      lowerMsg.includes('poverty') ||
+      lowerMsg.includes('equity');
+    // Do not auto-add equity metrics; LLM must pick explicitly based on the question.
 
     return plan;
   }
 }
 
-class DefinitionService {
-  constructor({ mongoClient, catalog }) {
-    this.mongoClient = mongoClient;
-    this.catalog = catalog;
-  }
-
-  async lookup(terms = []) {
-    if (!terms || terms.length === 0) {
-      return [];
-    }
-
-    const results = [];
-    for (const term of terms) {
-      const normalized = normalizeName(term);
-      let found = null;
-
-      for (const source of this.catalog.dictionaryCollections) {
-        try {
-          const coll = this.mongoClient.db(source.dbName).collection(source.collection);
-          const cursor = await coll
-            .find(
-              {
-                $or: [
-                  { term },
-                  { title: term },
-                  { metric: term },
-                  { synonyms: { $regex: term, $options: 'i' } },
-                  { term_normalized: normalized }
-                ]
-              },
-              { limit: 1 }
-            )
-            .toArray();
-
-          if (cursor.length > 0) {
-            const doc = cursor[0];
-            found = {
-              term: term,
-              definition: doc.definition || doc.description || doc.text || null,
-              unit: doc.unit || doc.units || null,
-              source: {
-                db: source.dbName,
-                collection: source.collection,
-                citation: doc.source || doc.citation || null
-              }
-            };
-            break;
-          }
-        } catch (error) {
-          // ignore missing collections
-        }
-      }
-
-      if (found) {
-        results.push(found);
-      } else {
-        results.push({
-          term,
-          definition: null,
-          unit: null,
-          source: null,
-          missing: true
-        });
-      }
-    }
-
-    return results;
-  }
-}
-
-class ExecutionService {
-  constructor({ mongoClient, catalog }) {
-    this.mongoClient = mongoClient;
-    this.catalog = catalog;
-    this.countyStateCache = new Map();
-    this.failedCountyLookups = new Set();
-  }
-
-  async execute(plan) {
-    const started = performance.now();
-    const outcome = {
-      metrics: [],
-      rankings: [],
-      comparisons: [],
-      trends: [],
-      chartData: null,
-      notes: [],
-      missing: [],
-      metadata: {
-        queryLog: [],
-        executionMs: 0
-      }
-    };
-
-    if (!plan.needsData) {
-      outcome.metadata.executionMs = performance.now() - started;
-      return outcome;
-    }
-
-    switch (plan.intent) {
-      case 'metric_lookup':
-      case 'compare':
-      case 'multi_geo_report':
-        await this.executeMetricLookup(plan, outcome);
-        break;
-      case 'rank':
-        await this.executeRanking(plan, outcome);
-        break;
-      case 'trend':
-        await this.executeTrend(plan, outcome);
-        break;
-      default:
-        await this.executeMetricLookup(plan, outcome);
-        break;
-    }
-
-    if (plan.chart && plan.chart.suggested) {
-      outcome.chartData = this.buildChartData(plan, outcome.metrics);
-    }
-
-    outcome.metadata.executionMs = performance.now() - started;
-    return outcome;
-  }
-
-  async executeMetricLookup(plan, outcome) {
-    const geographies = plan.geographies && plan.geographies.length > 0 ? plan.geographies : [];
-    if (!plan.metrics || plan.metrics.length === 0) {
-      outcome.notes.push('Planner did not specify any metrics to retrieve.');
-      return;
-    }
-
-    for (const metric of plan.metrics) {
-      for (const geography of geographies) {
-        const resolvedGeography = await this.resolveGeography(geography);
-        if (!resolvedGeography) {
-          outcome.missing.push({
-            metricId: metric.metricId,
-            geography
-          });
-          continue;
-        }
-
-        if (metric.source?.lookup === 'collection_metrics' && metric.metricId === '__ALL__') {
-          const collectionResults = await this.fetchCollectionMetrics(metric, resolvedGeography, plan);
-          if (collectionResults.length > 0) {
-            outcome.metrics.push(...collectionResults);
-          } else {
-            outcome.missing.push({
-              metricId: metric.metricId,
-              geography
-            });
-          }
-          continue;
-        }
-
-        const result = await this.fetchMetricValue(metric, geography, plan, resolvedGeography);
-        if (result) {
-          outcome.metrics.push(result);
-        } else {
-          outcome.missing.push({
-            metricId: metric.metricId,
-            geography
-          });
-        }
-      }
-    }
-  }
-
-  async executeRanking(plan, outcome) {
-    if (!plan.metrics || plan.metrics.length === 0) {
-      outcome.notes.push('Ranking intent missing metric definition.');
-      return;
-    }
-    const metric = plan.metrics[0];
-    const source = metric.source || {};
-    if (source.lookup !== 'metric_document') {
-      outcome.notes.push('Ranking currently supported only for state-level transit metrics.');
-      return;
-    }
-
-    const dbName = source.db || DEFAULT_TRANSIT_DB;
-    const collection = this.mongoClient.db(dbName).collection(source.collection || STATE_COLLECTION);
-    const doc = await collection.findOne({ [source.metricField || 'title']: metric.metricId });
-    if (!doc) {
-      outcome.missing.push({ metricId: metric.metricId, geography: 'rank:states' });
-      return;
-    }
-
-    const values = [];
-    Object.keys(doc).forEach(key => {
-      if (['_id', source.metricField || 'title'].includes(key)) return;
-      const value = doc[key];
-      if (typeof value === 'number') {
-        values.push({ geography: key, value });
-      }
-    });
-
-    const direction = plan.comparisons?.rank?.direction === 'lowest' ? 'asc' : 'desc';
-    values.sort((a, b) => (direction === 'desc' ? b.value - a.value : a.value - b.value));
-    const limit = plan.comparisons?.rank?.limit || 5;
-    outcome.rankings.push({
-      metricId: metric.metricId,
-      unit: metric.unit || this.catalog.inferUnit(metric.metricId),
-      direction,
-      limit,
-      values: values.slice(0, limit),
-      source: {
-        db: dbName,
-        collection: source.collection || STATE_COLLECTION
-      }
-    });
-  }
-
-  async executeTrend(plan, outcome) {
-    // Attempt to fetch temporal series; fall back to latest if structure unavailable
-    if (!plan.metrics || plan.metrics.length === 0) {
-      outcome.notes.push('Trend intent missing metric definition.');
-      return;
-    }
-
-    const metric = plan.metrics[0];
-    for (const geography of plan.geographies || []) {
-      const series = await this.fetchTemporalSeries(metric, geography);
-      if (series && series.values && series.values.length > 0) {
-        outcome.trends.push(series);
-      } else {
-        outcome.missing.push({ metricId: metric.metricId, geography, reason: 'no temporal data' });
-      }
-    }
-  }
-
-  async fetchMetricValue(metric, geography, plan, resolvedGeographyOverride = null) {
-    const source = metric.source || {};
-    const unit = metric.unit || this.catalog.inferUnit(metric.metricId);
-    const resolvedGeography = resolvedGeographyOverride || (await this.resolveGeography(geography));
-    if (!resolvedGeography) {
-      return null;
-    }
-
-    const dbName =
-      source.db === STATE_DB_PLACEHOLDER
-        ? this.catalog.formatStateDatabaseName(resolvedGeography.stateContext || resolvedGeography.value)
-        : source.db || DEFAULT_TRANSIT_DB;
-
-    const collectionName = source.collection || (resolvedGeography.type === 'county' ? COUNTY_COLLECTION : STATE_COLLECTION);
-    const db = this.mongoClient.db(dbName);
-    const collection = db.collection(collectionName);
-
-    let doc = null;
-    let fieldUsed = null;
-
-    const queryLogEntry = {
-      metricId: metric.metricId,
-      geography: resolvedGeography,
-      db: dbName,
-      collection: collectionName,
-      lookup: source.lookup
-    };
-
-    if (source.lookup === 'metric_document') {
-      doc = await collection.findOne({ [source.metricField || 'title']: metric.metricId });
-      fieldUsed = resolvedGeography.value;
-    } else if (source.lookup === 'geography_document') {
-      doc = await collection.findOne({ [source.geographyField || 'title']: resolvedGeography.value });
-      fieldUsed = (source.valuePath && source.valuePath.join('.')) || resolvedGeography.value;
-    } else if (source.lookup === 'county_document') {
-      const result = await this.findCountyDocument(resolvedGeography, collection, metric);
-      doc = result?.doc;
-      fieldUsed = result?.field;
-      queryLogEntry.countyMatch = result?.match;
-    } else {
-      doc = await collection.findOne({ [source.metricField || 'title']: metric.metricId });
-      fieldUsed = resolvedGeography.value;
-    }
-
-    if (!doc) {
-      queryLogEntry.missing = true;
-      this.recordQueryLog(queryLogEntry, plan);
-      return null;
-    }
-
-    const valueResult = this.extractValue(doc, source, resolvedGeography, metric);
-    if (!valueResult) {
-      queryLogEntry.missingValue = true;
-      this.recordQueryLog(queryLogEntry, plan);
-      return null;
-    }
-
-    this.recordQueryLog(
-      {
-        ...queryLogEntry,
-        fieldUsed,
-        year: valueResult.year || null
-      },
-      plan
-    );
-
-    return {
-      metricId: metric.metricId,
-      metricLabel: metric.label || metric.metricId,
-      geography: resolvedGeography,
-      value: valueResult.value,
-      unit,
-      year: valueResult.year || metric.time?.year || valueResult.detectedYear || null,
-      category: metric.category || null,
-      source: {
-        db: dbName,
-        collection: collectionName,
-        field: valueResult.field || fieldUsed,
-        lookup: source.lookup
-      }
-    };
-  }
-
-  async fetchCollectionMetrics(metric, resolvedGeography, plan) {
-    const source = metric.source || {};
-    const dbName =
-      source.db === STATE_DB_PLACEHOLDER
-        ? this.catalog.formatStateDatabaseName(resolvedGeography.stateContext || resolvedGeography.value)
-        : source.db || DEFAULT_TRANSIT_DB;
-    const collectionName =
-      source.collection ||
-      (resolvedGeography.type === 'county' ? COUNTY_COLLECTION : STATE_COLLECTION);
-
-    const db = this.mongoClient.db(dbName);
-    const collection = db.collection(collectionName);
-    const results = [];
-    const queryLogEntry = {
-      metricId: metric.metricId,
-      geography: resolvedGeography,
-      db: dbName,
-      collection: collectionName,
-      lookup: 'collection_metrics'
-    };
-
-    const pushResult = ({
-      metricId,
-      metricLabel,
-      value,
-      unit,
-      fieldPath,
-      year,
-      category,
-      collectionSource
-    }) => {
-      if (typeof value !== 'number' || Number.isNaN(value)) return;
-      results.push({
-        metricId,
-        metricLabel,
-        geography: resolvedGeography,
-        value,
-        unit: unit || this.catalog.inferUnit(metricId),
-        year: year || null,
-        category: category || metric.category || null,
-        source: {
-          db: dbName,
-          collection: collectionSource || collectionName,
-          field: fieldPath,
-          lookup: 'collection_metrics'
-        }
-      });
-    };
-
-    if (collectionName === STATE_COLLECTION && resolvedGeography.type === 'state') {
-      const docs = await collection.find({}).toArray();
-      docs.forEach(doc => {
-        if (!doc) return;
-        const metricLabel = doc[source.metricField || 'title'] || doc.title || doc.name;
-        const value = doc[resolvedGeography.value];
-        if (typeof value === 'number') {
-          pushResult({
-            metricId: metricLabel,
-            metricLabel,
-            value,
-            unit: metric.unit,
-            fieldPath: resolvedGeography.value,
-            year: doc.year || doc.Year,
-            category: 'transit'
-          });
-        }
-      });
-
-      // Include additional transit collections (e.g., frequency) for the state.
-      const collections = await db.listCollections().toArray();
-      const relatedCollections = collections
-        .map(col => col.name)
-        .filter(name => name && name !== collectionName && !name.startsWith('system.'));
-
-      for (const relatedName of relatedCollections) {
-        try {
-          const relatedCollection = db.collection(relatedName);
-          const doc = await relatedCollection.findOne({ title: resolvedGeography.value });
-          if (!doc) continue;
-          const flattened = this.flattenNumericFields(doc, {
-            skipKeys: ['_id', 'title'],
-            separator: ' > '
-          });
-          flattened.forEach(item => {
-            pushResult({
-              metricId: `${relatedName}::${item.metricId}`,
-              metricLabel: `${relatedName} > ${item.metricLabel}`,
-              value: item.value,
-              fieldPath: `${relatedName}.${item.path}`,
-              year: doc.year || doc.Year,
-              category: 'transit',
-              collectionSource: relatedName
-            });
-          });
-        } catch (error) {
-          // Ignore missing collections or incompatible structures.
-        }
-      }
-    } else if (collectionName === COUNTY_COLLECTION && resolvedGeography.type === 'county') {
-      const countyCollection = db.collection(collectionName);
-      const countyDocResult = await this.findCountyDocument(resolvedGeography, countyCollection, metric);
-      const countyDoc = countyDocResult?.doc;
-      if (countyDoc) {
-        const flattened = this.flattenNumericFields(countyDoc, {
-          skipKeys: ['_id', 'title'],
-          separator: ' > '
-        });
-        flattened.forEach(item => {
-          pushResult({
-            metricId: item.metricId,
-            metricLabel: item.metricLabel,
-            value: item.value,
-            fieldPath: item.path,
-            year: countyDoc.year || countyDoc.Year,
-            category: metric.category || null
-          });
-        });
-      }
-    } else {
-      const geoField = source.geographyField || 'title';
-      const query = {
-        [geoField]: resolvedGeography.value
-      };
-      if (resolvedGeography.type === 'county' && resolvedGeography.stateContext && source.stateField) {
-        const stateFields = Array.isArray(source.stateField) ? source.stateField : [source.stateField];
-        query.$or = stateFields.map(field => ({
-          [field]: resolvedGeography.stateContext
-        }));
-      }
-      const doc = await collection.findOne(query);
-      if (doc) {
-        const target =
-          source.valuePath && source.valuePath.length > 0 ? safeGet(doc, source.valuePath) : doc;
-        if (target && typeof target === 'object') {
-          const flattened = this.flattenNumericFields(target, {
-            skipKeys: ['_id', 'title', 'NAME', 'state', 'State'],
-            separator: ' > '
-          });
-          flattened.forEach(item => {
-            pushResult({
-              metricId: item.metricId,
-              metricLabel: item.metricLabel,
-              value: item.value,
-              fieldPath: item.path,
-              year: doc.year || doc.Year,
-              category: metric.category || null
-            });
-          });
-        }
-      }
-    }
-
-    this.recordQueryLog(
-      {
-        ...queryLogEntry,
-        totalMetrics: results.length
-      },
-      plan
-    );
-
-    return results;
-  }
-
-  flattenNumericFields(node, options = {}) {
-    const results = [];
-    if (!node || typeof node !== 'object') {
-      return results;
-    }
-    const skipKeys = new Set(options.skipKeys || []);
-    const separator = options.separator || ' > ';
-    const maxDepth = options.maxDepth || 8;
-
-    const walk = (current, path = [], depth = 0) => {
-      if (depth > maxDepth || current === null || current === undefined) {
-        return;
-      }
-
-      if (typeof current === 'number') {
-        if (path.length === 0) return;
-        const metricId = path[path.length - 1];
-        const metricLabel = path.join(separator);
-        results.push({
-          metricId,
-          metricLabel,
-          value: current,
-          path: path.join('.')
-        });
-        return;
-      }
-
-      if (Array.isArray(current)) {
-        current.forEach((item, index) => {
-          walk(item, path.concat(String(index)), depth + 1);
-        });
-        return;
-      }
-
-      if (typeof current === 'object') {
-        Object.entries(current).forEach(([key, value]) => {
-          if (skipKeys.has(key)) return;
-          walk(value, path.concat(key), depth + 1);
-        });
-      }
-    };
-
-    walk(node, [], 0);
-    return results;
-  }
-
-  recordQueryLog(entry, plan) {
-    if (!plan.executionLog) {
-      plan.executionLog = [];
-    }
-    plan.executionLog.push(entry);
-  }
-
-  extractValue(doc, source, geography, metric) {
-    if (source.lookup === 'metric_document') {
-      const value = doc[geography.value];
-      if (typeof value === 'number') {
-        return { value, field: geography.value };
-      }
-      return null;
-    }
-
-    if (source.lookup === 'geography_document') {
-      const pathSegments = source.valuePath || [metric.metricId];
-      const value = safeGet(doc, pathSegments);
-      if (typeof value === 'number') {
-        const year = doc.year || doc.Year || null;
-        return { value, field: pathSegments.join('.'), year };
-      }
-
-      // handle nested objects keyed by year
-      if (value && typeof value === 'object') {
-        const year = metric.time?.year;
-        if (year && typeof value[year] === 'number') {
-          return { value: value[year], field: `${pathSegments.join('.')}[${year}]`, year };
-        }
-        const entries = Object.entries(value).filter(([, v]) => typeof v === 'number');
-        if (entries.length > 0) {
-          const [latestYear, latestValue] = entries.sort((a, b) => Number(a[0]) - Number(b[0])).pop();
-          return {
-            value: latestValue,
-            field: `${pathSegments.join('.')}[${latestYear}]`,
-            year: Number(latestYear),
-            detectedYear: Number(latestYear)
-          };
-        }
-      }
-      return null;
-    }
-
-    if (source.lookup === 'county_document') {
-      const pathSegments = source.valuePath || [metric.metricId];
-      const value = safeGet(doc, pathSegments);
-      if (typeof value === 'number') {
-        return { value, field: pathSegments.join('.') };
-      }
-      return null;
-    }
-
-    // fallback for unexpected structure
-    const value = doc[geography.value];
-    if (typeof value === 'number') {
-      return { value, field: geography.value };
-    }
-    return null;
-  }
-
-  async fetchTemporalSeries(metric, geography) {
-    const source = metric.source || {};
-    const resolvedGeography = await this.resolveGeography(geography);
-    if (!resolvedGeography) {
-      return null;
-    }
-
-    const dbName =
-      source.db === STATE_DB_PLACEHOLDER
-        ? this.catalog.formatStateDatabaseName(resolvedGeography.stateContext || resolvedGeography.value)
-        : source.db || DEFAULT_TRANSIT_DB;
-
-    const collectionName = source.collection || STATE_COLLECTION;
-    const collection = this.mongoClient.db(dbName).collection(collectionName);
-
-    let doc = null;
-    if (source.lookup === 'metric_document') {
-      doc = await collection.findOne({ [source.metricField || 'title']: metric.metricId });
-    } else if (source.lookup === 'geography_document') {
-      doc = await collection.findOne({ [source.geographyField || 'title']: resolvedGeography.value });
-    } else {
-      doc = await collection.findOne({ [source.metricField || 'title']: metric.metricId });
-    }
-
-    if (!doc) return null;
-
-    const pathSegments = source.valuePath || [metric.metricId];
-    const candidate = safeGet(doc, pathSegments);
-    const values = [];
-
-    if (Array.isArray(candidate)) {
-      candidate.forEach(entry => {
-        if (entry && typeof entry.value === 'number') {
-          values.push({ year: entry.year || entry.date || null, value: entry.value });
-        }
-      });
-    } else if (candidate && typeof candidate === 'object') {
-      Object.entries(candidate).forEach(([key, value]) => {
-        const year = Number(key);
-        if (!Number.isNaN(year) && typeof value === 'number') {
-          values.push({ year, value });
-        }
-      });
-    }
-
-    if (values.length === 0) {
-      return null;
-    }
-
-    values.sort((a, b) => (a.year || 0) - (b.year || 0));
-
-    return {
-      metricId: metric.metricId,
-      geography: resolvedGeography,
-      unit: metric.unit || this.catalog.inferUnit(metric.metricId),
-      values
-    };
-  }
-
-  async resolveGeography(geo) {
-    if (!geo || !geo.type || !geo.value) return null;
-    if (geo.type === 'state') {
-      const state = this.catalog.resolveState(geo.value) || geo.value;
-      return { type: 'state', value: state };
-    }
-    if (geo.type === 'county') {
-      let state = this.catalog.resolveState(geo.stateContext) || geo.stateContext;
-      if (!state) {
-        state = await this.detectCountyState(geo.value);
-      }
-      if (!state) {
-        return null;
-      }
-      return {
-        type: 'county',
-        value: geo.value.replace(COUNTY_NAME_SUFFIX, '').trim(),
-        stateContext: state
-      };
-    }
-    if (geo.type === 'national') {
-      return { type: 'national', value: geo.value };
-    }
-    return { type: geo.type, value: geo.value };
-  }
-
-  async findCountyDocument(resolvedGeography, collection, metric) {
-    const countyName = resolvedGeography.value;
-    const variations = [
-      countyName,
-      `${countyName} County`,
-      countyName.toUpperCase(),
-      countyName.toLowerCase()
-    ];
-
-    for (const nameVariant of variations) {
-      const doc = await collection.findOne({ title: nameVariant });
-      if (doc) {
-        return { doc, field: metric.metricId, match: nameVariant };
-      }
-    }
-
-    const flexiblePattern = countyName
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/'/g, "['’`]")
-      .replace(/ñ/g, '[nñ]')
-      .replace(/á/g, '[aá]')
-      .replace(/é/g, '[eé]')
-      .replace(/í/g, '[ií]')
-      .replace(/ó/g, '[oó]')
-      .replace(/ú/g, '[uú]');
-
-    const regex = new RegExp(flexiblePattern, 'i');
-    const fuzzyDoc = await collection.findOne({ title: regex });
-    if (fuzzyDoc) {
-      return { doc: fuzzyDoc, field: metric.metricId, match: fuzzyDoc.title };
-    }
-
-    return null;
-  }
-
-  async detectCountyState(countyName) {
-    const normalized = normalizeName(countyName);
-    if (this.countyStateCache.has(normalized)) {
-      return this.countyStateCache.get(normalized);
-    }
-    if (this.failedCountyLookups.has(normalized)) {
-      return null;
-    }
-
-    const base = countyName.replace(/ county$/i, '').trim();
-    const variations = Array.from(
-      new Set(
-        [
-          countyName,
-          `${base} County`,
-          base,
-          countyName.toUpperCase(),
-          countyName.toLowerCase()
-        ]
-          .map(name => name && name.trim())
-          .filter(Boolean)
-      )
-    );
-
-    for (const state of this.catalog.states) {
-      const dbName = this.catalog.formatStateDatabaseName(state);
-      try {
-        const collection = this.mongoClient.db(dbName).collection(COUNTY_COLLECTION);
-        for (const variant of variations) {
-          const doc = await collection.findOne({ title: variant });
-          if (doc) {
-            this.countyStateCache.set(normalized, state);
-            return state;
-          }
-        }
-        const flexiblePattern = base
-          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          .replace(/'/g, "['’`]")
-          .replace(/ñ/g, '[nñ]')
-          .replace(/á/g, '[aá]')
-          .replace(/é/g, '[eé]')
-          .replace(/í/g, '[ií]')
-          .replace(/ó/g, '[oó]')
-          .replace(/ú/g, '[uú]');
-        const regex = new RegExp(flexiblePattern, 'i');
-        const fuzzy = await collection.findOne({ title: regex });
-        if (fuzzy) {
-          this.countyStateCache.set(normalized, state);
-          return state;
-        }
-      } catch (error) {
-        // ignore inaccessible databases
-      }
-    }
-
-    this.failedCountyLookups.add(normalized);
-    return null;
-  }
-
-  buildChartData(plan, metrics) {
-    if (!metrics || metrics.length === 0) return null;
-    const focusMetric = plan.chart?.focusMetric || metrics[0].metricId;
-    const filtered = metrics.filter(item => item.metricId === focusMetric);
-    if (filtered.length === 0) return null;
-
-    return {
-      metricId: focusMetric,
-      unit: filtered[0].unit,
-      type: plan.chart?.type || 'bar',
-      values: filtered.map(item => ({
-        geography: `${item.geography.value}${item.geography.stateContext ? `, ${item.geography.stateContext}` : ''}`,
-        year: item.year,
-        value: item.value
-      }))
-    };
-  }
-}
-
 class WriterService {
-  constructor({ openai, model = process.env.OPENAI_WRITER_MODEL || 'gpt-4o-mini' }) {
+  constructor({ openai, model = process.env.OPENAI_WRITER_MODEL || 'gpt-4o' }) {
     this.openai = openai;
     this.model = model;
-    this.lastUsage = null;
   }
 
-  groupMetricsByGeography(metrics = []) {
-    const map = new Map();
-    metrics.forEach(item => {
-      const geo = item.geography || {};
-      const label = geo.type === 'county' && geo.stateContext
-        ? `${geo.value}, ${geo.stateContext}`
-        : geo.value || 'Requested area';
-      if (!map.has(label)) {
-        map.set(label, []);
-      }
-      map.get(label).push(item);
-    });
-    return Array.from(map.entries()).map(([geography, items]) => ({
-      geography,
-      metrics: items.map(metric => ({
-        metricId: metric.metricId,
-        label: metric.metricLabel || metric.metricId,
-        value: metric.value,
-        unit: metric.unit || null,
-        year: metric.year || null,
-        category: metric.category || null,
-        source: metric.source || {}
-      }))
-    }));
-  }
-
-  prepareWriterPayload(plan, execution, definitions) {
-    const chartRequested = plan.chart?.requested === true;
-    return {
-      intent: plan.intent,
-      chartSuggestion: chartRequested
-        ? {
-            type: plan.chart.type || 'bar',
-            focusMetric: plan.chart.focusMetric || execution?.chartData?.metricId || null
-          }
-        : null,
-      metricsByGeography: this.groupMetricsByGeography(execution?.metrics || []),
-      rankings: (execution?.rankings || []).map(rank => ({
-        metricId: rank.metricId,
-        unit: rank.unit || null,
-        direction: rank.direction,
-        values: rank.values || [],
-        source: rank.source || {}
-      })),
-      trends: execution?.trends || [],
-      missing: execution?.missing || [],
-      notes: execution?.notes || [],
-      definitions: definitions || []
-    };
-  }
-
-  async compose({ plan, execution, definitions }) {
-    const writerPayload = this.prepareWriterPayload(plan, execution, definitions);
-
+  async compose({ userMessage, statements }) {
     const systemPrompt = `
-You are the narration module for TransitViz. Write a concise, user-friendly answer grounded ONLY in the provided MongoDB results.
-
-Style and content rules:
-- Explain what the metrics mean for transit accessibility; avoid dumping raw lists.
-- Each numeric statement must include its value, unit (when available), and the year. If the year is missing, say "latest available year".
-- Provide a brief source hint in parentheses using natural language (for example "(AverageValues collection)") without prefacing it with "source:".
-- Do not fabricate numbers or perform new calculations.
-- Mention when data or definitions are unavailable.
-- Reference chart suggestions only if present.
-- End with a reminder that users can open “Show details” for metadata.`;
+You are a helpful Transit & Equity Chatbot.
+Answer the user's question using ONLY the statements provided below.
+- Combine them into a natural, conversational answer.
+- Interpret the data to explain what it means (e.g., is the accessibility good or bad?) rather than just listing numbers.
+- Do NOT invent numbers or external facts.
+- DATA MISSING RULES:
+  - Generally, if statements mention "Data not found", explicitly state we do not have data for that metric/location.
+  - EXCEPTION: If "Percent Access" is reported as missing/None, interpret this as meaning there is **no transit access** for that location.`;
 
     const userPrompt = `
-Planner intent: ${plan.intent}
+User Question:
+${userMessage}
 
-Payload to narrate:
-${JSON.stringify(writerPayload, null, 2)}
-
-Compose the final response following the style rules.`;
+Facts from Database:
+${statements.join('\n')}
+`;
 
     const completion = await this.openai.chat.completions.create({
       model: this.model,
@@ -1414,94 +388,22 @@ Compose the final response following the style rules.`;
       ]
     });
 
-    // Store usage for cost calculation
-    this.lastUsage = completion.usage;
-
-    return completion.choices[0]?.message?.content?.trim() || 'I could not generate a response.';
+    return completion.choices[0]?.message?.content?.trim() || FALLBACK_MESSAGE;
   }
 }
 
-class ConversationService {
+export default class ChatbotService {
   constructor({ mongoClient }) {
     this.mongoClient = mongoClient;
-    this.collection = null;
-  }
-
-  async ensureCollection() {
-    if (this.collection) return this.collection;
-    const db = this.mongoClient.db('BotData');
-    this.collection = db.collection('Data');
-    return this.collection;
-  }
-
-  async saveConversation({ username, question, response, cost, metadata = {} }) {
-    try {
-      if (!username) {
-        console.warn('[Chatbot] Cannot save conversation: username is missing');
-        return null;
-      }
-
-      const coll = await this.ensureCollection();
-      
-      // Create conversation entry
-      const conversationEntry = {
-        question,
-        response,
-        cost: cost || 0,
-        timestamp: new Date(),
-        ...metadata
-      };
-
-      // Check if document with this username exists
-      const existingDoc = await coll.findOne({ title: username });
-
-      if (existingDoc) {
-        // Update existing document - append to conversations array
-        await coll.updateOne(
-          { title: username },
-          { 
-            $push: { conversations: conversationEntry },
-            $set: { lastUpdated: new Date() }
-          }
-        );
-        return existingDoc._id.toString();
-      } else {
-        // Create new document
-        const newDoc = {
-          title: username,
-          conversations: [conversationEntry],
-          createdAt: new Date(),
-          lastUpdated: new Date()
-        };
-        const result = await coll.insertOne(newDoc);
-        return result.insertedId?.toString();
-      }
-    } catch (error) {
-      console.warn('[Chatbot] Failed to save conversation:', error.message);
-      return null;
-    }
-  }
-}
-
-class ChatbotService {
-  constructor({ mongoClient }) {
-    this.mongoClient = mongoClient;
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || process.env.OPEN_AI_KEY
-    });
+    this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || process.env.OPEN_AI_KEY });
     if (!this.openai.apiKey) {
       throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY or OPEN_AI_KEY.');
     }
     this.catalog = new SchemaCatalog({ mongoClient });
     this.planner = new PlannerService({ openai: this.openai, catalog: this.catalog });
-    this.executor = new ExecutionService({ mongoClient, catalog: this.catalog });
-    this.definitionService = new DefinitionService({ mongoClient, catalog: this.catalog });
     this.writer = new WriterService({ openai: this.openai });
-    this.conversationService = new ConversationService({ mongoClient });
     this.initialized = false;
     this.initializing = null;
-    this.lastPlannerUsage = null;
-    this.lastWriterUsage = null;
   }
 
   async initialize() {
@@ -1518,128 +420,615 @@ class ChatbotService {
     await this.initializing;
   }
 
-  async handleChat({ user, message, context = {} }) {
+  async handleChat({ message }) {
     if (!message || !message.trim()) {
-      return {
-        success: false,
-        narrative: 'Please provide a question for the chatbot.',
-        showDetails: null
-      };
+      return { success: false, narrative: 'Please provide a question for the chatbot.' };
     }
 
     await this.initialize();
 
-    const started = performance.now();
-    let plan;
-    let execution = null;
-    let definitions = [];
-    let narrative = '';
-    let error = null;
-
     try {
-      plan = await this.planner.plan(message, context);
+      const plan = await this.planner.plan(message);
 
-      execution = await this.executor.execute(plan);
-
-      if (plan.needsDefinition) {
-        definitions = await this.definitionService.lookup(plan.definitionTerms || []);
+      if (plan.status !== 'valid') {
+        return { success: true, narrative: FALLBACK_MESSAGE };
       }
 
-      narrative = await this.writer.compose({
-        userMessage: message,
-        plan,
-        execution,
-        definitions
-      });
-    } catch (err) {
-      error = err;
-      console.error('[Chatbot] Error handling chat:', err);
-      narrative = 'Sorry, I encountered an error while processing your request. The team has been notified.';
-    }
+      const { assignments, errors } = await this.buildAssignments(plan);
 
-    const showDetails = {
-      intent: plan?.intent,
-      geographies: plan?.geographies || [],
-      metrics: plan?.metrics?.map(m => ({
-        metricId: m.metricId,
-        unit: m.unit || this.catalog.inferUnit(m.metricId),
-        source: m.source
-      })),
-      execution: {
-        durationMs: execution?.metadata?.executionMs || 0,
-        missing: execution?.missing || [],
-        notes: execution?.notes || []
-      },
-      definitions: definitions?.map(def => ({
-        term: def.term,
-        source: def.source
-      }))
-    };
+      const statements = await this.runPython(plan.code_snippet, assignments);
 
-    // Calculate cost from OpenAI API usage
-    const plannerUsage = this.planner.lastUsage;
-    const writerUsage = this.writer.lastUsage;
-    const totalCost = this.calculateCost(plannerUsage, writerUsage);
+      if (statements.error) {
+        return { success: false, narrative: FALLBACK_MESSAGE };
+      }
 
-    // Save conversation to BotData.Data collection
-    const username = user?.username || null;
-    if (username) {
-      await this.conversationService.saveConversation({
-        username,
-        question: message,
-        response: narrative,
-        cost: totalCost,
-        metadata: {
-          intent: plan?.intent,
-          durationMs: performance.now() - started,
-          plannerUsage,
-          writerUsage,
-          error: error ? { message: error.message } : null
+      const narrative = await this.writer.compose({ userMessage: message, statements: statements.lines });
+
+      return {
+        success: true,
+        narrative,
+        showDetails: {
+          plan,
+          assignments,
+          pythonOutput: statements.lines
         }
-      });
+      };
+    } catch (err) {
+      return { success: false, narrative: FALLBACK_MESSAGE };
     }
+  }
 
-    return {
-      success: !error,
-      narrative,
-      plan,
-      data: execution,
-      definitions,
-      showDetails
+  async buildAssignments(plan) {
+    const assignments = {};
+    const errors = [];
+
+    const setVar = (key, value) => {
+      if (!key) return;
+      assignments[key] = value;
     };
-  }
 
-  // Calculate cost from OpenAI API usage
-  calculateCost(plannerUsage, writerUsage) {
-    // Pricing for gpt-4o-mini (as of 2024)
-    // Input: $0.15 per 1M tokens
-    // Output: $0.60 per 1M tokens
-    const INPUT_COST_PER_MILLION = 0.15;
-    const OUTPUT_COST_PER_MILLION = 0.60;
+    const resolveState = state => this.catalog.resolveState(state) || state;
 
-    let totalCost = 0;
-
-    if (plannerUsage) {
-      const plannerInputCost = (plannerUsage.prompt_tokens / 1000000) * INPUT_COST_PER_MILLION;
-      const plannerOutputCost = (plannerUsage.completion_tokens / 1000000) * OUTPUT_COST_PER_MILLION;
-      totalCost += plannerInputCost + plannerOutputCost;
+    // States
+    for (const st of plan.states) {
+      if (!st?.var || !st.name) continue;
+      if (st.name === '__ALL__') {
+        setVar(st.var, this.catalog.states);
+      } else {
+        const resolved = resolveState(st.name);
+        setVar(st.var, resolved);
+      }
     }
 
-    if (writerUsage) {
-      const writerInputCost = (writerUsage.prompt_tokens / 1000000) * INPUT_COST_PER_MILLION;
-      const writerOutputCost = (writerUsage.completion_tokens / 1000000) * OUTPUT_COST_PER_MILLION;
-      totalCost += writerInputCost + writerOutputCost;
+    // Counties
+    for (const ct of plan.counties) {
+      if (!ct?.var || !ct.state || !ct.name) continue;
+      const stateName = resolveState(ct.state);
+      if (!stateName) {
+        errors.push({ type: 'state_not_found', entry: ct });
+        continue;
+      }
+
+      if (ct.name === '__ALL__') {
+        const counties = await this.listCounties(stateName);
+        setVar(ct.var, counties);
+      } else {
+        setVar(ct.var, cleanCountyForTransit(ct.name));
+      }
     }
 
-    return totalCost;
+    // Transit - state
+    for (const m of plan.transit_state) {
+      if (!m?.var || !m.state || !m.metric) continue;
+      
+      if (m.state === '__ALL__') {
+         const values = await this.fetchTransitStateAll(m.metric);
+         setVar(m.var, values);
+      } else {
+         const stateName = resolveState(m.state);
+         if (!stateName) {
+           errors.push({ type: 'state_not_found', entry: m });
+           continue;
+         }
+         const value = await this.fetchTransitState(stateName, m.metric);
+         setVar(m.var, value);
+      }
+    }
+
+    // Transit - county
+    for (const m of plan.transit_county) {
+      if (!m?.var || !m.state || !m.county || !m.metric) continue;
+      const stateName = resolveState(m.state);
+      if (!stateName) {
+        errors.push({ type: 'state_not_found', entry: m });
+        continue;
+      }
+      if (m.county === '__ALL__') {
+        const counties = assignments[plan.counties.find(c => c.state === m.state && c.name === '__ALL__')?.var] || [];
+        const values = await this.fetchTransitCountyAll(stateName, counties, m.metric);
+        setVar(m.var, values);
+      } else {
+        const value = await this.fetchTransitCounty(stateName, m.county, m.metric);
+        setVar(m.var, value);
+      }
+    }
+
+    // Frequency - state
+    for (const m of plan.frequency_state) {
+      if (!m?.var || !m.state || !m.metric || !m.bin) continue;
+      
+      if (m.state === '__ALL__') {
+        const values = await this.fetchFrequencyStateAll(m.metric, m.bin);
+        setVar(m.var, values);
+      } else {
+        const stateName = resolveState(m.state);
+        const value = await this.fetchFrequencyState(stateName, m.metric, m.bin);
+        setVar(m.var, value);
+      }
+    }
+
+    // Frequency - county
+    for (const m of plan.frequency_county) {
+      if (!m?.var || !m.state || !m.county || !m.metric || !m.bin) continue;
+      const stateName = resolveState(m.state);
+      if (m.county === '__ALL__') {
+        const counties = assignments[plan.counties.find(c => c.state === m.state && c.name === '__ALL__')?.var] || [];
+        const values = await this.fetchFrequencyCountyAll(stateName, counties, m.metric, m.bin);
+        setVar(m.var, values);
+      } else {
+        const value = await this.fetchFrequencyCounty(stateName, m.county, m.metric, m.bin);
+        setVar(m.var, value);
+      }
+    }
+
+    // Equity - state
+    for (const m of plan.equity_state) {
+      if (!m?.var || !m.state || !m.metric) continue;
+      
+      if (m.state === '__ALL__') {
+        const values = await this.fetchEquityStateAll(m.metric);
+        setVar(m.var, values);
+      } else {
+        const stateName = resolveState(m.state);
+        const value = await this.fetchEquityState(stateName, m.metric);
+        setVar(m.var, value);
+      }
+    }
+
+    // Equity - county
+    for (const m of plan.equity_county) {
+      if (!m?.var || !m.state || !m.county || !m.metric) continue;
+      const stateName = resolveState(m.state);
+      if (m.county === '__ALL__') {
+        const counties = assignments[plan.counties.find(c => c.state === m.state && c.name === '__ALL__')?.var] || [];
+        const values = await this.fetchEquityCountyAll(stateName, counties, m.metric);
+        setVar(m.var, values);
+      } else {
+        const value = await this.fetchEquityCounty(stateName, m.county, m.metric);
+        setVar(m.var, value);
+      }
+    }
+
+    return { assignments, errors };
   }
 
-  async cleanup() {
-    // No persistent resources beyond shared Mongo client.
-    this.initialized = false;
+  async listCounties(state) {
+    const dbName = this.catalog.formatStateDatabaseName(state);
+    if (!dbName) return [];
+    try {
+      const docs = await this.mongoClient
+        .db(dbName)
+        .collection(TRANSIT_COUNTY_COLLECTION)
+        .find({}, { projection: { title: 1 }, limit: 1000 })
+        .toArray();
+      const list = docs.map(d => d?.title).filter(Boolean).map(cleanCountyForTransit);
+      return list;
+    } catch (err) {
+      return [];
+    }
+  }
+
+  async fetchTransitStateAll(metric) {
+    const db = this.mongoClient.db(DEFAULT_TRANSIT_DB);
+    
+    // Fetch the document for this metric
+    // Document structure: { title: "Initial Wait Time", "Texas": 12.5, "California": 15.2, ... }
+    let doc = await db.collection(TRANSIT_STATE_COLLECTION).findOne({ title: metric });
+    
+    if (!doc) {
+      doc = await db.collection(TRANSIT_STATE_COLLECTION).findOne({ title: { $regex: `^${metric}$`, $options: 'i' } });
+    }
+
+    if (!doc) return this.catalog.states.map(() => null);
+
+    // Map states to values using findMetricValue logic
+    const values = this.catalog.states.map(state => {
+      const val = findMetricValue(doc, state);
+      const num = typeof val === 'string' ? parseFloat(val) : val;
+      return typeof num === 'number' && !isNaN(num) ? num : null;
+    });
+    
+    return values;
+  }
+
+  async fetchTransitState(state, metric) {
+    const db = this.mongoClient.db(DEFAULT_TRANSIT_DB);
+    
+    // SCHEMA CORRECTION: In AverageValues, 'title' is the METRIC name, not the state name.
+    // The document looks like: { title: "Initial Wait Time...", "Texas": 12.5, "California": 15.2, ... }
+    
+    // Try exact metric name first
+    let doc = await db.collection(TRANSIT_STATE_COLLECTION).findOne({ title: metric });
+    
+    // If not found, try fuzzy match on title
+    if (!doc) {
+      doc = await db.collection(TRANSIT_STATE_COLLECTION).findOne({ title: { $regex: `^${metric}$`, $options: 'i' } });
+    }
+
+    if (!doc) {
+      return null;
+    }
+
+    // Now look for the state value inside that document
+    // We need to match the state name key (e.g. "Texas", "Alabama", etc.)
+    const val = findMetricValue(doc, state);
+    
+    const num = typeof val === 'string' ? parseFloat(val) : val;
+    return typeof num === 'number' && !isNaN(num) ? num : null;
+  }
+
+  async fetchTransitCounty(state, county, metric) {
+    const dbName = this.catalog.formatStateDatabaseName(state);
+    if (!dbName) return null;
+    const db = this.mongoClient.db(dbName);
+    const doc = await db.collection(TRANSIT_COUNTY_COLLECTION).findOne({ title: cleanCountyForTransit(county) });
+    if (!doc) {
+      return null;
+    }
+
+    // SCHEMA CORRECTION: Handle "Average " prefix
+    const NO_PREFIX_METRICS = [
+      'Transfers',
+      'Transit:Driving', 
+      'Transit: Driving', // Handle potential spacing diffs
+      'In-Vehicle:Out-of-Vehicle',
+      'Sample Size',
+      'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)'
+    ];
+
+    // Determine the key to look for
+    let searchKey = metric;
+    
+    // If it's NOT in the exception list, prepend "Average "
+    // (Check loosely to avoid double prefixing if the prompt already had it)
+    const isException = NO_PREFIX_METRICS.some(m => m.toLowerCase() === metric.toLowerCase());
+    if (!isException && !metric.toLowerCase().startsWith('average ')) {
+      searchKey = `Average ${metric}`;
+    }
+
+    let val = findMetricValue(doc, searchKey);
+    
+    // Fallback: if Average prefix didn't work, try raw metric
+    if (val === null && searchKey !== metric) {
+       val = findMetricValue(doc, metric);
+    }
+    
+    // SCALING FIX: County DBs store Percent Access as 0-1.
+    if (val !== null && metric.toLowerCase().includes('percent access')) {
+       const num = typeof val === 'string' ? parseFloat(val) : val;
+       if (typeof num === 'number' && !isNaN(num)) {
+         // If it's clearly a ratio (<= 1.0), multiply by 100.
+         // (Safe guard against double scaling if DB changes)
+         if (Math.abs(num) <= 1.0) return num * 100;
+         return num;
+       }
+    }
+
+    const num = typeof val === 'string' ? parseFloat(val) : val;
+    return typeof num === 'number' && !isNaN(num) ? num : null;
+  }
+
+  async fetchTransitCountyAll(state, counties, metric) {
+    const dbName = this.catalog.formatStateDatabaseName(state);
+    if (!dbName) return [];
+    const db = this.mongoClient.db(dbName);
+    const docs = await db.collection(TRANSIT_COUNTY_COLLECTION).find({ title: { $in: counties } }).toArray();
+    
+    // Determine the key (same logic as single fetch)
+    const NO_PREFIX_METRICS = [
+      'Transfers',
+      'Transit:Driving',
+      'Transit: Driving',
+      'In-Vehicle:Out-of-Vehicle',
+      'Sample Size',
+      'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)'
+    ];
+    let searchKey = metric;
+    const isException = NO_PREFIX_METRICS.some(m => m.toLowerCase() === metric.toLowerCase());
+    if (!isException && !metric.toLowerCase().startsWith('average ')) {
+      searchKey = `Average ${metric}`;
+    }
+
+    const map = new Map();
+    docs.forEach(d => {
+      if (d?.title) {
+        let val = findMetricValue(d, searchKey);
+        if (val === null && searchKey !== metric) {
+          val = findMetricValue(d, metric);
+        }
+        
+        const num = typeof val === 'string' ? parseFloat(val) : val;
+        
+        // SCALING FIX: County DBs store Percent Access as 0-1.
+        if (metric.toLowerCase().includes('percent access')) {
+           if (typeof num === 'number' && !isNaN(num)) {
+             if (Math.abs(num) <= 1.0) map.set(d.title, num * 100);
+             else map.set(d.title, num);
+             return;
+           }
+        }
+
+        if (typeof num === 'number' && !isNaN(num)) map.set(d.title, num);
+      }
+    });
+    return counties.map(c => (map.has(c) ? map.get(c) : null));
+  }
+
+  async fetchFrequencyStateAll(metricLabel, bin) {
+    const freq = this.catalog.findFrequencyMetric(metricLabel);
+    if (!freq) return this.catalog.states.map(() => null);
+    
+    const db = this.mongoClient.db(DEFAULT_TRANSIT_DB);
+    // Fetch all docs for known states
+    // The collection has docs { title: "StateName", bin: val }
+    const docs = await db.collection(freq.collection).find({ 
+      title: { $in: this.catalog.states.map(s => new RegExp(`^${s}$`, 'i')) } 
+    }).toArray();
+    
+    const map = new Map();
+    docs.forEach(d => {
+      if (d?.title) {
+        const val = d[bin];
+        const num = typeof val === 'string' ? parseFloat(val) : val;
+        // Use normalized state name for mapping
+        const normalized = normalizeName(d.title);
+        if (typeof num === 'number' && !isNaN(num)) map.set(normalized, num);
+      }
+    });
+
+    return this.catalog.states.map(state => {
+      const key = normalizeName(state);
+      return map.has(key) ? map.get(key) : null;
+    });
+  }
+
+  async fetchFrequencyState(state, metricLabel, bin) {
+    const freq = this.catalog.findFrequencyMetric(metricLabel);
+    if (!freq) return null;
+    const db = this.mongoClient.db(DEFAULT_TRANSIT_DB);
+    const doc = await db.collection(freq.collection).findOne({ title: { $regex: `^${state}$`, $options: 'i' } });
+    if (!doc) return null;
+    const val = doc[bin];
+    const num = typeof val === 'string' ? parseFloat(val) : val;
+    return typeof num === 'number' && !isNaN(num) ? num : null;
+  }
+
+  async fetchFrequencyCounty(state, county, metricLabel, bin) {
+    const freq = this.catalog.findFrequencyMetric(metricLabel);
+    const dbName = this.catalog.formatStateDatabaseName(state);
+    if (!freq || !dbName) return null;
+    const db = this.mongoClient.db(dbName);
+    const doc = await db.collection(freq.collection).findOne({ title: cleanCountyForTransit(county) });
+    if (!doc) return null;
+
+    // FIX: Map '30-60' bin to '> 30 < 60' for state databases where naming differs
+    let val = doc[bin];
+    if (val === undefined && bin === '30-60') {
+      val = doc['> 30 < 60'];
+    }
+
+    const num = typeof val === 'string' ? parseFloat(val) : val;
+    // Frequency in County DB is 0-1 ratio, scale to percentage
+    if (typeof num === 'number' && !isNaN(num)) {
+       if (Math.abs(num) <= 1.0) return num * 100;
+       return num;
+    }
+    return null;
+  }
+
+  async fetchFrequencyCountyAll(state, counties, metricLabel, bin) {
+    const freq = this.catalog.findFrequencyMetric(metricLabel);
+    const dbName = this.catalog.formatStateDatabaseName(state);
+    if (!freq || !dbName) return [];
+    const db = this.mongoClient.db(dbName);
+    const docs = await db.collection(freq.collection).find({ title: { $in: counties } }).toArray();
+    const map = new Map();
+    docs.forEach(d => {
+      if (d?.title) {
+        // FIX: Map '30-60' bin to '> 30 < 60'
+        let val = d[bin];
+        if (val === undefined && bin === '30-60') {
+          val = d['> 30 < 60'];
+        }
+
+        const num = typeof val === 'string' ? parseFloat(val) : val;
+        // Frequency in County DB is 0-1 ratio, scale to percentage
+        if (typeof num === 'number' && !isNaN(num)) {
+          if (Math.abs(num) <= 1.0) map.set(d.title, num * 100);
+          else map.set(d.title, num);
+        }
+      }
+    });
+    return counties.map(c => (map.has(c) ? map.get(c) : null));
+  }
+
+  async fetchEquityStateAll(metric) {
+    const dbName = this.catalog.findEquityDb(metric);
+    if (!dbName) return this.catalog.states.map(() => null);
+    
+    // State Level collection uses 'NAME' or 'title' for State Name
+    const query = { 
+      $or: [
+        { title: { $in: this.catalog.states } },
+        { NAME: { $in: this.catalog.states } }
+      ]
+    };
+
+    const docs = await this.mongoClient.db(dbName).collection('State Level').find(query).toArray();
+    
+    const map = new Map();
+    docs.forEach(d => {
+      const name = d.title || d.NAME;
+      if (name && d.data) {
+        const val = d.data[metric];
+        const num = typeof val === 'string' ? parseFloat(val) : val;
+        const normalized = normalizeName(name);
+        if (typeof num === 'number' && !isNaN(num)) map.set(normalized, num);
+      }
+    });
+
+    return this.catalog.states.map(state => {
+      const key = normalizeName(state);
+      return map.has(key) ? map.get(key) : null;
+    });
+  }
+
+  async fetchEquityState(state, metric) {
+    const dbName = this.catalog.findEquityDb(metric);
+    if (!dbName) return null;
+    
+    // SCHEMA CORRECTION: Use 'title' field for State Name
+    const doc = await this.mongoClient.db(dbName).collection('State Level').findOne({ title: state });
+    
+    if (!doc || !doc.data) {
+      // Try fuzzy match if exact fail
+      const fuzzyDoc = await this.mongoClient.db(dbName).collection('State Level').findOne({ title: { $regex: `^${state}$`, $options: 'i' } });
+       if (!fuzzyDoc || !fuzzyDoc.data) {
+          return null;
+       }
+       // use fuzzy doc
+       const val = fuzzyDoc.data[metric];
+       const num = typeof val === 'string' ? parseFloat(val) : val;
+       return typeof num === 'number' && !isNaN(num) ? num : null;
+    }
+    
+    const val = doc.data[metric];
+    const num = typeof val === 'string' ? parseFloat(val) : val;
+    return typeof num === 'number' && !isNaN(num) ? num : null;
+  }
+
+  async fetchEquityCounty(state, county, metric) {
+    const dbName = this.catalog.findEquityDb(metric);
+    if (!dbName) return null;
+    
+    // SCHEMA CORRECTION: 
+    // 1. Match 'State' field for state name
+    // 2. Match 'title' field for county name (which has "County" suffix)
+    
+    const countyTitle = cleanCountyForEquity(county); // "Anderson County"
+    const normalizedState = (state || '').replace(/\s+/g, '_');
+    const stateRegex = new RegExp(`^${normalizedState.replace(/_/g, '[ _]')}$`, 'i');
+    
+    const query = {
+      title: countyTitle,
+      $or: [
+        { State: normalizedState },
+        { state: normalizedState },
+        { State: stateRegex },
+        { state: stateRegex }
+      ]
+    };
+
+    const doc = await this.mongoClient
+      .db(dbName)
+      .collection('County Level')
+      .findOne(query);
+
+    if (!doc || !doc.data) {
+      return null;
+    }
+    const val = doc.data[metric];
+    const num = typeof val === 'string' ? parseFloat(val) : val;
+    return typeof num === 'number' && !isNaN(num) ? num : null;
+  }
+
+  async fetchEquityCountyAll(state, counties, metric) {
+    const dbName = this.catalog.findEquityDb(metric);
+    if (!dbName) return [];
+    
+    const cleanedCounties = counties.map(cleanCountyForEquity);
+    const normalizedState = (state || '').replace(/\s+/g, '_');
+    const stateRegex = new RegExp(`^${normalizedState.replace(/_/g, '[ _]')}$`, 'i');
+    
+    // Use the same schema corrections for bulk fetch
+    const query = {
+      title: { $in: cleanedCounties },
+      $or: [
+        { State: normalizedState },
+        { state: normalizedState },
+        { State: stateRegex },
+        { state: stateRegex }
+      ]
+    };
+
+    const docs = await this.mongoClient
+      .db(dbName)
+      .collection('County Level')
+      .find(query)
+      .toArray();
+      
+    const map = new Map();
+    docs.forEach(d => {
+      if (d?.title && d.data) {
+        const val = d.data[metric];
+        const num = typeof val === 'string' ? parseFloat(val) : val;
+        if (typeof num === 'number' && !isNaN(num)) {
+          // Store by uppercase key WITHOUT " County" suffix to match input list
+          // "Anderson County" -> "ANDERSON"
+          const key = d.title.replace(/ county$/i, '').trim().toUpperCase();
+          map.set(key, num);
+        }
+      }
+    });
+    
+    // Match using cleanCountyForTransit (uppercase) logic since that's our base list format
+    return counties.map(c => {
+      const key = c.toUpperCase();
+      return map.has(key) ? map.get(key) : null;
+    });
+  }
+
+  async runPython(codeSnippet, assignments) {
+    if (!codeSnippet || !codeSnippet.trim()) {
+      return { lines: ['No code_snippet provided'], error: false };
+    }
+
+    const forbidden = ['import ', '__', 'exec', 'eval', 'open(', 'subprocess', 'os.', 'sys.', 'socket', 'requests', 'http'];
+    const lower = codeSnippet.toLowerCase();
+    if (forbidden.some(w => lower.includes(w))) {
+      return { lines: ['Code execution skipped: disallowed content'], error: true };
+    }
+
+    const assigns = Object.entries(assignments).map(([k, v]) => {
+      if (Array.isArray(v)) {
+        const sanitized = v.map(item => {
+          if (item === null || item === undefined) return 'None';
+          if (typeof item === 'number') return item;
+          if (typeof item === 'string') return `'${item.replace(/'/g, "\\'")}'`;
+          return 'None';
+        });
+        return `${k} = [${sanitized.join(', ')}]`;
+      }
+      if (v && typeof v === 'object') {
+        const literalObj = JSON.stringify(v).replace(/\bnull\b/g, 'None');
+        return `${k} = ${literalObj}`;
+      }
+      if (typeof v === 'string') {
+        return `${k} = '${v.replace(/'/g, "\\'")}'`;
+      }
+      if (v === null || v === undefined) {
+        return `${k} = None`;
+      }
+      return `${k} = ${v}`;
+    });
+
+    const script = [...assigns, codeSnippet].join('\n');
+    const execResult = spawnSync('python', ['-c', script], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      killSignal: 'SIGKILL'
+    });
+
+    if (execResult.error || execResult.status !== 0) {
+      return {
+        lines: ['Code execution failed', execResult.stderr?.trim()].filter(Boolean),
+        error: true
+      };
+    }
+
+    const lines = (execResult.stdout || '').split('\n').map(l => l.trim()).filter(Boolean);
+    return { lines, error: false };
   }
 }
 
-export default ChatbotService;
-export const STATE_DB_TOKEN = STATE_DB_PLACEHOLDER;
-
+export const STATE_DB_TOKEN = '__STATE_DB__';

@@ -86,6 +86,20 @@ function normalizeAggregateKey(key = '') {
     .replace(/[\s._-]+/g, '');
 }
 
+function isDistrictOfColumbia(name = '') {
+  const normalized = normalizeAggregateKey(name);
+  return ['districtofcolumbia', 'washingtondc', 'dc'].includes(normalized);
+}
+
+function isSampleSizeMetric(name = '') {
+  return (name || '').toString().toLowerCase().includes('sample size');
+}
+
+function clampPercentAccessValue(value) {
+  if (!Number.isFinite(value)) return value;
+  return Math.min(value, 99.99);
+}
+
 function isAggregateKey(key = '') {
   const normalized = normalizeAggregateKey(key);
   return normalized && NATIONAL_AGGREGATE_KEYS.has(normalized);
@@ -130,15 +144,21 @@ function normalizeMetricTitle(title) {
 
 // Helper function to get metric group
 function getMetricGroup(metricName) {
-  if (metricName.includes('Percent Access')) return 'Access';
-  if (metricName.includes('Travel Time') || metricName.includes('Travel Duration') || 
-      metricName.includes('Driving Duration') || metricName.includes('Transit to Car') ||
-      metricName.includes('Transit: Driving') || metricName.includes('Transit to Driving')) return 'Travel Times';
-  if (metricName.includes('Transfer')) return 'Transfers';
-  if (metricName.includes('Initial')) return 'Initial Journey';
-  if (metricName.includes('Total')) return 'Total Journey';
-  if (metricName.includes('Vehicle')) return 'Vehicle Times';
-  if (metricName.includes('Sample Size')) return 'Sample Data';
+  const normalized = (metricName || '').toString();
+  if (normalized.includes('Percent Access')) return 'Access';
+  // Ensure all in-vehicle/out-of-vehicle metrics sit under Vehicle Times (red)
+  if (normalized.toLowerCase().includes('vehicle')) return 'Vehicle Times';
+  if (normalized.includes('Transfer')) return 'Transfers';
+  if (normalized.includes('Initial')) return 'Initial Journey';
+  if (normalized.includes('Total')) return 'Total Journey';
+  if (
+    normalized.includes('Travel Time') || normalized.includes('Travel Duration') ||
+    normalized.includes('Driving Duration') || normalized.includes('Transit to Car') ||
+    normalized.includes('Transit: Driving') || normalized.includes('Transit to Driving')
+  ) {
+    return 'Travel Times';
+  }
+  if (normalized.includes('Sample Size')) return 'Sample Data';
   return 'Other';
 }
 
@@ -378,6 +398,15 @@ let clusterState = {
   inputs: null
 };
 
+function setClusterInteractionLock(lockEnabled) {
+  if (usMap && usMap.svg) {
+    usMap.svg.selectAll('.state').style('cursor', lockEnabled ? 'default' : 'pointer');
+  }
+  if (countyMap && countyMap.svg) {
+    countyMap.svg.selectAll('.county').style('cursor', lockEnabled ? 'default' : 'pointer');
+  }
+}
+
 let clusterPanelOpening = false;
 let clusterPanelPlaceholder = null;
 let clusterPanelSource = 'map';
@@ -423,6 +452,7 @@ function resetClusterState(options = { refresh: true }) {
     legend: [],
     inputs: null
   };
+  setClusterInteractionLock(false);
   if (options.refresh) {
     updateMapColors();
     updateCountyMapColors();
@@ -641,6 +671,11 @@ function isTransitMetricIndependent(metricName) {
 }
 
 function getTransitMetricDirection(metricName) {
+  if (!metricName) return 'high_is_bad';
+  const lower = metricName.toLowerCase();
+  if (lower.includes('percent access')) {
+    return 'high_is_good';
+  }
   const logic = getMetricColorLogic(metricName);
   return logic === 'high_is_good' ? 'high_is_good' : 'high_is_bad';
 }
@@ -697,7 +732,8 @@ function extractEquityMetricsFromDocument(doc, category) {
 
   const metrics = {};
   Object.entries(source).forEach(([key, value]) => {
-    if (EQUITY_METADATA_FIELDS.includes(key)) {
+    const normalizedKey = typeof key === 'string' ? key.trim().toLowerCase() : '';
+    if (EQUITY_METADATA_FIELDS.includes(key) || normalizedKey === 'us') {
       return;
     }
     const numericValue = Number(value);
@@ -713,6 +749,8 @@ function buildEquityMetricStore(documents = [], category) {
   documents.forEach(doc => {
     const stateName = doc.title || doc.State || doc.state || doc.name;
     if (!stateName) return;
+    const normalizedState = typeof stateName === 'string' ? stateName.trim().toLowerCase() : '';
+    if (normalizedState === 'us' || normalizedState === 'united states') return;
     const metrics = extractEquityMetricsFromDocument(doc, category);
     Object.entries(metrics).forEach(([metricName, value]) => {
       if (!valuesByMetric[metricName]) {
@@ -775,6 +813,9 @@ function buildStateClusterDataset(transitMetric, equityCategory, equityMetric) {
 
   Object.entries(statesData).forEach(([stateId, meta]) => {
     const stateName = meta.name;
+    // Remove US from cluster analysis
+    if (stateName === 'United States' || stateId === 'us') return;
+    
     const transitValue = Number(transitDoc[stateName]);
     const equityValue = Number(equityValues[stateName]);
     if (isNaN(transitValue) || isNaN(equityValue)) {
@@ -887,15 +928,64 @@ function normalizeClusterPoints(points, transitMetric, equityMetric) {
     });
   }
 
-  const transitStats = computeValueStats(points, 'transitValue');
-  const equityStats = computeValueStats(points, 'equityValue');
+  // Build rank lookups so percentile-based normalization is stable and immune to outliers
+  const buildRankLookup = (key) => {
+    const sorted = points
+      .map(p => p[key])
+      .filter(v => v !== null && !Number.isNaN(v))
+      .sort((a, b) => a - b);
+
+    const n = sorted.length;
+    if (n === 0) {
+      return { lookup: new Map(), fallback: null };
+    }
+    if (n === 1) {
+      return { lookup: new Map([[sorted[0], 0.5]]), fallback: 0.5 };
+    }
+
+    const lookup = new Map();
+    let i = 0;
+    while (i < n) {
+      let j = i;
+      while (j + 1 < n && sorted[j + 1] === sorted[i]) {
+        j += 1;
+      }
+      // Average rank for ties so equal values get the same percentile
+      const rank = ((i + j) / 2) / (n - 1);
+      lookup.set(sorted[i], rank);
+      i = j + 1;
+    }
+
+    return { lookup, fallback: 0.5 };
+  };
+
+  const equityRanks = buildRankLookup('equityValue');
+  const transitRanks = buildRankLookup('transitValue');
   const transitDirection = getTransitMetricDirection(transitMetric);
   const equityDirection = getEquityMetricDirection(equityMetric);
 
   return points.map(point => ({
     ...point,
-    normX: normalizeValue(point.equityValue, equityStats, equityDirection === 'high_is_good'),
-    normY: normalizeValue(point.transitValue, transitStats, transitDirection === 'high_is_good')
+    normX: (() => {
+      const rank = equityRanks.lookup.get(point.equityValue);
+      const safeRank = rank !== undefined && rank !== null ? rank : equityRanks.fallback;
+      if (safeRank === null) return null;
+      return equityDirection === 'high_is_good' ? 1 - safeRank : safeRank;
+    })(),
+    normY: (() => {
+      // FIX: Explicitly handle No Access or Missing Data as Poor Service (1.0)
+      if (point.noAccess || point.transitValue === null || isNaN(point.transitValue)) {
+        return 1.0; // Worst rank (Poor Service)
+      }
+
+      const rank = transitRanks.lookup.get(point.transitValue);
+      const safeRank = rank !== undefined && rank !== null ? rank : transitRanks.fallback;
+      
+      // If we still don't have a valid rank, default to 0.5
+      if (safeRank === null) return 0.5;
+
+      return transitDirection === 'high_is_good' ? 1 - safeRank : safeRank;
+    })()
   }));
 }
 
@@ -903,8 +993,18 @@ function runKMeans(points, k = CLUSTER_K) {
   if (!points || points.length === 0) {
     return [];
   }
-  const centroids = [];
-  for (let i = 0; i < k; i++) {
+
+  // Deterministic initialization at the semantic corners to make clustering stable
+  const fixedCentroids = [
+    { x: 0, y: 0 }, // High Access (low need, good service)
+    { x: 0, y: 1 }, // Service Gap (low need, poor service)
+    { x: 1, y: 0 }, // Synergy (high need, good service)
+    { x: 1, y: 1 }  // Critical (high need, poor service)
+  ];
+
+  const centroids = fixedCentroids.slice(0, k);
+  // If k differs from 4, pad with random seeds to avoid crashes
+  while (centroids.length < k) {
     const seed = points[Math.floor(Math.random() * points.length)];
     centroids.push({
       x: seed.normX !== null ? seed.normX : Math.random(),
@@ -944,9 +1044,7 @@ function runKMeans(points, k = CLUSTER_K) {
       centroids.forEach((centroid, centroidIndex) => {
         const assignedPoints = points.filter((_, pointIndex) => assignments[pointIndex] === centroidIndex);
         if (assignedPoints.length === 0) {
-          const seed = points[Math.floor(Math.random() * points.length)];
-          centroid.x = seed.normX !== null ? seed.normX : Math.random();
-          centroid.y = seed.normY !== null ? seed.normY : Math.random();
+          // Keep empty clusters at their original fixed position to avoid randomness
           return;
         }
         centroid.x = assignedPoints.reduce((sum, point) => sum + (point.normX || 0), 0) / assignedPoints.length;
@@ -1263,6 +1361,7 @@ async function performClusterAnalysis({ level, transitMetric, equityCategory, eq
       })),
       inputs: { level, transitMetric, equityCategory, equityMetric }
     };
+    setClusterInteractionLock(true);
 
     if (level === 'state') {
       applyStateClusterColors();
@@ -1270,7 +1369,6 @@ async function performClusterAnalysis({ level, transitMetric, equityCategory, eq
       applyCountyClusterColors();
     }
   } catch (error) {
-    console.error('Cluster analysis error:', error);
     alert('Unable to run cluster analysis right now. Please try again.');
   }
 }
@@ -1482,7 +1580,6 @@ async function loadClusterEquityMetrics(category, options = {}) {
       metricSelect.value = metricSelect.options[0].value;
     }
   } catch (error) {
-    console.error('Failed to load equity metrics:', error);
     metricSelect.innerHTML = '<option value="">Unable to load metrics</option>';
   }
 }
@@ -1776,7 +1873,6 @@ function showInfoPopup(metricName, mapTypeOrInfoText) {
         content.innerHTML = info;
       })
       .catch(error => {
-        console.error('Error loading metric info:', error);
         content.innerHTML = '<p>Sorry, information for this metric is not available at the moment.</p>';
       });
   }
@@ -1847,9 +1943,9 @@ function formatMetricValue(metricName, value) {
   // Format numeric values to 2 decimal places
   let formattedValue = value;
   if (typeof value === 'number') {
-    formattedValue = formatNumberToTwoDecimals(value);
+    formattedValue = metricName.includes('Sample Size') ? Math.round(value) : formatNumberToTwoDecimals(value);
   } else if (typeof value === 'string' && !isNaN(Number(value))) {
-    formattedValue = formatNumberToTwoDecimals(Number(value));
+    formattedValue = metricName.includes('Sample Size') ? Math.round(Number(value)) : formatNumberToTwoDecimals(Number(value));
   }
   
   // Special handling for Percent Access metric
@@ -2179,7 +2275,11 @@ function formatNumberToTwoDecimals(value) {
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
   updateLeftPanel();
-  document.getElementById('mapViewTab').addEventListener('click', switchToMapView);
+  const mapTab = document.getElementById('mapViewTab');
+  if (mapTab && !mapTab.dataset.navbound) {
+    mapTab.addEventListener('click', handlePrimaryMapNav);
+    mapTab.dataset.navbound = 'true';
+  }
   document.getElementById('equityComparisonTab').addEventListener('click', switchToEquityComparison);
   
   // Add event listener for back button in equity comparison
@@ -2187,6 +2287,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const equityClusterBackBtn = document.getElementById('equityClusterBackBtn');
   if (equityClusterBackBtn) {
     equityClusterBackBtn.addEventListener('click', () => setEquityViewMode('scatter'));
+  }
+  const mapBackButton = document.getElementById('mapBackButton');
+  if (mapBackButton) {
+    mapBackButton.addEventListener('click', handleBackToState);
   }
   
   // New event listener: update equity metrics immediately when equity category changes
@@ -2197,6 +2301,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   initializeClusterAnalysisUI();
   initializeEquityViewToggle();
+  updateMapTabState();
+  updateScrollState();
+  updateMapBackButton();
 });
 
 function formatStateNameForDb(name) {
@@ -2208,17 +2315,14 @@ function formatStateNameForDb(name) {
 // Add this to ensure metric data is properly loaded
 function ensureMetricDataLoaded() {
   if (!allStateData || allStateData.length === 0) {
-    console.log("State data not loaded yet, retrying...");
     
     fetchAllStateDataForCountryAverage().then(() => {
       if (allStateData && allStateData.length > 0) {
-        console.log("State data loaded successfully on retry");
         selectedMetric = allStateData[0].title;
         updateMapColors();
         // Charts removed - replaced with chatbot
         updateDataPanel();
       } else {
-        console.error("Failed to load state data even after retry");
       }
     });
   }
@@ -2226,17 +2330,14 @@ function ensureMetricDataLoaded() {
 
 function ensureDataLoaded() {
   if (!allStateData || allStateData.length === 0) {
-    console.log("State data not loaded, loading now...");
     
     fetchAllStateDataForCountryAverage().then(() => {
       if (allStateData && allStateData.length > 0) {
-        console.log("State data loaded successfully");
         selectedMetric = allStateData[0].title;
         updateMapColors();
         // Charts removed - replaced with chatbot
         updateDataPanel();
       } else {
-        console.error("Failed to load state data");
       }
     });
     return false;
@@ -2248,7 +2349,11 @@ function ensureDataLoaded() {
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
   updateLeftPanel();
-  document.getElementById('mapViewTab').addEventListener('click', switchToMapView);
+  const mapTab = document.getElementById('mapViewTab');
+  if (mapTab && !mapTab.dataset.navbound) {
+    mapTab.addEventListener('click', handlePrimaryMapNav);
+    mapTab.dataset.navbound = 'true';
+  }
   document.getElementById('equityComparisonTab').addEventListener('click', switchToEquityComparison);
   
   // Add this line
@@ -2262,6 +2367,48 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Setup equity category hover menu
   setupEquityCategoryHoverMenu();
+  updateMapTabState();
+  updateScrollState();
+
+  // Handle browser back button
+  window.addEventListener('popstate', (event) => {
+    const state = event.state;
+    
+    if (state && state.view === 'equity') {
+      if (state.stateId && selectedState !== state.stateId) {
+        handleStateClick(state.stateId, false);
+        setTimeout(() => switchToEquityComparison(false), 400);
+      } else {
+        switchToEquityComparison(false);
+      }
+      return;
+    }
+    
+    if (state && state.view === 'county' && state.stateId && state.countyName) {
+      if (selectedState !== state.stateId) {
+        // Need to load state first, then county
+        // This is complex as it requires async loading. 
+        // For simplicity, we trigger state load and then try county if possible, 
+        // or just rely on user clicking county again.
+        // Or we can try to simulate the sequence.
+        handleStateClick(state.stateId, false); // false to suppress pushState
+        setTimeout(() => handleCountyClick(state.countyName, false), 500);
+      } else if (selectedCounty !== state.countyName) {
+        handleCountyClick(state.countyName, false);
+      }
+    } else if (state && state.view === 'state' && state.stateId) {
+      if (selectedState !== state.stateId) {
+        handleStateClick(state.stateId, false);
+      } else if (selectedCounty) {
+        handleBackToState(false);
+      }
+    } else {
+      // Default to USA
+      if (selectedState) {
+        handleBackToStates(false);
+      }
+    }
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -2351,7 +2498,6 @@ async function fetchAllStateDataForCountryAverage() {
     allStateData = sanitizeMetricDocuments(allStateData);
     statePercentAccessCache = null;
   } catch (error) {
-    console.error('Error fetching country data:', error);
   }
 }
 
@@ -2382,13 +2528,15 @@ function populateMetricSelect() {
     const actualName = metricMapping[desiredName];
     if (actualName) {
       const group = getMetricGroup(desiredName);
+      const groupColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color : '#3498db';
       
       // Create new optgroup if group changed
       if (group !== currentGroup) {
         currentOptgroup = document.createElement('optgroup');
         currentOptgroup.label = group;
         currentOptgroup.style.fontWeight = 'bold';
-        currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+        currentOptgroup.style.backgroundColor = `${groupColor}15`;
+        currentOptgroup.style.color = '#000';
         select.appendChild(currentOptgroup);
         currentGroup = group;
       }
@@ -2397,6 +2545,8 @@ function populateMetricSelect() {
       option.value = actualName; // Use actual database name as value
       option.textContent = desiredName; // Show desired name to user
       option.dataset.group = group;
+      option.dataset.color = groupColor;
+      option.style.color = '#000';
       currentOptgroup.appendChild(option);
     }
   });
@@ -2441,15 +2591,26 @@ function updateMapColors() {
   const metricData = findMetricDataByTitle(selectedMetric);
   if (!metricData) return;
   
+  const isPercentAccessMetric = selectedMetric && selectedMetric.includes('Percent Access');
+  const allowedStates = new Set(Object.values(statesData).map(s => s.name));
   const values = Object.entries(metricData)
     .filter(([key]) => key !== '_id' && key !== 'title')
-    .map(([, value]) => formatNumberToTwoDecimals(value));
+    .filter(([key]) => allowedStates.has(key))
+    .filter(([key]) => !isPercentAccessMetric || !isDistrictOfColumbia(key))
+    .map(([, value]) => Number(value))
+    .filter(v => typeof v === 'number' && !Number.isNaN(v));
   
   if (values.length === 0) return;
   
   // Use natural breaks for better categorization
   const breaks = naturalBreaks(values, 3);
+  const actualMax = values.length > 0 ? Math.max(...values) : 0;
   
+  // Debug logging for Percent Access/state Jenks
+  if (isPercentAccessMetric) {
+    const sortedVals = [...values].sort((a, b) => a - b);
+  }
+
   // Special handling for Percent Access - always green for high values
   let isHighGood = getMetricColorLogic(selectedMetric) === 'high_is_good';
   if (selectedMetric && selectedMetric.includes('Percent Access')) {
@@ -2472,15 +2633,19 @@ function updateMapColors() {
   usMap.colorScale = colorScale;
   usMap.breaks = breaks;
   usMap.validValues = values;
-  createLegendWithBreaks(breaks, colors, isHighGood, values);
+  createLegendWithBreaks(breaks, colors, isHighGood, values, actualMax);
 }
 
-function createLegendWithBreaks(breaks, colors, isHighGood, validValues = []) {
-  console.log('createLegendWithBreaks called with:', { breaks, colors, isHighGood, validValues });
+function formatLegendNumber(value, max) {
+  // Truncate (not round up) to 2 decimals, but display fixed 2 decimals for non-integer legends
+  const safeMax = isFinite(max) ? max : value;
+  const truncated = Math.floor(Math.min(value, safeMax) * 100) / 100;
+  return truncated.toFixed(2);
+}
+
+function createLegendWithBreaks(breaks, colors, isHighGood, validValues = [], forcedMax = null) {
   const legend = document.getElementById('legend');
-  console.log('Legend element found:', legend);
   if (!legend) {
-    console.error('Legend element not found!');
     return;
   }
   
@@ -2501,29 +2666,31 @@ function createLegendWithBreaks(breaks, colors, isHighGood, validValues = []) {
     // Get actual min and max values for better display
     const allValues = validValues.length > 0 ? [...validValues] : [];
     const actualMin = allValues.length > 0 ? Math.min(...allValues) : 0;
-    const actualMax = allValues.length > 0 ? Math.max(...allValues) : 0;
+    const actualMaxRaw = allValues.length > 0 ? Math.max(...allValues) : 0;
+    const actualMax = forcedMax !== null && forcedMax !== undefined ? forcedMax : actualMaxRaw;
+    const displayMax = isFinite(actualMax) ? actualMax : 0;
     
     // Create ranges based on breaks
     if (breaks.length === 1) {
       ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
-      ranges.push({ min: breaks[0], max: actualMax, color: colors[1] });
+      ranges.push({ min: breaks[0], max: displayMax, color: colors[1] });
     } else if (breaks.length === 2) {
       ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
       ranges.push({ min: breaks[0], max: breaks[1], color: colors[1] });
-      ranges.push({ min: breaks[1], max: actualMax, color: colors[2] });
+      ranges.push({ min: breaks[1], max: displayMax, color: colors[2] });
     } else {
       // Handle more than 2 breaks
       ranges.push({ min: actualMin, max: breaks[0], color: colors[0] });
       for (let i = 0; i < breaks.length - 1; i++) {
         ranges.push({ min: breaks[i], max: breaks[i + 1], color: colors[i + 1] });
       }
-      ranges.push({ min: breaks[breaks.length - 1], max: actualMax, color: colors[colors.length - 1] });
+      ranges.push({ min: breaks[breaks.length - 1], max: displayMax, color: colors[colors.length - 1] });
     }
     
     ranges.forEach(range => {
-      const rangeText = range.max === actualMax ? 
-        `${range.min.toFixed(2)} - ${range.max.toFixed(2)}` : 
-        `${range.min.toFixed(2)} - ${range.max.toFixed(2)}`;
+      const useInteger = isSampleSizeMetric(selectedMetric);
+      const formatVal = (v) => useInteger ? Math.round(v).toString() : formatLegendNumber(v, displayMax);
+      const rangeText = `${formatVal(range.min)} - ${formatVal(range.max)}`;
       
       legendContent += `
         <div style="display: flex; align-items: center; gap: 5px;">
@@ -2548,7 +2715,6 @@ function createLegendWithBreaks(breaks, colors, isHighGood, validValues = []) {
     </div>
   `;
   
-  console.log('Setting legend content:', wrapperContent);
   legend.innerHTML = wrapperContent;
   
   // Re-attach event listener for info button
@@ -2621,7 +2787,6 @@ function createLegendWithBreaks(breaks, colors, isHighGood, validValues = []) {
     };
   }
   
-  console.log('Legend updated successfully');
 }
 
 
@@ -2697,11 +2862,9 @@ function createDistributionChart() {
 
 // In your createTopBottomChart function, add these debugging lines:
 function createTopBottomChart() {
-  console.log("Creating top/bottom chart...");
   const canvas = document.getElementById('topBottomChart');
   
   if (!canvas) {
-    console.error("Canvas 'topBottomChart' not found!");
     return;
   }
   
@@ -2710,10 +2873,8 @@ function createTopBottomChart() {
   }
   
   const metricData = allStateData.find(d => d.title === selectedMetric);
-  console.log("Metric data for top/bottom chart:", metricData);
   
   if (!metricData) {
-    console.error("No metric data found for:", selectedMetric);
     return;
   }
   
@@ -2724,16 +2885,13 @@ function createTopBottomChart() {
       // Check if value is valid
       const numValue = Number(value);
       if (isNaN(numValue)) {
-        console.warn(`Invalid value for state ${state}: ${value}`);
         return { state, value: 0 }; // Use 0 as fallback
       }
       return { state, value: numValue };
     });
   
-  console.log("State values for top/bottom chart:", stateValues);
   
   if (stateValues.length === 0) {
-    console.error("No valid state values found!");
     return;
   }
   
@@ -2744,8 +2902,6 @@ function createTopBottomChart() {
   const top5 = stateValues.slice(0, Math.min(5, stateValues.length));
   const bottom5 = stateValues.slice(-Math.min(5, stateValues.length)).reverse();
   
-  console.log("Top 5 states:", top5);
-  console.log("Bottom 5 states:", bottom5);
   
   // Create labels and data arrays
   const labels = [
@@ -2802,7 +2958,6 @@ function createTopBottomChart() {
     }
   });
   
-  console.log("Top/bottom chart created successfully");
 }
 
 // -----------------------------------------------------------------------------
@@ -2842,16 +2997,34 @@ function createUSMap() {
         .attr('data-state-id', d => d.id)
         .on('click', (event, d) => handleStateClick(d.id))
         .on('mouseover', function(event, d) {
-          d3.select(this).attr('cursor', 'pointer').attr('stroke-width', 2);
+          // Check if state is selected
+          const isSelected = isComparisonMode && selectedEntitiesForComparison.some(e => e.id === d.id);
+          
+          // Apply hover effect - enhance but don't override selection
+          d3.select(this)
+            .attr('stroke-width', isSelected ? 3 : 2.5)
+            .attr('stroke', isSelected ? '#2c41ff' : '#2c3e50');
+          
+          // Update text label
           const text = d3.select(`text[data-state-id="${d.id}"]`);
-          text.text(statesData[d.id]?.name || '');
-          text.attr('font-size', '12px');
+          if (text.node()) {
+            text.text(statesData[d.id]?.name || '');
+            text.attr('font-size', '12px');
+          }
         })
         .on('mouseout', function(event, d) {
-          d3.select(this).attr('stroke-width', 1);
+          // Restore to selection state
+          const isSelected = isComparisonMode && selectedEntitiesForComparison.some(e => e.id === d.id);
+          d3.select(this)
+            .attr('stroke-width', isSelected ? 2 : 1)
+            .attr('stroke', isSelected ? '#2c41ff' : '#fff');
+          
+          // Reset text label
           const text = d3.select(`text[data-state-id="${d.id}"]`);
-          text.text(statesData[d.id]?.abbr || '');
-          text.attr('font-size', '10px');
+          if (text.node()) {
+            text.text(statesData[d.id]?.abbr || '');
+            text.attr('font-size', '10px');
+          }
         });
       svg.append('g')
         .selectAll('text')
@@ -2871,24 +3044,36 @@ function createUSMap() {
           handleStateClick(d.id);
         })
         .on('mouseover', function(event, d) {
-          d3.select(this).attr('cursor', 'pointer').attr('font-size', '12px');
-          // Also highlight the corresponding state path
-          d3.select(`path[data-state-id="${d.id}"]`).attr('stroke-width', 2);
-          // Show full state name
+          // Check if state is selected
+          const isSelected = isComparisonMode && selectedEntitiesForComparison.some(e => e.id === d.id);
+          const path = d3.select(`path[data-state-id="${d.id}"]`);
+          
+          // Apply hover effect
+          path
+            .attr('stroke-width', isSelected ? 3 : 2.5)
+            .attr('stroke', isSelected ? '#2c41ff' : '#2c3e50');
+          
+          // Update text
+          d3.select(this).attr('font-size', '12px');
           d3.select(this).text(statesData[d.id]?.name || '');
         })
         .on('mouseout', function(event, d) {
+          // Restore to selection state
+          const isSelected = isComparisonMode && selectedEntitiesForComparison.some(e => e.id === d.id);
+          const path = d3.select(`path[data-state-id="${d.id}"]`);
+          path
+            .attr('stroke-width', isSelected ? 2 : 1)
+            .attr('stroke', isSelected ? '#2c41ff' : '#fff');
+          
+          // Reset text
           d3.select(this).attr('font-size', '10px');
-          // Reset state path highlight
-          d3.select(`path[data-state-id="${d.id}"]`).attr('stroke-width', 1);
-          // Show abbreviation again
           d3.select(this).text(statesData[d.id]?.abbr || '');
         });
       mapContainer.appendChild(svg.node());
       usMap = { svg, path, projection, states, colorScale: null };
       updateMapColors();
     })
-    .catch(err => console.error('Error loading US map:', err));
+    .catch(err => {});
 }
 
 // Add this to your app.js
@@ -2896,14 +3081,17 @@ function isLoggedIn() {
   return document.cookie.includes('access_token') || document.cookie.includes('is_logged_in');
 }
 
-function handleStateClick(stateId) {
+function handleStateClick(stateId, doPushState = true) {
   // Check if authentication is required but user isn't logged in
   const authModal = document.getElementById('authRequiredModal');
   const isLoggedIn = document.cookie.includes('access_token') || document.cookie.includes('is_logged_in');
   
   if (authModal && !isLoggedIn) {
-    console.log("User not logged in, showing auth modal");
     authModal.style.display = 'flex';
+    return;
+  }
+
+  if (clusterState.active) {
     return;
   }
   
@@ -2938,7 +3126,13 @@ function handleStateClick(stateId) {
     exitClusterMode();
   }
 
-  console.log("User is logged in, processing state click:", stateId);
+  
+  if (doPushState) {
+    const url = new URL(window.location);
+    url.searchParams.set('state', stateId);
+    url.searchParams.delete('county');
+    history.pushState({ view: 'state', stateId: stateId }, '', url);
+  }
   
   // Clear any existing tooltips
   d3.selectAll('.county-tooltip').remove();
@@ -2948,6 +3142,9 @@ function handleStateClick(stateId) {
   activeView = 'county';
   updateCompareStatesButtonVisibility();
   updateClusterAnalysisButtonVisibility();
+  updateMapTabState();
+  updateScrollState();
+  updateMapBackButton();
   
   // Hide state-level elements and show county-level elements
   document.getElementById('metricSelection').style.display = 'none';
@@ -2965,7 +3162,6 @@ function handleStateClick(stateId) {
   fetchStateData(stateId);
   
   // Fix scrollbar issue: Restore scrollbar functionality after state selection
-  console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from handleStateClick (delayed)');
   setTimeout(() => {
     restoreScrollbarFunctionality();
   }, 100);
@@ -2975,7 +3171,6 @@ function handleStateClick(stateId) {
   const correctedStateName = getCountyDbName(stateName);
   const dbName = formatStateNameForDb(correctedStateName);
   
-  console.log(`State: ${stateName} -> Corrected: ${correctedStateName} -> DB: ${dbName}`);
   
   fetch(`/api/countyAverageValues/${encodeURIComponent(dbName)}`)
     .then(response => response.json())
@@ -3005,7 +3200,7 @@ function handleStateClick(stateId) {
         selectedCountyMetric = null;
       }
     })
-    .catch(err => console.error("Error fetching transit county averages:", err));
+    .catch(err => {});
   
   updateLeftPanel();
 }
@@ -3016,7 +3211,6 @@ function createAppStateHandlers() {
   
   // Only change the state click handler for non-logged in users
   if (!isLoggedIn) {
-    console.log("User is not logged in - setting up auth modal");
     const authModal = document.getElementById('authRequiredModal');
     
     // Store original function if it exists
@@ -3026,7 +3220,6 @@ function createAppStateHandlers() {
     
     // Override with modal display function
     window.handleStateClick = function(stateId) {
-      console.log("Showing auth modal for non-logged in user");
       authModal.style.display = 'flex';
     };
     
@@ -3045,7 +3238,6 @@ function createAppStateHandlers() {
       }
     });
   } else {
-    console.log("User is logged in - using standard state handler");
   }
 }
 
@@ -3189,14 +3381,21 @@ function createCountyMap(stateId) {
         
         // Store reference for later use
         window.currentCountyMapSvg = svg;
+        if (clusterState.active) {
+          setClusterInteractionLock(true);
+        }
         
       });
   }, 800);
 }
 
-function handleCountyClick(countyName) {
+function handleCountyClick(countyName, doPushState = true) {
   // Use the original county name for database operations
   const originalCountyName = countyName;
+
+  if (clusterState.active) {
+    return;
+  }
   
   if (isComparisonMode) {
     const existingIndex = selectedEntitiesForComparison.findIndex(e => e.name === originalCountyName);
@@ -3220,8 +3419,16 @@ function handleCountyClick(countyName) {
   // Use original county name
   selectedCounty = originalCountyName;
   
+  if (doPushState) {
+    const url = new URL(window.location);
+    url.searchParams.set('state', selectedState);
+    url.searchParams.set('county', originalCountyName);
+    history.pushState({ view: 'county', stateId: selectedState, countyName: originalCountyName }, '', url);
+  }
+  
   // Add boundary highlight to selected county and keep all counties clickable
   if (countyMap && countyMap.svg) {
+    const normalizedSelectedName = normalizeCountyNameForComparison(originalCountyName);
     countyMap.svg.selectAll('.county')
       .transition()
       .duration(300)
@@ -3230,7 +3437,6 @@ function handleCountyClick(countyName) {
         
         // Compare using normalized versions but keep originals for display
         const normalizedMapName = normalizeCountyNameForComparison(mapCountyName);
-        const normalizedSelectedName = normalizeCountyNameForComparison(originalCountyName);
         
         if (normalizedMapName === normalizedSelectedName) {
           // Selected county gets a prominent boundary
@@ -3246,13 +3452,19 @@ function handleCountyClick(countyName) {
       .attr('stroke-width', function() {
         const mapCountyName = d3.select(this).attr('data-county-name');
         const normalizedMapName = normalizeCountyNameForComparison(mapCountyName);
-        const normalizedSelectedName = normalizeCountyNameForComparison(originalCountyName);
         
         if (normalizedMapName === normalizedSelectedName) {
           return 3; // Thicker boundary for selected county
         } else {
           return 1; // Normal boundary for other counties
         }
+      });
+
+    countyMap.svg.selectAll('.county')
+      .classed('selected-county', function() {
+        const mapCountyName = d3.select(this).attr('data-county-name');
+        const normalizedMapName = normalizeCountyNameForComparison(mapCountyName);
+        return normalizedMapName === normalizedSelectedName;
       });
   }
   
@@ -3268,13 +3480,23 @@ function handleCountyClick(countyName) {
   // Use original county name for database query
   fetchCountyData(originalCountyName);
   updateLeftPanel();
+  updateMapTabState();
+  updateScrollState();
+  updateMapBackButton();
 }
 
-function handleBackToStates() {
-  console.log('🏠 [NAV] handleBackToStates called - returning to homepage');
+function handleBackToStates(doPushState = true) {
   if (clusterState.active || isClusterPanelOpen()) {
     exitClusterMode();
   }
+  
+  if (doPushState) {
+    const url = new URL(window.location);
+    url.searchParams.delete('state');
+    url.searchParams.delete('county');
+    history.pushState({}, '', url);
+  }
+  
   selectedState = null;
   selectedCounty = null;
   activeView = 'state';
@@ -3283,13 +3505,34 @@ function handleBackToStates() {
   if (defaultMetricTitle) {
     selectedMetric = defaultMetricTitle;
   }
-  createUSMap();
+  
+  // Update view state FIRST to ensure correct dimensions for map generation
+  updateScrollState();
+  switchToMapView();
+  updateMapTabState();
+  updateMapBackButton();
+  resetMapViewportPosition();
+  
+  // Force immediate layout update (bypass transition)
+  const mapContainer = document.getElementById('mapView');
+  if (mapContainer) {
+    const originalTransition = mapContainer.style.transition;
+    mapContainer.style.transition = 'none';
+    void mapContainer.offsetHeight; // Force reflow
+    createUSMap();
+    requestAnimationFrame(() => {
+      mapContainer.style.transition = originalTransition || '';
+    });
+  } else {
+    createUSMap();
+  }
+  
   updateDataPanel();
   stateCharts.forEach(chart => { if (chart.destroy) chart.destroy(); });
   stateCharts = [];
   countyCharts.forEach(chart => { if (chart.destroy) chart.destroy(); });
   countyCharts = [];
-  switchToMapView();
+  
   applyDefaultUSAMetric(true);
   updateCompareStatesButtonVisibility();
   updateLeftPanel();
@@ -3297,14 +3540,19 @@ function handleBackToStates() {
   updateClusterAnalysisButtonVisibility();
   
   // Fix scrollbar issue: Ensure scrollbar is restored when returning to homepage
-  console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from handleBackToStates (delayed)');
   setTimeout(() => {
     restoreScrollbarFunctionality();
   }, 100);
 }
 
-function handleBackToState() {
+function handleBackToState(doPushState = true) {
   if (selectedCounty) {
+    if (doPushState) {
+      const url = new URL(window.location);
+      url.searchParams.set('state', selectedState);
+      url.searchParams.delete('county');
+      history.pushState({ view: 'state', stateId: selectedState }, '', url);
+    }
     selectedCounty = null;
     document.getElementById('mapTitle').textContent = `${statesData[selectedState].name} Counties`;
     
@@ -3313,7 +3561,8 @@ function handleBackToState() {
     
     // Restore all counties to normal appearance and make them clickable again
     if (countyMap && countyMap.svg) {
-      countyMap.svg.selectAll('.county')
+      const counties = countyMap.svg.selectAll('.county');
+      counties
         .transition()
         .duration(300)
         .attr('opacity', 1)
@@ -3321,7 +3570,7 @@ function handleBackToState() {
         .attr('stroke', '#666') // Reset to normal boundary color
         .attr('stroke-width', 1) // Reset to normal boundary width
         .style('cursor', 'pointer');
-      
+      counties.classed('selected-county', false);
       // Update colors to show the current metric
       updateCountyMapColors();
     }
@@ -3342,6 +3591,10 @@ function handleBackToState() {
     updateLeftPanel();
     updateCompareStatesButtonVisibility();
     updateClusterAnalysisButtonVisibility();
+    updateMapTabState();
+    updateScrollState();
+    updateMapBackButton();
+    resetMapViewportPosition();
   } else {
     selectedState = null;
     activeView = 'state';
@@ -3354,11 +3607,32 @@ function handleBackToState() {
     if (defaultMetricTitle) {
       selectedMetric = defaultMetricTitle;
     }
-    createUSMap();
+    
+    // Update view state FIRST to ensure correct dimensions for map generation
+    updateScrollState();
+    switchToMapView();
+    updateMapTabState();
+    updateMapBackButton();
+    resetMapViewportPosition();
+    
+    // Force immediate layout update (bypass transition)
+    const mapContainer = document.getElementById('mapView');
+    if (mapContainer) {
+      const originalTransition = mapContainer.style.transition;
+      mapContainer.style.transition = 'none';
+      void mapContainer.offsetHeight; // Force reflow
+      createUSMap();
+      requestAnimationFrame(() => {
+        mapContainer.style.transition = originalTransition || '';
+      });
+    } else {
+      createUSMap();
+    }
+    
     updateDataPanel();
     stateCharts.forEach(chart => { if (chart.destroy) chart.destroy(); });
     stateCharts = [];
-    switchToMapView();
+    // switchToMapView(); // Removed duplicate call
     applyDefaultUSAMetric(true);
     updateCompareStatesButtonVisibility();
     updateLeftPanel();
@@ -3372,10 +3646,8 @@ function handleBackToState() {
 }
 
 function updateDataPanel() {
-  console.log('📊 [DATA] updateDataPanel called - selectedState:', selectedState, 'selectedCounty:', selectedCounty);
   const dataPanelContent = document.getElementById('dataPanelContent');
   if (!selectedState) {
-    console.log('📊 [DATA] Updating for USA view (no selected state)');
     dataPanelContent.innerHTML = `
       <h2 class="section-title">United States</h2>
       <h3>Averages</h3>
@@ -3388,23 +3660,24 @@ function updateDataPanel() {
     dataPanelContent.style.overflowY = '';
     dataPanelContent.style.scrollbarWidth = '';
     dataPanelContent.style.scrollbarColor = '';
-    console.log('📊 [DATA] Cleared inline styles for USA view');
     
     return;
   }
   if (selectedCounty) {
-    console.log('📊 [DATA] Updating for county view:', selectedCounty);
     const template = document.getElementById('countyDataTemplate');
     const countyPanel = template.content.cloneNode(true);
     dataPanelContent.innerHTML = '';
     dataPanelContent.appendChild(countyPanel);
-    document.getElementById('backToStateButton').addEventListener('click', handleBackToState);
+    const countyTitle = document.getElementById('countyName');
+    if (countyTitle) {
+      const displayName = /county$/i.test(selectedCounty) ? selectedCounty : `${selectedCounty} County`;
+      countyTitle.textContent = displayName;
+    }
     
     // Fix Bug 1: Ensure scrollbar functionality is maintained by removing any inline styles
     dataPanelContent.style.overflowY = '';
     dataPanelContent.style.scrollbarWidth = '';
     dataPanelContent.style.scrollbarColor = '';
-    console.log('📊 [DATA] Cleared inline styles for county view');
     
     // Toggle functionality for county view
     const averagesOption = document.getElementById('averagesOption');
@@ -3427,19 +3700,19 @@ function updateDataPanel() {
       });
     }
   } else {
-    console.log('📊 [DATA] Updating for state view:', statesData[selectedState]?.name);
     const template = document.getElementById('stateDataTemplate');
     const statePanel = template.content.cloneNode(true);
     dataPanelContent.innerHTML = '';
     dataPanelContent.appendChild(statePanel);
-    document.getElementById('backButton').addEventListener('click', handleBackToStates);
-    document.getElementById('stateName').textContent = statesData[selectedState].name;
+    const stateTitle = document.getElementById('stateName');
+    if (stateTitle) {
+      stateTitle.textContent = `${statesData[selectedState].name} State`;
+    }
     
     // Fix Bug 1: Ensure scrollbar functionality is maintained by removing any inline styles
     dataPanelContent.style.overflowY = '';
     dataPanelContent.style.scrollbarWidth = '';
     dataPanelContent.style.scrollbarColor = '';
-    console.log('📊 [DATA] Cleared inline styles for state view');
     
     // Toggle functionality for state view (default view: Frequency Charts)
     const stateAveragesOption = document.getElementById('stateAveragesOption');
@@ -3478,7 +3751,9 @@ function displayCountryMetrics(data) {
   data.forEach(metric => {
     const values = Object.entries(metric)
       .filter(([key]) => key !== '_id' && key !== 'title')
-      .map(([, value]) => (typeof value === 'number' ? value : 0));
+      .filter(([key]) => !isDistrictOfColumbia(key))
+      .map(([, value]) => (typeof value === 'number' ? value : Number(value)))
+      .filter(v => typeof v === 'number' && !Number.isNaN(v));
     
     if (values.length > 0) {
       const avg = values.reduce((a, b) => a + b, 0) / values.length;
@@ -3722,7 +3997,7 @@ function displayFrequencyDistributions(data) {
     
     const wrapper = document.createElement('div');
     wrapper.className = 'chart-wrapper';
-    wrapper.style.marginBottom = '2rem'; // Add gap between charts
+    wrapper.style.marginBottom = '0.75rem'; // Keep charts a bit closer together
     
     // Create title with info button
     const titleContainer = document.createElement('div');
@@ -3833,8 +4108,6 @@ function fetchCountyData(countyName) {
   // Keep the original county name with special characters for database query
   const originalCountyName = countyName;
   
-  console.log(`Fetching county data: ${stateRaw} -> ${correctedStateName} -> ${stateNameForDb}`);
-  console.log(`County: ${countyName} (keeping original with special characters)`);
   
   // Use proper encoding for URLs but preserve special characters
   const encodedStateName = encodeURIComponent(stateNameForDb);
@@ -3847,12 +4120,11 @@ function fetchCountyData(countyName) {
       displayCountyData(data, originalCountyName);
       
       // Fix scrollbar issue: Restore scrollbar functionality after county data is loaded
-      console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from fetchCountyData (delayed)');
       setTimeout(() => {
         restoreScrollbarFunctionality();
       }, 100);
     })
-    .catch(err => console.error("Error fetching county data:", err));
+    .catch(err => {});
 }
 
 function sanitizeCountyNameForDisplay(countyName) {
@@ -4044,7 +4316,7 @@ function displayCountyData(data, countyName) {
     dataToProcess.forEach(([collectionName, freqData]) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'chart-wrapper';
-      wrapper.style.marginBottom = '2rem'; // Add gap between charts
+      wrapper.style.marginBottom = '0.75rem'; // Keep charts a bit closer together
       
       // Create title with info button
       const titleContainer = document.createElement('div');
@@ -4228,11 +4500,13 @@ function populateCountyMetricSelect(availableMetrics) {
     if (!databaseFieldName) return;
 
     const group = getMetricGroup(displayName);
+    const groupColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color : '#3498db';
     if (group !== currentGroup) {
       currentOptgroup = document.createElement('optgroup');
       currentOptgroup.label = group;
       currentOptgroup.style.fontWeight = 'bold';
-      currentOptgroup.style.backgroundColor = METRIC_GROUPS[group] ? METRIC_GROUPS[group].color + '15' : '#f0f0f0';
+      currentOptgroup.style.backgroundColor = `${groupColor}15`;
+      currentOptgroup.style.color = '#000';
       select.appendChild(currentOptgroup);
       currentGroup = group;
     }
@@ -4242,6 +4516,8 @@ function populateCountyMetricSelect(availableMetrics) {
     option.textContent = displayName;
     option.dataset.displayName = displayName;
     option.dataset.group = group;
+    option.dataset.color = groupColor;
+    option.style.color = '#000';
     currentOptgroup.appendChild(option);
     optionCount += 1;
   });
@@ -4281,17 +4557,22 @@ function updateCountyMapColors() {
     return;
   }
   if (!countyMap || !countyMap.svg) {
-    console.warn('County map or SVG not available');
     return;
   }
   
   if (!allCountyData || allCountyData.length === 0 || !selectedCountyMetric) {
-    console.warn('No county data or metric selected');
     return;
   }
   
-  console.log('Updating county map colors for metric:', selectedCountyMetric);
-  
+  const allowedCountyNames = new Set();
+  countyMap.svg.selectAll('.county-path').each(function() {
+    const mapCountyName = d3.select(this).attr('data-county-name');
+    if (mapCountyName) {
+      const normalized = normalizeCountyNameForComparison(mapCountyName);
+      allowedCountyNames.add(normalized);
+    }
+  });
+
   const metricValues = {};
   const validValues = [];
   let nullCount = 0;
@@ -4301,23 +4582,23 @@ function updateCountyMapColors() {
     if (doc.title != null) {
       const countyName = String(doc.title);
       const normalizedCountyName = normalizeCountyNameForComparison(countyName);
+      if (!allowedCountyNames.has(normalizedCountyName)) {
+        return; // Skip counties that are not on the map
+      }
       
       // Get the raw value for the selected metric
       const rawValue = doc[selectedCountyMetric];
       
-      console.log(`Processing ${countyName}: rawValue=${rawValue}, type=${typeof rawValue}, metric=${selectedCountyMetric}`);
       
       // Check if Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes) is zero for this county (skip Sample Size metric)
       if (selectedCountyMetric !== 'Sample Size') {
         const percentAccessValue = doc['Percent Access'];
         const hasZeroPercentAccess = (percentAccessValue === 0 || percentAccessValue === 0.0);
         
-        console.log(`Percent Access for ${countyName}: ${percentAccessValue}, hasZeroPercentAccess: ${hasZeroPercentAccess}`);
         
         if (hasZeroPercentAccess) {
           metricValues[normalizedCountyName] = 'No Access';
           nullCount++;
-          console.log(`${countyName}: No Access (zero Percent Access for this county)`);
           return; // Skip processing - exclude from natural breaks
         }
       }
@@ -4327,7 +4608,6 @@ function updateCountyMapColors() {
         // Missing data for the selected metric - but since Percent Access is non-zero, this shouldn't happen
         metricValues[normalizedCountyName] = 'No Access';
         nullCount++;
-        console.log(`${countyName}: No Access (missing data for selected metric but non-zero Percent Access)`);
       } else if (typeof rawValue === 'number') {
         // Valid numeric value (not zero)
         let valueToProcess = rawValue;
@@ -4339,20 +4619,17 @@ function updateCountyMapColors() {
         if (selectedCountyMetric.includes('Percent Access') && rawValue === 0) {
           metricValues[normalizedCountyName] = 'No Access';
           nullCount++;
-          console.log(`${countyName}: No Access (zero Percent Access value for Percent Access metric)`);
           return; // Skip processing - exclude from natural breaks
         }
         
         const formattedValue = formatNumberToTwoDecimals(valueToProcess);
         metricValues[normalizedCountyName] = formattedValue;
         validValues.push(formattedValue);
-        console.log(`${countyName}: ${formattedValue}`);
       } else if (typeof rawValue === 'string') {
         const parsed = parseFloat(rawValue.trim());
         if (isNaN(parsed)) {
           metricValues[normalizedCountyName] = 'No Access';
           nullCount++;
-          console.log(`${countyName}: No Access (unparseable string: ${rawValue})`);
         } else {
           // Valid parsed value (not zero)
           let valueToProcess = parsed;
@@ -4364,33 +4641,27 @@ function updateCountyMapColors() {
           if (selectedCountyMetric.includes('Percent Access') && parsed === 0) {
             metricValues[normalizedCountyName] = 'No Access';
             nullCount++;
-            console.log(`${countyName}: No Access (zero Percent Access parsed value for Percent Access metric)`);
             return; // Skip processing - exclude from natural breaks
           }
           
-          const formattedValue = formatNumberToTwoDecimals(valueToProcess);
-          metricValues[normalizedCountyName] = formattedValue;
-          validValues.push(formattedValue);
-          console.log(`${countyName}: ${formattedValue}`);
+          const numericValue = Number(valueToProcess);
+          metricValues[normalizedCountyName] = numericValue;
+          validValues.push(numericValue);
         }
       } else {
         metricValues[normalizedCountyName] = 'No Access';
         nullCount++;
-        console.log(`${countyName}: No Access (unknown type: ${typeof rawValue})`);
       }
     }
   });
   
-  console.log(`Processed counties: ${validValues.length} valid values, ${nullCount} No Access`);
-  console.log(`Selected metric: ${selectedCountyMetric}`);
-  console.log(`Is Percent Access metric: ${selectedCountyMetric.includes('Percent Access')}`);
   
   // Debug: Show some sample metric values
   const sampleValues = Object.entries(metricValues).slice(0, 5);
-  console.log('Sample metric values:', sampleValues);
   
   // Create color scale for valid numeric values only
   let colorScale;
+  let jenksBreaks = [];
   if (validValues.length === 0) {
     // No valid numeric data
     colorScale = null;
@@ -4400,12 +4671,20 @@ function updateCountyMapColors() {
   } else {
     // Use natural breaks for better categorization
     const breaks = naturalBreaks(validValues, 3);
+    jenksBreaks = breaks;
     const isHighGood = getMetricColorLogic(selectedCountyMetric) === 'high_is_good';
     const colors = getColorScheme(selectedCountyMetric, isHighGood);
     
     colorScale = d3.scaleThreshold()
       .domain(breaks)
       .range(colors);
+  }
+
+  // Debug logging for Percent Access at county level
+  if (selectedCountyMetric && selectedCountyMetric.includes('Percent Access')) {
+    const sortedVals = [...validValues].sort((a, b) => a - b);
+    if (sortedVals.length > 0) {
+    }
   }
   
   // Update county colors
@@ -4417,7 +4696,6 @@ function updateCountyMapColors() {
       const mapCountyName = d3.select(this).attr('data-county-name');
       
       if (!mapCountyName) {
-        console.warn('County missing data-county-name');
         d3.select(this).attr('fill', '#808080'); // N/A color
         return;
       }
@@ -4508,7 +4786,6 @@ function updateCountyMapColors() {
       }
     });
   
-  console.log(`Applied colors: ${coloredCount} valid, ${nullColoredCount} No Access (black)`);
   
   // Store data for legend
   countyMap.colorScale = colorScale;
@@ -4523,15 +4800,10 @@ function updateCountyMapColors() {
 }
 
 function createCountyLegendForMap() {
-  console.log('createCountyLegendForMap called');
   const legend = document.getElementById('legend');
-  console.log('County legend element found:', legend);
   const colorScale = countyMap?.colorScale;
   const validValues = countyMap?.validValues || [];
   const hasNullValues = countyMap?.hasNullValues || false;
-  console.log('County legend data:', { validValues: validValues.length, hasNullValues });
-  console.log('Selected county metric:', selectedCountyMetric);
-  console.log('Is Percent Access metric:', selectedCountyMetric.includes('Percent Access'));
   
   if (!selectedCountyMetric) {
     legend.innerHTML = `<h3>Select a metric</h3>`;
@@ -4559,6 +4831,8 @@ function createCountyLegendForMap() {
     const breaks = naturalBreaks(validValues, 3);
     const isHighGood = getMetricColorLogic(selectedCountyMetric) === 'high_is_good';
     const colors = getColorScheme(selectedCountyMetric, isHighGood);
+    const useInteger = isSampleSizeMetric(selectedCountyMetric);
+    const formatVal = (v, maxRef) => useInteger ? Math.round(v).toString() : formatLegendNumber(v, maxRef);
     
     legendContent += `<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">`;
     
@@ -4567,7 +4841,7 @@ function createCountyLegendForMap() {
       legendContent += `
         <div style="display: flex; align-items: center; gap: 5px;">
           <div style="width: 20px; height: 20px; background: ${colors[0]};"></div> 
-          <span>${validValues[0].toFixed(2)}</span>
+          <span>${formatVal(validValues[0], validValues[0])}</span>
         </div>
       `;
     } else {
@@ -4578,7 +4852,6 @@ function createCountyLegendForMap() {
       const allValues = [...validValues];
       const actualMin = Math.min(...allValues);
       const actualMax = Math.max(...allValues);
-      console.log('Range values:', { allValues, actualMin, actualMax, breaks });
       
       // Create ranges based on breaks - ensure proper range boundaries
       if (breaks.length === 1) {
@@ -4602,10 +4875,9 @@ function createCountyLegendForMap() {
       
       ranges.forEach(range => {
         const rangeText = range.max === actualMax ? 
-          `${range.min.toFixed(2)} - ${range.max.toFixed(2)}` : 
-          `${range.min.toFixed(2)} - ${range.max.toFixed(2)}`;
+          `${formatVal(range.min, actualMax)} - ${formatVal(range.max, actualMax)}` : 
+          `${formatVal(range.min, actualMax)} - ${formatVal(range.max, actualMax)}`;
         
-        console.log('Range:', { min: range.min, max: range.max, text: rangeText, color: range.color });
         
         legendContent += `
           <div style="display: flex; align-items: center; gap: 5px;">
@@ -4642,7 +4914,6 @@ function createCountyLegendForMap() {
     </div>
   `;
   
-  console.log('Setting county legend content:', wrapperContent);
   legend.innerHTML = wrapperContent;
   
   // Re-attach event listener for info button
@@ -4697,7 +4968,9 @@ function createCountyLegendForMap() {
           const colorName = range.color === '#e74c3c' ? 'Red' : 
                            range.color === '#e67e22' ? 'Orange' : 
                            range.color === '#27ae60' ? 'Green' : range.color;
-          const rangeText = `${range.min.toFixed(2)} - ${range.max.toFixed(2)}`;
+      const useInteger = isSampleSizeMetric(selectedCountyMetric);
+      const formatVal = (v) => useInteger ? Math.round(v).toString() : formatLegendNumber(v, actualMax);
+      const rangeText = `${formatVal(range.min)} - ${formatVal(range.max)}`;
           legendInfo += `<span style="color: ${range.color}; font-weight: bold;">${colorName}</span>: ${rangeText}<br>`;
         });
         
@@ -4716,34 +4989,22 @@ function createCountyLegendForMap() {
       showInfoPopup(`${metricName} - Legend Information`, legendInfo);
     };
   }
-  console.log('County legend updated successfully');
-  console.log('Final legend HTML:', legend.innerHTML);
 }
 
 // -----------------------------------------------------------------------------
 // SCROLLBAR RESTORATION FUNCTION
 function restoreScrollbarFunctionality() {
-  console.log('🔧 [SCROLLBAR] Starting scrollbar restoration...');
   
   // Get the right panel (data panel) content
   const dataPanelContent = document.getElementById('dataPanelContent');
   if (!dataPanelContent) {
-    console.log('❌ [SCROLLBAR] dataPanelContent not found!');
     return;
   }
   
-  console.log('✅ [SCROLLBAR] dataPanelContent found:', dataPanelContent);
-  console.log('📊 [SCROLLBAR] Current scrollHeight:', dataPanelContent.scrollHeight);
-  console.log('📊 [SCROLLBAR] Current clientHeight:', dataPanelContent.clientHeight);
-  console.log('📊 [SCROLLBAR] Current overflowY:', dataPanelContent.style.overflowY);
-  console.log('📊 [SCROLLBAR] Current computed overflowY:', getComputedStyle(dataPanelContent).overflowY);
   
   // Get the parent sidebar container
   const rightPanel = document.getElementById('rightPanel');
   if (rightPanel) {
-    console.log('📊 [SCROLLBAR] rightPanel scrollHeight:', rightPanel.scrollHeight);
-    console.log('📊 [SCROLLBAR] rightPanel clientHeight:', rightPanel.clientHeight);
-    console.log('📊 [SCROLLBAR] rightPanel computed height:', getComputedStyle(rightPanel).height);
   }
   
   // Force the sidebar content to have a constrained height
@@ -4751,8 +5012,6 @@ function restoreScrollbarFunctionality() {
   const navbarHeight = 80; // Approximate navbar height
   const availableHeight = viewportHeight - navbarHeight;
   
-  console.log('📏 [SCROLLBAR] Viewport height:', viewportHeight);
-  console.log('📏 [SCROLLBAR] Available height for sidebar:', availableHeight);
   
   // Set explicit height constraint on the sidebar content
   dataPanelContent.style.maxHeight = `${availableHeight - 100}px`; // Leave some padding
@@ -4760,43 +5019,145 @@ function restoreScrollbarFunctionality() {
   dataPanelContent.style.scrollbarWidth = 'thin';
   dataPanelContent.style.scrollbarColor = 'var(--text-light) transparent';
   
-  console.log('🔧 [SCROLLBAR] Set maxHeight to:', dataPanelContent.style.maxHeight);
-  console.log('🔧 [SCROLLBAR] Set overflowY to:', dataPanelContent.style.overflowY);
   
   // Force a reflow to ensure the scrollbar is properly rendered
   const height = dataPanelContent.offsetHeight;
-  console.log('🔄 [SCROLLBAR] Forced reflow, height:', height);
   
   // Also ensure the sidebar container has proper scrollbar settings
   if (rightPanel) {
-    console.log('✅ [SCROLLBAR] rightPanel found:', rightPanel);
     rightPanel.style.overflowY = '';
     rightPanel.style.scrollbarWidth = '';
     rightPanel.style.scrollbarColor = '';
-    console.log('🧹 [SCROLLBAR] Cleared rightPanel inline styles');
   } else {
-    console.log('❌ [SCROLLBAR] rightPanel not found!');
   }
   
   // Small delay to ensure DOM is fully updated
   setTimeout(() => {
-    console.log('⏰ [SCROLLBAR] Delayed restoration (10ms later)...');
     // Trigger a reflow again to ensure scrollbar is rendered
     const finalHeight = dataPanelContent.offsetHeight;
-    console.log('🔄 [SCROLLBAR] Final reflow, height:', finalHeight);
-    console.log('📊 [SCROLLBAR] Final scrollHeight:', dataPanelContent.scrollHeight);
-    console.log('📊 [SCROLLBAR] Final clientHeight:', dataPanelContent.clientHeight);
-    console.log('📊 [SCROLLBAR] Final computed overflowY:', getComputedStyle(dataPanelContent).overflowY);
-    console.log('📊 [SCROLLBAR] Can scroll?', dataPanelContent.scrollHeight > dataPanelContent.clientHeight);
-    console.log('📊 [SCROLLBAR] Max height set to:', dataPanelContent.style.maxHeight);
-    console.log('✅ [SCROLLBAR] Scrollbar restoration completed');
   }, 10);
+}
+
+// -----------------------------------------------------------------------------
+// PRIMARY NAV / VIEW TAB HELPERS
+// -----------------------------------------------------------------------------
+function updateMapTabState() {
+  const tab = document.getElementById('mapViewTab');
+  const label = document.getElementById('mapViewTabLabel');
+  const icon = tab?.querySelector('i');
+  if (!tab || !label) {
+    return;
+  }
+
+  const inEquity = activeView === 'equity';
+  const inCountyView = Boolean(selectedCounty);
+  let nextAction = 'none';
+  let nextLabel = 'USA Map';
+  let locked = false;
+
+  if (!selectedState) {
+    // Home: USA map
+    locked = !inEquity;
+    nextAction = inEquity ? 'toMapView' : 'none';
+    nextLabel = 'USA Map';
+  } else if (selectedCounty) {
+    nextAction = 'backToState';
+    nextLabel = 'Back to State Map';
+  } else {
+    // State map (no county)
+    nextAction = inEquity ? 'toMapView' : 'backToUS';
+    nextLabel = inEquity ? 'Back to State Map' : 'Back to US Map';
+  }
+
+  // Keep tab blue only when map is the active view
+  const mapActive = activeView !== 'equity' && !inCountyView;
+  tab.classList.toggle('active', mapActive);
+  tab.classList.toggle('back-mode', inCountyView);
+  tab.classList.toggle('locked', locked);
+  tab.setAttribute('aria-disabled', locked ? 'true' : 'false');
+  tab.dataset.action = nextAction;
+  label.textContent = nextLabel;
+  if (icon) {
+    icon.className = (!selectedState ? 'fas fa-map-marked-alt' : 'fas fa-arrow-left');
+  }
+}
+
+function handlePrimaryMapNav(event) {
+  const tab = event.currentTarget;
+  if (!tab || tab.getAttribute('aria-disabled') === 'true') {
+    return;
+  }
+  const action = tab.dataset.action;
+  switch (action) {
+    case 'backToState':
+      handleBackToState();
+      return;
+    case 'backToUS':
+      handleBackToStates();
+      return;
+    case 'toMapView':
+      switchToMapView();
+      return;
+    default:
+      if (activeView === 'equity') {
+        switchToMapView();
+      }
+  }
+}
+
+function updateScrollState() {
+  const stateView = Boolean(selectedState);
+  document.body?.classList.toggle('state-view', stateView);
+}
+
+function resetMapViewportPosition() {
+  const mapContent = document.querySelector('.map-content');
+  if (mapContent) {
+    mapContent.scrollTop = 0;
+    mapContent.style.paddingTop = '';
+  }
+  const mainContent = document.querySelector('.main-content');
+  if (mainContent) {
+    mainContent.scrollTop = 0;
+    mainContent.style.paddingTop = '';
+  }
+  const contentWrapper = document.querySelector('.content-wrapper');
+  if (contentWrapper) {
+    contentWrapper.scrollTop = 0;
+    contentWrapper.style.paddingTop = '';
+  }
+  const mapView = document.getElementById('mapView');
+  if (mapView) {
+    mapView.scrollTop = 0;
+    mapView.scrollLeft = 0;
+    mapView.classList.remove('zoom-to-county');
+    mapView.style.top = '';
+    mapView.style.left = '';
+    mapView.style.right = '';
+    mapView.style.bottom = '';
+    mapView.style.transform = '';
+    mapView.style.marginTop = '';
+    mapView.style.paddingTop = '';
+    mapView.style.position = '';
+  }
+  const legend = document.getElementById('legend');
+  if (legend) {
+    legend.style.marginTop = '';
+    legend.style.position = '';
+  }
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+function updateMapBackButton() {
+  const btn = document.getElementById('mapBackButton');
+  if (!btn) return;
+  const show = Boolean(selectedCounty);
+  btn.style.display = show ? 'inline-flex' : 'none';
 }
 
 // -----------------------------------------------------------------------------
 // EQUITY COMPARISON FUNCTIONS
 function switchToMapView() {
-  console.log('🗺️ [NAV] switchToMapView called');
   if (
     (clusterState.active && clusterState.context === 'equity') ||
     (!selectedState && clusterState.active) ||
@@ -4815,7 +5176,6 @@ function switchToMapView() {
   // Restore both sidebars
   document.getElementById('leftPanel').style.display = 'block';
   document.getElementById('rightPanel').style.display = 'block';
-  console.log('📱 [NAV] Sidebars restored to display: block');
   
   // Restore main content layout
   const mainContent = document.querySelector('.main-content');
@@ -4827,18 +5187,27 @@ function switchToMapView() {
   }
   
   // Fix scrollbar issue: Restore scrollbar functionality after sidebar visibility changes
-  console.log('🔧 [NAV] Calling restoreScrollbarFunctionality from switchToMapView');
   restoreScrollbarFunctionality();
   if (selectedState === null) {
     applyDefaultUSAMetric(true);
   }
   updateCompareStatesButtonVisibility();
   updateClusterAnalysisButtonVisibility();
+  updateMapTabState();
+  updateScrollState();
+  const viewTabs = document.querySelector('.view-tabs');
+  if (viewTabs) {
+    viewTabs.style.display = 'flex';
+  }
 }
 
-function switchToEquityComparison() {
+function switchToEquityComparison(doPushState = true) {
   if (!selectedState || selectedCounty) {
     return;
+  }
+  if (doPushState) {
+    const url = new URL(window.location);
+    history.pushState({ view: 'equity', stateId: selectedState }, '', url);
   }
   activeView = 'equity';
   loadComparisonData();
@@ -4853,6 +5222,10 @@ function switchToEquityComparison() {
   const stateTitle = document.getElementById('equityStateTitle');
   if (stateTitle && statesData[selectedState]) {
     stateTitle.textContent = `Transit Vs Equity - ${statesData[selectedState].name}`;
+  }
+  const equityBackLabel = document.getElementById('equityBackLabel');
+  if (equityBackLabel && statesData[selectedState]) {
+    equityBackLabel.textContent = `Back to ${statesData[selectedState].name} Map`;
   }
   
   // Hide both sidebars
@@ -4874,6 +5247,12 @@ function switchToEquityComparison() {
     setupEquityCategoryHoverMenu();
   }, 500);
   updateCompareStatesButtonVisibility();
+  updateMapTabState();
+  updateScrollState();
+  const viewTabs = document.querySelector('.view-tabs');
+  if (viewTabs) {
+    viewTabs.style.display = 'none';
+  }
 }
 
 function loadComparisonData() {
@@ -4884,34 +5263,26 @@ function loadComparisonData() {
   const correctedStateName = getCountyDbName(stateName);
   const dbName = formatStateNameForDb(correctedStateName);
   
-  console.log("Loading county data for state:", stateName);
-  console.log("Corrected state name:", correctedStateName);
-  console.log("Formatted DB name:", dbName);
   
   fetch(`/api/countyAverageValues/${encodeURIComponent(dbName)}`)
     .then(response => {
-      console.log("Response status:", response.status);
       return response.json();
     })
     .then(data => {
-      console.log("Received county data:", data);
       
       allCountyData = data;
       if (allCountyData.length > 0) {
-        console.log("County data keys:", Object.keys(allCountyData[0]));
         
         transitMetricKeys = Object.keys(allCountyData[0]).filter(key => 
           key !== '_id' && key !== 'title' && key !== 'state'
         );
         
-        console.log("Transit Metric Keys:", transitMetricKeys);
         
         selectedCountyMetric = transitMetricKeys[0] || null;
         
         populateTransitMetricDropdown();
         populateComparisonMetricDropdown();
       } else {
-        console.warn("No county data found");
         transitMetricKeys = [];
         selectedCountyMetric = null;
       }
@@ -4921,7 +5292,6 @@ function loadComparisonData() {
       loadEquityComparisonData(equityCategory, correctedStateName);
     })
     .catch(err => {
-      console.error("Error fetching transit county averages:", err);
     });
 }
 
@@ -4930,29 +5300,20 @@ function loadEquityComparisonData(category, stateName) {
   const correctedStateName = getCountyDbName(stateName);
   const formattedState = formatStateNameForDb(correctedStateName);
   
-  console.log("Loading equity data for category:", category);
-  console.log("Original state:", stateName);
-  console.log("Corrected state:", correctedStateName);
-  console.log("Formatted state:", formattedState);
   
   fetch(`/api/equityCountyAverageValues/${encodeURIComponent(category)}/${encodeURIComponent(formattedState)}`)
     .then(response => {
-      console.log("Equity response status:", response.status);
       return response.json();
     })
     .then(data => {
-      console.log("Received equity data:", data);
       
       equityCountyData = data;
       if (equityCountyData.length > 0) {
-        console.log("First equity data object:", equityCountyData[0]);
         
         if (category === 'Housing_Data') {
           if (equityCountyData[0].data) {
-            console.log("Found nested data structure:", equityCountyData[0].data);
             equityMetricKeys = Object.keys(equityCountyData[0].data);
           } else if (equityCountyData[0].Population) {
-            console.log("Found Population nested data:", equityCountyData[0].Population);
             equityMetricKeys = Object.keys(equityCountyData[0].Population);
           } else {
             equityMetricKeys = Object.keys(equityCountyData[0]).filter(key => 
@@ -4973,9 +5334,7 @@ function loadEquityComparisonData(category, stateName) {
         // Store metrics for this category
         equityMetricsByCategory[category] = equityMetricKeys;
         
-        console.log("Extracted Equity Metric Keys:", equityMetricKeys);
       } else {
-        console.warn(`No equity data found for ${category}`);
         equityMetricKeys = [];
         equityMetricsByCategory[category] = [];
       }
@@ -4987,7 +5346,6 @@ function loadEquityComparisonData(category, stateName) {
       createComparisonScatterPlotFull();
     })
     .catch(err => {
-      console.error("Error fetching equity county averages:", err);
       equityCountyData = [];
       equityMetricKeys = [];
       populateEquityMetricDropdown();
@@ -4999,7 +5357,6 @@ function populateTransitMetricDropdown() {
   if (!select) return;
   select.innerHTML = '';
 
-  console.log("Populating transit metrics:", transitMetricKeys);
 
   const metricMapping = createMetricMappingFromTitles(transitMetricKeys || []);
   let currentGroup = null;
@@ -5056,7 +5413,6 @@ function populateEquityMetricDropdown() {
   const select = document.getElementById('equityMetricSelect');
   select.innerHTML = '';
   
-  console.log("Populating equity metrics:", equityMetricKeys);
   
   // Get the current equity category
   const equityCategorySelect = document.getElementById('equityCategorySelect');
@@ -5082,40 +5438,29 @@ function populateEquityMetricDropdown() {
     const displayText = mapEquityMetricName(select.options[0].value, currentCategory);
     updateEquityCategoryDisplay(displayText, currentCategory);
     
-    console.log("Default equity metric selected:", select.value);
   }
   
   select.addEventListener('change', createComparisonScatterPlotFull);
 }
 
 function populateEquityMetricsMenu(category, metrics) {
-  console.log(`📝 [EQUITY MENU] populateEquityMetricsMenu called for category: ${category}`);
-  console.log(`   - Metrics count:`, metrics ? metrics.length : 0);
   
   const menuId = `metricsMenu_${category}`;
   const menu = document.getElementById(menuId);
   
   if (!menu) {
-    console.error(`❌ [EQUITY MENU] Metrics menu not found: ${menuId}`);
-    console.error(`   - Searching for element with ID: ${menuId}`);
     // Try to find all metrics menus
     const allMenus = document.querySelectorAll('[id^="metricsMenu_"]');
-    console.error(`   - Found ${allMenus.length} menus with metricsMenu prefix`);
-    allMenus.forEach(m => console.error(`   - Found menu: ${m.id}`));
     return;
   }
   
-  console.log(`✅ [EQUITY MENU] Found menu element: ${menuId}`);
-  console.log(`   - Menu current innerHTML length:`, menu.innerHTML.length);
   
   if (!metrics || metrics.length === 0) {
-    console.warn(`⚠️ [EQUITY MENU] No metrics provided for ${category}`);
     menu.innerHTML = '<div class="equity-metric-loading">No metrics available</div>';
     return;
   }
   
   menu.innerHTML = '';
-  console.log(`   - Clearing menu and adding ${metrics.length} metric items`);
   
   metrics.forEach((metric, index) => {
     const menuItem = document.createElement('div');
@@ -5126,36 +5471,27 @@ function populateEquityMetricsMenu(category, metrics) {
     menuItem.textContent = displayName;
     menuItem.addEventListener('click', (e) => {
       e.stopPropagation();
-      console.log(`🖱️ [EQUITY MENU] Metric clicked: ${displayName} (${metric})`);
       selectEquityMetric(category, metric, displayName);
     });
     menu.appendChild(menuItem);
     
     if (index < 3) {
-      console.log(`   - Added metric ${index + 1}: ${displayName}`);
     }
   });
   
-  console.log(`✅ [EQUITY MENU] Populated menu with ${metrics.length} items`);
-  console.log(`   - Menu innerHTML length now:`, menu.innerHTML.length);
   
   // Ensure menu is visible if parent option is being hovered
   const option = document.querySelector(`.equity-category-option[data-category="${category}"]`);
   if (option) {
     const isHovered = option.matches(':hover');
-    console.log(`   - Parent option hovered:`, isHovered);
     if (isHovered) {
       menu.classList.add('active');
-      console.log(`   - Menu activated because parent is hovered`);
     }
   }
   
-  console.log(`   - Menu active class after population:`, menu.classList.contains('active'));
-  console.log(`   - Menu computed display:`, window.getComputedStyle(menu).display);
 }
 
 function selectEquityMetric(category, metric, displayName) {
-  console.log(`🎯 [EQUITY MENU] Selecting metric: ${metric} for category: ${category}`);
   
   // Update hidden selects
   const categorySelect = document.getElementById('equityCategorySelect');
@@ -5164,12 +5500,10 @@ function selectEquityMetric(category, metric, displayName) {
   
   if (categorySelect) {
     categorySelect.value = category;
-    console.log(`   ✅ [EQUITY MENU] Category select updated to: ${category}`);
   }
   
   // If category changed, we need to reload the equity data for the new category
   if (previousCategory !== category && selectedState) {
-    console.log(`   🔄 [EQUITY MENU] Category changed from ${previousCategory} to ${category}, reloading data`);
     const stateName = statesData[selectedState].name;
     const correctedStateName = getCountyDbName(stateName);
     loadEquityComparisonData(category, correctedStateName);
@@ -5187,10 +5521,8 @@ function selectEquityMetric(category, metric, displayName) {
     if (existingOption) {
       // Option exists, just select it
       metricSelect.value = metric;
-      console.log(`   ✅ [EQUITY MENU] Metric select updated to: ${metric}`);
     } else {
       // Option doesn't exist - need to repopulate dropdown with metrics from this category
-      console.log(`   ⚠️ [EQUITY MENU] Metric option not found, repopulating dropdown for category: ${category}`);
       metricSelect.innerHTML = '';
       
       if (equityMetricsByCategory[category] && equityMetricsByCategory[category].length > 0) {
@@ -5202,9 +5534,7 @@ function selectEquityMetric(category, metric, displayName) {
           metricSelect.appendChild(opt);
         });
         metricSelect.value = metric;
-        console.log(`   ✅ [EQUITY MENU] Repopulated dropdown with ${equityMetricsByCategory[category].length} metrics`);
       } else {
-        console.error(`   ❌ [EQUITY MENU] No metrics available for category: ${category}`);
       }
     }
     
@@ -5220,7 +5550,6 @@ function selectEquityMetric(category, metric, displayName) {
   closeEquityMenus();
   
   // Update chart
-  console.log(`   📊 [EQUITY MENU] Updating chart with category: ${category}, metric: ${metric}`);
   createComparisonScatterPlotFull();
 }
 
@@ -5241,27 +5570,21 @@ function closeEquityMenus() {
 }
 
 function setupEquityCategoryHoverMenu() {
-  console.log('🔧 [EQUITY MENU] Setting up equity category hover menu...');
   const categoryDisplay = document.getElementById('equityCategoryDisplay');
   const categoryOptions = document.querySelector('.equity-category-options');
   
   if (!categoryDisplay) {
-    console.error('❌ [EQUITY MENU] categoryDisplay not found!');
     return;
   }
   if (!categoryOptions) {
-    console.error('❌ [EQUITY MENU] categoryOptions not found!');
     return;
   }
   
-  console.log('✅ [EQUITY MENU] Found categoryDisplay and categoryOptions');
   
   // Toggle menu on click
   categoryDisplay.addEventListener('click', (e) => {
     e.stopPropagation();
-    console.log('🖱️ [EQUITY MENU] Category display clicked');
     categoryOptions.classList.toggle('active');
-    console.log('📋 [EQUITY MENU] Category options active:', categoryOptions.classList.contains('active'));
     if (!categoryOptions.classList.contains('active')) {
       closeEquityMenus();
     }
@@ -5269,24 +5592,16 @@ function setupEquityCategoryHoverMenu() {
   
   // Handle category option hover
   const categoryOptionsList = document.querySelectorAll('.equity-category-option');
-  console.log(`📋 [EQUITY MENU] Found ${categoryOptionsList.length} category options`);
   
   categoryOptionsList.forEach((option, index) => {
     const category = option.dataset.category;
     const metricsMenu = document.getElementById(`metricsMenu_${category}`);
     
-    console.log(`🔍 [EQUITY MENU] Setting up option ${index + 1}: ${category}`);
-    console.log(`   - Metrics menu element:`, metricsMenu ? 'Found' : 'NOT FOUND');
-    console.log(`   - Metrics menu ID: metricsMenu_${category}`);
     
     if (!metricsMenu) {
-      console.error(`❌ [EQUITY MENU] Metrics menu not found for category: ${category}`);
-      console.error(`   - Looking for element with ID: metricsMenu_${category}`);
       // Try to find it in the DOM
       const allMenus = document.querySelectorAll('.equity-metrics-menu');
-      console.log(`   - Found ${allMenus.length} total metrics menus in DOM`);
       allMenus.forEach((m, i) => {
-        console.log(`   - Menu ${i + 1} ID:`, m.id);
       });
     }
     
@@ -5308,20 +5623,14 @@ function setupEquityCategoryHoverMenu() {
       hoverTimeout = setTimeout(() => {
         if (isInteracting) return; // Double check
         
-        console.log(`🖱️ [EQUITY MENU] Mouse entered category option: ${category}`);
         // Show metrics menu on the right
         if (metricsMenu) {
-          console.log(`   ✅ [EQUITY MENU] Metrics menu found for ${category}`);
-          console.log(`   📊 [EQUITY MENU] Menu innerHTML length:`, metricsMenu.innerHTML.length);
-          console.log(`   📊 [EQUITY MENU] Cached metrics:`, equityMetricsByCategory[category] ? equityMetricsByCategory[category].length : 0);
           
           // Always try to load/populate metrics when hovering
           if (equityMetricsByCategory[category] && equityMetricsByCategory[category].length > 0) {
-            console.log(`   ✅ [EQUITY MENU] Using cached metrics (${equityMetricsByCategory[category].length} metrics)`);
             // We have metrics cached, use them
             populateEquityMetricsMenu(category, equityMetricsByCategory[category]);
             metricsMenu.classList.add('active');
-            console.log(`   ✅ [EQUITY MENU] Menu activated with cached metrics`);
           } else {
             // Check if menu has actual metric items or just placeholder/loading content
             const hasMetricItems = metricsMenu.querySelector('.equity-metric-item');
@@ -5329,30 +5638,19 @@ function setupEquityCategoryHoverMenu() {
                                       metricsMenu.innerHTML.includes('Loading') ||
                                       metricsMenu.querySelector('.equity-metric-loading');
             
-            console.log(`   📊 [EQUITY MENU] Menu state check:`);
-            console.log(`      - Has metric items:`, hasMetricItems ? 'Yes' : 'No');
-            console.log(`      - Has loading message:`, hasLoadingMessage ? 'Yes' : 'No');
-            console.log(`      - innerHTML length:`, metricsMenu.innerHTML.length);
             
             if (!hasMetricItems || hasLoadingMessage || metricsMenu.innerHTML.length < 200) {
-              console.log(`   ⏳ [EQUITY MENU] Loading metrics for category: ${category}`);
               // Need to load metrics for this category
               loadMetricsForCategory(category);
               // Show menu immediately (will show loading message)
               metricsMenu.classList.add('active');
-              console.log(`   ✅ [EQUITY MENU] Menu activated (loading metrics)`);
             } else {
-              console.log(`   ✅ [EQUITY MENU] Menu already has content, just showing it`);
               // Menu has content, just show it
               metricsMenu.classList.add('active');
             }
           }
           
-          console.log(`   📊 [EQUITY MENU] Menu active class:`, metricsMenu.classList.contains('active'));
-          console.log(`   📊 [EQUITY MENU] Menu display style:`, window.getComputedStyle(metricsMenu).display);
-          console.log(`   📊 [EQUITY MENU] Menu visibility:`, window.getComputedStyle(metricsMenu).visibility);
         } else {
-          console.error(`   ❌ [EQUITY MENU] Metrics menu element not found for ${category}!`);
         }
       }, 100); // Slightly longer delay to reduce rapid hover events
     });
@@ -5368,7 +5666,6 @@ function setupEquityCategoryHoverMenu() {
       
       leaveTimeout = setTimeout(() => {
         if (metricsMenu && !metricsMenu.matches(':hover') && !option.matches(':hover')) {
-          console.log(`   🔒 [EQUITY MENU] Closing menu for ${category}`);
           metricsMenu.classList.remove('active');
           isInteracting = false;
         }
@@ -5395,16 +5692,12 @@ function setupEquityCategoryHoverMenu() {
   
   // Keep metrics menu open when hovering over it
   const allMetricsMenus = document.querySelectorAll('.equity-metrics-menu');
-  console.log(`📋 [EQUITY MENU] Found ${allMetricsMenus.length} metrics menus`);
   
   allMetricsMenus.forEach((menu, index) => {
-    console.log(`   - Menu ${index + 1} ID:`, menu.id);
     menu.addEventListener('mouseenter', () => {
-      console.log(`🖱️ [EQUITY MENU] Mouse entered metrics menu: ${menu.id}`);
       menu.classList.add('active');
     });
     menu.addEventListener('mouseleave', () => {
-      console.log(`🖱️ [EQUITY MENU] Mouse left metrics menu: ${menu.id}`);
       menu.classList.remove('active');
     });
   });
@@ -5412,45 +5705,37 @@ function setupEquityCategoryHoverMenu() {
   // Close menus when clicking outside
   document.addEventListener('click', (e) => {
     if (!categoryDisplay.contains(e.target) && !categoryOptions.contains(e.target)) {
-      console.log('🖱️ [EQUITY MENU] Clicked outside, closing menus');
       closeEquityMenus();
     }
   });
   
-  console.log('✅ [EQUITY MENU] Setup complete');
 }
 
 // Store metrics for each category
 let equityMetricsByCategory = {};
 
 function loadMetricsForCategory(category) {
-  console.log(`📥 [EQUITY MENU] loadMetricsForCategory called for: ${category}`);
   
   // This will be called when hovering over a category that hasn't been loaded yet
   const menuId = `metricsMenu_${category}`;
   const menu = document.getElementById(menuId);
   
   if (!menu) {
-    console.error(`❌ [EQUITY MENU] Menu element not found: ${menuId}`);
     return;
   }
   
-  console.log(`✅ [EQUITY MENU] Found menu element: ${menuId}`);
   
   // Check if we already have metrics for this category
   if (equityMetricsByCategory[category] && equityMetricsByCategory[category].length > 0) {
-    console.log(`✅ [EQUITY MENU] Using cached metrics for ${category} (${equityMetricsByCategory[category].length} metrics)`);
     populateEquityMetricsMenu(category, equityMetricsByCategory[category]);
     return;
   }
   
   // Show loading message
-  console.log(`⏳ [EQUITY MENU] Showing loading message for ${category}`);
   menu.innerHTML = '<div class="equity-metric-loading">Loading metrics...</div>';
   
   // Fetch metrics for this category
   if (!selectedState) {
-    console.warn(`⚠️ [EQUITY MENU] No state selected, cannot load metrics`);
     menu.innerHTML = '<div class="equity-metric-loading">Please select a state first</div>';
     return;
   }
@@ -5459,54 +5744,42 @@ function loadMetricsForCategory(category) {
   const correctedStateName = getCountyDbName(stateName);
   const formattedState = formatStateNameForDb(correctedStateName);
   
-  console.log(`🌐 [EQUITY MENU] Fetching metrics for category: ${category}, state: ${formattedState}`);
   const url = `/api/equityCountyAverageValues/${encodeURIComponent(category)}/${encodeURIComponent(formattedState)}`;
-  console.log(`   - URL:`, url);
   
   fetch(url)
     .then(response => {
-      console.log(`📡 [EQUITY MENU] Response status:`, response.status);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       return response.json();
     })
     .then(data => {
-      console.log(`📦 [EQUITY MENU] Received data for ${category}:`, data ? data.length : 0, 'items');
       
       if (data && data.length > 0) {
-        console.log(`   - First data item keys:`, Object.keys(data[0]));
         let metrics = [];
         
         if (category === 'Housing_Data') {
           if (data[0].data) {
             metrics = Object.keys(data[0].data);
-            console.log(`   - Found metrics in data.data:`, metrics.length);
           } else if (data[0].Population) {
             metrics = Object.keys(data[0].Population);
-            console.log(`   - Found metrics in data.Population:`, metrics.length);
           } else {
             metrics = Object.keys(data[0]).filter(key => 
               key !== '_id' && key !== 'title' && key !== 'state' && 
               key !== 'county' && key !== 'data' && key !== 'Population'
             );
-            console.log(`   - Found metrics in data root:`, metrics.length);
           }
         } else {
           if (data[0].data && typeof data[0].data === 'object') {
             metrics = Object.keys(data[0].data);
-            console.log(`   - Found metrics in data.data:`, metrics.length);
           } else {
             metrics = Object.keys(data[0]).filter(key => 
               key !== '_id' && key !== 'title' && key !== 'state' && key !== 'data'
             );
-            console.log(`   - Found metrics in data root:`, metrics.length);
           }
         }
         
-        console.log(`✅ [EQUITY MENU] Extracted ${metrics.length} metrics for ${category}`);
         if (metrics.length > 0) {
-          console.log(`   - Sample metrics:`, metrics.slice(0, 3));
         }
         
         // Store metrics for this category
@@ -5519,19 +5792,13 @@ function loadMetricsForCategory(category) {
         const menuElement = document.getElementById(`metricsMenu_${category}`);
         if (menuElement) {
           menuElement.classList.add('active');
-          console.log(`✅ [EQUITY MENU] Menu activated after loading metrics`);
-          console.log(`   - Menu display:`, window.getComputedStyle(menuElement).display);
         } else {
-          console.error(`❌ [EQUITY MENU] Could not find menu element to activate: ${menuId}`);
         }
       } else {
-        console.warn(`⚠️ [EQUITY MENU] No data received for ${category}`);
         menu.innerHTML = '<div class="equity-metric-loading">No metrics available</div>';
       }
     })
     .catch(err => {
-      console.error(`❌ [EQUITY MENU] Error loading metrics for ${category}:`, err);
-      console.error(`   - Error details:`, err.message);
       menu.innerHTML = '<div class="equity-metric-loading">Error loading metrics</div>';
     });
 }
@@ -5539,27 +5806,19 @@ function loadMetricsForCategory(category) {
 function createComparisonScatterPlotFull() {
   if (!selectedState || selectedCounty) return;
   
-  console.log("Creating comparison scatter plot");
-  console.log("Selected State:", selectedState);
-  console.log("All County Data:", allCountyData);
-  console.log("Equity County Data:", equityCountyData);
   
   const equitySelect = document.getElementById('equityMetricSelect');
   const transitSelect = document.getElementById('transitMetricSelect');
   
   if (!equitySelect || !transitSelect) {
-    console.error("Dropdowns for equity or transit metrics are missing.");
     return;
   }
   
   const equityMetric = equitySelect.value || (equitySelect.options[0] && equitySelect.options[0].value);
   const transitMetric = transitSelect.value || (transitSelect.options[0] && transitSelect.options[0].value);
   
-  console.log("Equity Metric:", equityMetric);
-  console.log("Transit Metric:", transitMetric);
   
   if (!equityMetric || !transitMetric) {
-    console.error("No metrics selected");
     return;
   }
   
@@ -5574,13 +5833,11 @@ function createComparisonScatterPlotFull() {
     for (const cat of categories) {
       if (equityMetricsByCategory[cat] && equityMetricsByCategory[cat].includes(equityMetric)) {
         equityCategory = cat;
-        console.log(`📊 [CHART] Inferred category ${cat} from metric ${equityMetric}`);
         break;
       }
     }
   }
   
-  console.log(`📊 [CHART] Using equity category: ${equityCategory}, metric: ${equityMetric}`);
   
   const dataPoints = [];
   
@@ -5620,7 +5877,6 @@ function createComparisonScatterPlotFull() {
         }
       }
       
-      console.log(`County: ${transitCounty}, Transit: ${transitValue}, Equity: ${equityValue}`);
       
       if (!isNaN(transitValue) && !isNaN(equityValue)) {
         dataPoints.push({
@@ -5632,7 +5888,6 @@ function createComparisonScatterPlotFull() {
     }
   });
   
-  console.log("Final Data Points:", dataPoints);
   
   const ctx = document.getElementById('comparisonChart').getContext('2d');
   
@@ -5641,7 +5896,6 @@ function createComparisonScatterPlotFull() {
   }
   
   if (dataPoints.length === 0) {
-    console.warn("No data points to create scatter plot");
     
     // Clear the canvas and add a message
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -5705,15 +5959,10 @@ function createComparisonScatterPlotFull() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      layout: {
-        padding: {
-          top: 10,
-          bottom: 10,
-          left: 10,
-          right: 10
-        }
-      },
       plugins: {
+        legend: {
+          display: false
+        },
         tooltip: {
           callbacks: {
             title: function(context) {
@@ -5725,6 +5974,26 @@ function createComparisonScatterPlotFull() {
               return `${point.label || 'County'} (${point.x.toFixed(2)}, ${point.y.toFixed(2)})`;
             }
           }
+        }
+      },
+      interaction: {
+        mode: 'nearest',
+        intersect: true
+      },
+      hover: {
+        mode: 'nearest',
+        intersect: true,
+        animationDuration: 0
+      },
+      animation: {
+        duration: 0
+      },
+      layout: {
+        padding: {
+          top: 10,
+          bottom: 10,
+          left: 10,
+          right: 10
         }
       },
       scales: {
@@ -5919,7 +6188,6 @@ async function generateComprehensiveAIReport() {
     // Get selected entities
     const entities = selectedEntitiesForComparison.map(entity => entity.name);
     
-    console.log('Generating chart comparison for:', entities);
     
     // Hide loading and close any modals
     hideAIReportLoading();
@@ -5940,7 +6208,6 @@ async function generateComprehensiveAIReport() {
     await fetchAndRenderDotplotInModal(entities);
     
   } catch (error) {
-    console.error('Error generating chart comparison:', error);
     hideAIReportLoading();
     showAIReportError(`Failed to generate chart comparison: ${error.message}`);
   }
@@ -5949,11 +6216,9 @@ async function generateComprehensiveAIReport() {
 // Add this new function to app.js:
 function createReportPopup(reportData) {
   hideAIReportLoading();
-  console.log('[AI REPORT] Creating report popup...');
 
   // Null checks and error handling
   if (!reportData || typeof reportData !== 'object') {
-    console.error('[AI REPORT] Report data is null or not an object:', reportData);
     alert('Failed to generate report. No data was returned.');
     return;
   }
@@ -6141,13 +6406,11 @@ function createReportPopup(reportData) {
     </div>
   `;
 
-  console.log('[AI REPORT] Rendered report in full-page view');
 
   // Event listeners
   document.getElementById('closeFullPageReport').onclick = function() {
     fullPageOverlay.style.display = 'none';
     document.body.style.overflow = ''; // Restore body scrolling
-    console.log('[AI REPORT] Closed full-page report');
   };
 
   document.getElementById('printFullPageReport').onclick = function() {
@@ -6317,10 +6580,8 @@ function createReportPopup(reportData) {
   }
   
   if (Array.isArray(states) && states.length > 0) {
-    console.log('[AI REPORT] Fetching and rendering dotplot for states:', states);
     fetchAndRenderDotplotInModal(states);
   } else {
-    console.warn('[AI REPORT] No selected states found for dotplot.');
     document.getElementById('dotplotContainer').innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No chart data available</p>';
   }
 }
@@ -6328,11 +6589,9 @@ function createReportPopup(reportData) {
 // Helper function to render dotplot specifically in the modal
 async function fetchAndRenderDotplotInModal(states) {
   if (!states || states.length === 0) {
-    console.error('No states provided for chart');
     return;
   }
   
-  console.log('[CHART] Fetching data for states:', states);
   
   // Create full-screen chart container
   let chartContainer = document.getElementById('fullScreenChartContainer');
@@ -6369,7 +6628,6 @@ async function fetchAndRenderDotplotInModal(states) {
     }
     
     const data = await response.json();
-    console.log('[CHART] Received data:', data);
     
     // Set the data and initialize variables
     dotplotData = data;
@@ -6381,7 +6639,6 @@ async function fetchAndRenderDotplotInModal(states) {
     renderDotplotChartInModal(chartContainer);
     
   } catch (err) {
-    console.error('Chart data fetch error:', err);
     chartContainer.innerHTML = `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; color: #dc3545; text-align: center;">
         <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 20px;"></i>
@@ -6402,7 +6659,6 @@ async function fetchAndRenderDotplotInModal(states) {
 // Modified version of renderDotplotChart specifically for modal
 function renderDotplotChartInModal(container) {
   if (!dotplotData || !container) {
-    console.error('[MODAL CHART] Missing container or data');
     return;
   }
   
@@ -6575,12 +6831,10 @@ function renderDotplotChartInModal(container) {
 function renderD3DotplotInModal(metric, legendsToShow) {
   const container = document.getElementById('modalDotplotChartArea');
   if (!container) {
-    console.error('[CHART] Container not found');
     return;
   }
   
   if (!metric || !metric.metrics) {
-    console.error('[CHART] No metric data provided');
     container.innerHTML = '<div style="text-align: center; padding: 40px; color: #666; font-size: 18px;">No metric selected</div>';
     return;
   }
@@ -6677,7 +6931,6 @@ function renderD3DotplotInModal(metric, legendsToShow) {
   const displayMin = 0;
   const displayMax = 100;
   
-  console.log(`[CHART] Using actual values scale`);
   
   // Calculate chart dimensions - More adaptive sizing
   const containerRect = container.getBoundingClientRect();
@@ -6688,7 +6941,6 @@ function renderD3DotplotInModal(metric, legendsToShow) {
   const chartWidth = Math.min(chartContainerWidth - 100, 1000); // More margin for centering
   const chartHeight = Math.min(chartContainerHeight - 160, 600); // More margin for centering
   
-  console.log(`[CHART] Chart dimensions: ${chartWidth}x${chartHeight} (container: ${chartContainerWidth}x${chartContainerHeight})`);
   
   const chartMargin = {top: 60, right: 80, bottom: 80, left: 200};
   
@@ -7084,7 +7336,6 @@ function renderD3DotplotInModal(metric, legendsToShow) {
   
   container.appendChild(chartContainer);
   
-  console.log(`[CHART] Single chart rendered with actual values`);
 }
 // Also add the event listener to handle the button click
 document.addEventListener('DOMContentLoaded', () => {
@@ -7100,7 +7351,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function displayDirectPDFReport(reportData) {
-  console.log('Report data received:', reportData);  // This debug line you added
   hideAIReportLoading();
   
   const totalDataPoints = reportData.metadata?.totalDataPoints || reportData.dataAnalyzed?.transitMetrics || 'Multiple';
@@ -7849,7 +8099,6 @@ function enterComparisonMode() {
   isComparisonMode = true;
   
   if (selectedState && (!allCountyData || allCountyData.length === 0)) {
-    console.log("Loading county data for comparison mode");
     const dbName = formatStateNameForDb(getCountyDbName(statesData[selectedState].name));
     fetch(`/api/countyAverageValues/${encodeURIComponent(dbName)}`)
       .then(response => response.json())
@@ -7863,7 +8112,7 @@ function enterComparisonMode() {
           populateCountyMetricSelect(transitMetricKeys);
         }
       })
-      .catch(err => console.error("Error fetching county data:", err));
+      .catch(err => {});
   }
   
   // Show the comparison overlay
@@ -7880,6 +8129,9 @@ function enterComparisonMode() {
   
   // Update selection count
   updateSelectionCount();
+  
+  // Update map highlights to show selected states
+  updateMapSelectionHighlights();
 }
 
 function exitComparisonMode() {
@@ -7892,6 +8144,9 @@ function exitComparisonMode() {
   // Remove visual effects from the content
   const contentWrapper = document.querySelector('.content-wrapper');
   contentWrapper.classList.remove('comparison-fade');
+  
+  // Reset map highlights
+  resetMapSelections();
   
   // Remove highlight from map container
   const mapContainer = document.getElementById('mapView');
@@ -8033,9 +8288,6 @@ function generateComparisonChart() {
   const metricName = document.getElementById('comparisonMetric').value;
   const chartCanvas = document.getElementById('comparisonModalChart');
   
-  console.log("Generating chart with type:", chartType);
-  console.log("Selected metric:", metricName);
-  console.log("Selected entities:", selectedEntitiesForComparison);
   
   // Destroy existing chart if it exists
   if (comparisonModalChart) {
@@ -8047,15 +8299,11 @@ function generateComparisonChart() {
   
   if (selectedState) {
     // County comparison - keep the improved county matching logic
-    console.log("County comparison for state:", statesData[selectedState].name);
-    console.log("All county data:", allCountyData);
     
     // Log the exact titles in the county data for debugging
-    console.log("Available county titles:", allCountyData.map(c => c.title));
     
     // Process each selected county
     selectedEntitiesForComparison.forEach(entity => {
-      console.log("Processing entity:", entity);
       
       // Find the county in the allCountyData array by matching the title
       // Try multiple formats/variations of the county name
@@ -8079,7 +8327,6 @@ function generateComparisonChart() {
         );
         if (match) {
           countyData = match;
-          console.log(`Found county data with name variant "${variation}":`, countyData);
           break;
         }
       }
@@ -8095,7 +8342,6 @@ function generateComparisonChart() {
         
         if (match) {
           countyData = match;
-          console.log(`Found county data with case-insensitive match:`, countyData);
         }
       }
       

@@ -480,6 +480,103 @@
   margin: 0;
 }
 
+/* Welcome Message Attention */
+.floating-welcome-attention {
+  background: rgba(255, 237, 213, 0.5);
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.dark-mode .floating-welcome-attention {
+  background: rgba(124, 45, 18, 0.2);
+  border-color: #7c2d12;
+}
+
+.attention-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c2410c;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.dark-mode .attention-header {
+  color: #fdba74;
+}
+
+.attention-header i {
+  font-size: 14px;
+}
+
+.floating-welcome-attention p {
+  color: #9a3412;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.dark-mode .floating-welcome-attention p {
+  color: #ffedd5;
+}
+
+/* Transit Thinking Indicator */
+.transit-thinking-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  min-width: 120px;
+  position: relative;
+  overflow: hidden;
+}
+
+.transit-line {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--chatbot-border);
+}
+
+.transit-bus {
+  color: var(--chatbot-primary);
+  font-size: 16px;
+  z-index: 2;
+  animation: busDrive 4s linear infinite;
+}
+
+.transit-thinking-text {
+  font-size: 12px;
+  color: var(--chatbot-text);
+  opacity: 0.7;
+  font-style: italic;
+  margin-left: auto;
+  z-index: 2;
+  display: none;
+}
+
+@keyframes busDrive {
+  0% {
+    transform: translateX(-20px);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100px);
+    opacity: 0;
+  }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .floating-chatbot-window {

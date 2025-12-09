@@ -371,6 +371,12 @@
   .county:hover {
     stroke-width: 1.5px !important;
   }
+
+  .county.selected-county {
+    stroke: #1e88e5 !important;
+    stroke-width: 3px !important;
+    filter: drop-shadow(0 0 4px rgba(30, 136, 229, 0.5));
+  }
   
   h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
@@ -385,7 +391,7 @@
   }
   
   /* App container */
-  .app-container {
+.app-container {
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -604,7 +610,7 @@
   }
   
   /* Content wrapper */
-  .content-wrapper {
+.content-wrapper {
     display: flex;
     height: calc(100vh - var(--navbar-height));
     width: 100%;
@@ -912,7 +918,7 @@
   }
   
   /* Main content area */
-  .main-content {
+.main-content {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -929,6 +935,47 @@
     gap: 0.5rem;
     margin-bottom: 1rem;
   }
+
+  .map-back-btn {
+    align-self: flex-start;
+    margin: 0 5px 6px 5px;
+  }
+
+  /* State view overrides only */
+  body.state-view .main-content {
+    overflow-y: auto;
+  }
+
+  body.state-view .map-container {
+    padding: 12px;
+    min-height: 520px;
+  }
+
+  body.state-view .map-legend {
+    padding: 0.6rem 0.85rem;
+    font-size: 0.82rem;
+  }
+
+body.state-view .state-charts-container .chart-container,
+body.state-view .county-charts-container .chart-container {
+  height: 320px !important;
+  }
+
+  body.state-view .equity-cluster-map-slot {
+    min-height: 480px;
+  }
+
+  body.state-view .metric-card {
+    padding: 0.75rem;
+  }
+
+  body.state-view .metric-label {
+    font-size: 0.9rem;
+  }
+
+  body.state-view .metric-value {
+    font-size: 1rem;
+  }
   
   .view-tab {
     background-color: var(--bg-white);
@@ -941,6 +988,13 @@
     transition: all var(--transition-fast);
     position: relative;
     overflow: hidden;
+  }
+
+  .view-tab.locked,
+  .view-tab[aria-disabled="true"] {
+    cursor: not-allowed;
+    pointer-events: none;
+    box-shadow: none;
   }
   
   .view-tab::before {
@@ -965,12 +1019,21 @@
     box-shadow: var(--shadow-md);
     transform: translateY(-2px);
   }
+
+.view-tab.back-mode {
+  background-color: var(--bg-white);
+  color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
   
   .view-tab:hover:not(.active) {
-    background-color: var(--bg-light);
-    color: var(--primary);
+    background-color: var(--primary);
+    color: #fff;
     transform: translateY(-2px);
     box-shadow: var(--shadow-sm);
+    border-color: var(--primary);
   }
   
   .view-tab i {
@@ -1080,8 +1143,9 @@
   
   .equity-state-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
     background-color: var(--bg-white);
     border-radius: var(--border-radius-md);
     padding: 1rem 1.5rem;
@@ -1089,6 +1153,13 @@
     margin-bottom: 0.5rem;
   }
   
+  .equity-nav-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
   .equity-state-header h2 {
     color: var(--primary);
     margin: 0;
@@ -1504,17 +1575,26 @@
   }
   
   /* Charts in data panels */
-  .state-charts-container,
-  .county-charts-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 1.5rem;
-  }
+.state-charts-container,
+.county-charts-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
   
-  .state-charts-container .chart-container,
-  .county-charts-container .chart-container {
-    height: 300px !important; /* Reduced from previous height */
-  }
+.state-charts-container .chart-container,
+.county-charts-container .chart-container {
+  height: 320px !important;
+  padding: 0.25rem 0.25rem 1.5rem; /* keep x-axis labels/titles visible */
+}
+
+/* Constrain width of charts to prevent them from looking too expanded */
+.state-charts-container .chart-wrapper,
+.county-charts-container .chart-wrapper {
+  max-width: 95%;
+  margin-left: auto;
+  margin-right: auto;
+}
   
   /* Modal for fullscreen charts */
   .modal {
@@ -1786,7 +1866,7 @@
   background-color: var(--bg-white);
   border-radius: var(--border-radius-md);
   padding: 1rem;
-  height: 400px;
+  height: 500px;
 }
 
 /* Auth modal styles in Public/css/styles.css */
@@ -2413,6 +2493,7 @@
 .equity-view-btn.active {
   background: var(--primary, #2c41ff);
   color: #fff;
+    pointer-events: none;
 }
 
 .equity-view-section {
@@ -2423,15 +2504,11 @@
   display: block;
 }
 
-.equity-cluster-hint {
-  background: var(--bg-light, #ffffff);
-  border-radius: 14px;
-  padding: 1.5rem;
-  box-shadow: var(--shadow-md, 0 14px 30px rgba(15, 23, 42, 0.15));
+.equity-cluster-legend-inline {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  align-items: flex-start;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
 }
 
 .equity-cluster-map-host {
@@ -2452,7 +2529,11 @@
 }
 
 .equity-cluster-legend-slot {
-  margin-top: 1rem;
+  margin-top: 0;
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: nowrap;
+  align-items: center;
 }
 
 .equity-cluster-map-frame #mapView {

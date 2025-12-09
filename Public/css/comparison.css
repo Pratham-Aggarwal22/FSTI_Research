@@ -1634,7 +1634,7 @@
     max-height: none;
     border: 1px solid #e8e8e8;
     border-radius: 4px;
-    padding: 30px 20px;
+    padding: 36px 24px 54px 24px; /* extra bottom padding to keep x-axis/title off the edge */
     background: #ffffff;
     overflow: visible; /* No scrollbar - all content visible */
     margin-bottom: 2rem;

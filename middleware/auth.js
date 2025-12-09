@@ -31,7 +31,6 @@ export const authenticate = async (req, res, next) => {
     
     next();
   } catch (error) {
-    console.error('Authentication error:', error);
     res.redirect('/auth/login');
   }
 };
@@ -106,12 +105,11 @@ export const isGuestRoute = (req, res, next) => {
   const publicRoutes = new Set(['/', '/auth/login', '/auth/signup', '/auth/refresh', '/auth-debug', '/auth/check-availability']);
   const requestPath = req.path || req.originalUrl;
   const isApiAverageValues = req.originalUrl.startsWith('/api/averageValues');
-  const isApiChatbot = req.originalUrl.startsWith('/api/chatbot');
   const isPublicAsset = req.originalUrl.startsWith('/css/') || 
                         req.originalUrl.startsWith('/js/') || 
                         req.originalUrl.startsWith('/img/');
   
-  if (publicRoutes.has(requestPath) || isApiAverageValues || isApiChatbot || isPublicAsset) {
+  if (publicRoutes.has(requestPath) || isApiAverageValues || isPublicAsset) {
     return next();
   }
   

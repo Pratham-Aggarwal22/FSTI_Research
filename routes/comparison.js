@@ -2,10 +2,201 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { MongoClient } from 'mongodb';
+import fetch from 'node-fetch';
 
 
 const router = express.Router();
 const TRANSIT_DB_NAME = 'StateWiseComputation2';
+const COUNTY_TOPO_JSON_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json';
+const MIN_VALID_COUNTIES_TRANSIT = 0; // no threshold; compute if at least one value
+const MIN_VALID_COUNTIES_EQUITY = 0; // no threshold; compute if at least one value
+// Aliases to match incoming metric names to DB field names (case-insensitive keys)
+const TRANSIT_METRIC_FIELD_ALIASES = (() => {
+  const aliasGroups = [
+    {
+      canonical: 'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)',
+      variants: [
+        'Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)',
+        'Percent Access (Initial walk distance < 4 miles, Initial wait time < 60 minutes)',
+        'Percent Access (Initial walk distance < 4mi & Initial wait time < 60 min)',
+        'Percent Access'
+      ]
+    },
+    {
+      // Use the canonical used elsewhere in the app for this ratio
+      canonical: 'Transit to Car Travel Time Ratio',
+      variants: [
+        'Transit to Car Travel Time Ratio',
+        'Transit:Driving',
+        'Transit: Driving',
+        'Transit to Driving',
+        'Transit to Driving Ratio',
+        'Transit:Driving Ratio',
+        'Transit to Car Ratio',
+        'Transit:Car Ratio'
+      ]
+    },
+    {
+      canonical: 'Transfers',
+      variants: [
+        'Transfers',
+        'Number of Transfers',
+        'Frequency- Transfers'
+      ]
+    },
+    {
+      canonical: 'Average Initial Wait Time in Minutes',
+      variants: [
+        'Average Initial Wait Time in Minutes',
+        'Average Initial Wait Time in minutes',
+        'Initial Wait Time in Minutes',
+        'Initial Wait Time in minutes',
+        'Frequency- Initial Wait Time in Minutes',
+        'Frequency- Initial Wait Time in minutes'
+      ]
+    },
+    {
+      canonical: 'Average Initial Walk Distance in Miles',
+      variants: [
+        'Average Initial Walk Distance in Miles',
+        'Initial Walk Distance in Miles',
+        'Initial Walk Distance in miles',
+        'Average Initial Walk Distance in miles',
+        'Frequency- Initial Walk Distance in Miles',
+        'Frequency- Initial Walk Distance in miles'
+      ]
+    },
+    {
+      canonical: 'Average Initial Walk Duration in Minutes',
+      variants: [
+        'Average Initial Walk Duration in Minutes',
+        'Average Initial Walk Duration in minutes',
+        'Initial Walk Duration in Minutes',
+        'Initial Walk Duration in minutes',
+        'Initial Walk Time in Minutes',
+        'Initial Walk Time in minutes',
+        'Frequency- Initial Walk Duration in Minutes',
+        'Frequency- Initial Walk Duration in minutes',
+        'Frequency- Initial Walk Time in Minutes',
+        'Frequency- Initial Walk Time in minutes'
+      ]
+    },
+    {
+      canonical: 'Average Total Walk Duration in Minutes',
+      variants: [
+        'Average Total Walk Duration in Minutes',
+        'Average Total Walk Duration in minutes',
+        'Total Walk Duration in Minutes',
+        'Total Walk Duration in minutes',
+        'Total Walk Time in Minutes',
+        'Total Walk Time in minutes',
+        'Frequency- Total Walk Duration in Minutes',
+        'Frequency- Total Walk Duration in minutes',
+        'Frequency- Total Walk Time in Minutes',
+        'Frequency- Total Walk Time in minutes'
+      ]
+    },
+    {
+      canonical: 'Average Total Walk Distance in Miles',
+      variants: [
+        'Average Total Walk Distance in Miles',
+        'Average Total Walk Distance in miles',
+        'Total Walk Distance in Miles',
+        'Total Walk Distance in miles',
+        'Frequency- Total Walk Distance in Miles',
+        'Frequency- Total Walk Distance in miles'
+      ]
+    },
+    {
+      canonical: 'Average Total Wait Duration In Minutes',
+      variants: [
+        'Average Total Wait Duration In Minutes',
+        'Average Total Wait Duration in Minutes',
+        'Average Total Wait Duration in minutes',
+        'Total Wait Duration in Minutes',
+        'Total Wait Duration in minutes',
+        'Total Wait Time in Minutes',
+        'Total Wait Time in minutes',
+        'Frequency- Total Wait Duration In Minutes',
+        'Frequency- Total Wait Duration in Minutes',
+        'Frequency- Total Wait Duration in minutes',
+        'Frequency- Total Wait Time in Minutes',
+        'Frequency- Total Wait Time in minutes'
+      ]
+    },
+    {
+      canonical: 'Average Out-of-Vehicle Duration In Minutes',
+      variants: [
+        'Average Out-of-Vehicle Duration In Minutes',
+        'Average Out-of-Vehicle Duration in Minutes',
+        'Average Out-of-Vehicle Duration in minutes',
+        'Out-of-Vehicle Duration in Minutes',
+        'Out-of-Vehicle Duration in minutes',
+        'Out-of-Vehicle Travel Time in Minutes',
+        'Out-of-Vehicle Travel Time in minutes',
+        'Frequency- Out-of-Vehicle Duration In Minutes',
+        'Frequency- Out-of-Vehicle Duration in Minutes',
+        'Frequency- Out-of-Vehicle Duration in minutes',
+        'Frequency- Out-of-Vehicle Travel Time in Minutes'
+      ]
+    },
+    {
+      canonical: 'Average Travel Duration in Minutes',
+      variants: [
+        'Average Travel Duration in Minutes',
+        'Travel Time by Transit in Minutes',
+        'Travel Time by Transit in minutes'
+      ]
+    },
+    {
+      canonical: 'Average Driving Duration with Traffic in Minutes',
+      variants: [
+        'Average Driving Duration with Traffic in Minutes',
+        'Travel Time by Car in Minutes',
+        'Travel Time by Car in minutes'
+      ]
+    },
+    {
+      canonical: 'Average In-Vehicle Duration in Minutes',
+      variants: [
+        'Average In-Vehicle Duration in Minutes',
+        'Average In-Vehicle Duration in minutes',
+        'In-Vehicle Duration in Minutes',
+        'In-Vehicle Duration in minutes',
+        'In-Vehicle Travel Time in Minutes',
+        'In-Vehicle Travel Time in minutes',
+        'Frequency- In-Vehicle Duration in minutes',
+        'Frequency- In-Vehicle Travel Time in Minutes'
+      ]
+    },
+    {
+      canonical: 'Average Travel Duration in Minutes',
+      variants: [
+        'Average Travel Duration in Minutes',
+        'Travel Time by Transit in Minutes',
+        'Travel Time by Transit in minutes'
+      ]
+    },
+    {
+      canonical: 'Average Driving Duration with Traffic in Minutes',
+      variants: [
+        'Average Driving Duration with Traffic in Minutes',
+        'Travel Time by Car in Minutes',
+        'Travel Time by Car in minutes'
+      ]
+    }
+  ];
+
+  const map = {};
+  aliasGroups.forEach(group => {
+    group.variants.forEach(v => {
+      map[v.toLowerCase()] = group.canonical;
+    });
+  });
+  // expose groups for lookup
+  map._groups = aliasGroups;
+  return map;
+})();
 
 const STATE_NAME_VARIANTS = {
   Alabama: ['Albama'],
@@ -63,6 +254,196 @@ function normalizeStateName(value) {
     .trim()
     .toLowerCase()
     .replace(/[_\s]+/g, ' ');
+}
+
+function normalizeCountyNameForComparison(countyName = '') {
+  return countyName
+    .toString()
+    .replace(/'/g, "'")
+    .replace(/"/g, '"')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+const STATE_FIPS_MAP = {
+  Alabama: '01',
+  Alaska: '02',
+  Arizona: '04',
+  Arkansas: '05',
+  California: '06',
+  Colorado: '08',
+  Connecticut: '09',
+  Delaware: '10',
+  'District of Columbia': '11',
+  Florida: '12',
+  Georgia: '13',
+  Hawaii: '15',
+  Idaho: '16',
+  Illinois: '17',
+  Indiana: '18',
+  Iowa: '19',
+  Kansas: '20',
+  Kentucky: '21',
+  Louisiana: '22',
+  Maine: '23',
+  Maryland: '24',
+  Massachusetts: '25',
+  Michigan: '26',
+  Minnesota: '27',
+  Mississippi: '28',
+  Missouri: '29',
+  Montana: '30',
+  Nebraska: '31',
+  Nevada: '32',
+  'New Hampshire': '33',
+  'New Jersey': '34',
+  'New Mexico': '35',
+  'New York': '36',
+  'North Carolina': '37',
+  'North Dakota': '38',
+  Ohio: '39',
+  Oklahoma: '40',
+  Oregon: '41',
+  Pennsylvania: '42',
+  'Rhode Island': '44',
+  'South Carolina': '45',
+  'South Dakota': '46',
+  Tennessee: '47',
+  Texas: '48',
+  Utah: '49',
+  Vermont: '50',
+  Virginia: '51',
+  Washington: '53',
+  'West Virginia': '54',
+  Wisconsin: '55',
+  Wyoming: '56'
+};
+
+let countyTopoCache = null;
+let countyNameCacheByState = new Map();
+
+async function loadCountyTopo() {
+  if (countyTopoCache) return countyTopoCache;
+  const res = await fetch(COUNTY_TOPO_JSON_URL);
+  if (!res.ok) {
+    throw new Error(`Failed to load county map data: ${res.status}`);
+  }
+  countyTopoCache = await res.json();
+  return countyTopoCache;
+}
+
+async function getAllowedCountyNamesForState(stateName) {
+  const cached = countyNameCacheByState.get(stateName);
+  if (cached) return cached;
+
+  const fips = STATE_FIPS_MAP[stateName];
+  if (!fips) {
+    const empty = new Set();
+    countyNameCacheByState.set(stateName, empty);
+    return empty;
+  }
+
+  const topo = await loadCountyTopo();
+  const geometries = topo?.objects?.counties?.geometries || [];
+  const allowed = new Set();
+  geometries.forEach(geo => {
+    if (!geo?.id || !geo?.properties?.name) return;
+    const idStr = String(geo.id).padStart(5, '0');
+    if (idStr.startsWith(fips)) {
+      allowed.add(normalizeCountyNameForComparison(geo.properties.name));
+    }
+  });
+  countyNameCacheByState.set(stateName, allowed);
+  return allowed;
+}
+
+function computePercentile(sortedSamples, p) {
+  if (sortedSamples.length === 0) return null;
+  if (sortedSamples.length === 1) return sortedSamples[0].value;
+  const rank = (p / 100) * (sortedSamples.length - 1);
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  if (lower === upper) return sortedSamples[lower].value;
+  const weight = rank - lower;
+  return sortedSamples[lower].value * (1 - weight) + sortedSamples[upper].value * weight;
+}
+
+function computeStatisticsFromSamples(samples, zeroAccessCount, totalCount) {
+  if (!samples || samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => a.value - b.value);
+  const sum = sorted.reduce((acc, s) => acc + s.value, 0);
+  const mean = sum / sorted.length;
+
+  return {
+    mean,
+    min: sorted[0].value,
+    minCounty: sorted[0].county,
+    max: sorted[sorted.length - 1].value,
+    maxCounty: sorted[sorted.length - 1].county,
+    percentile_10: computePercentile(sorted, 10),
+    percentile_90: computePercentile(sorted, 90),
+    validCount: sorted.length,
+    zeroAccessCount,
+    totalCount
+  };
+}
+
+function mapTransitMetricField(metric = '') {
+  const key = metric.toLowerCase();
+  return TRANSIT_METRIC_FIELD_ALIASES[key] || metric;
+}
+
+function getTransitCandidateFields(metric = '') {
+  const key = metric.toLowerCase();
+  const groups = TRANSIT_METRIC_FIELD_ALIASES._groups || [];
+  const group = groups.find(g => g.variants.some(v => v.toLowerCase() === key) || g.canonical.toLowerCase() === key);
+  if (group) {
+    // unique list preserving order: canonical first then variants
+    const seen = new Set();
+    const ordered = [];
+    [group.canonical, ...group.variants].forEach(v => {
+      const k = v.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        ordered.push(v);
+      }
+    });
+    return ordered;
+  }
+  return [metric];
+}
+
+function getMetricValue(doc = {}, metricField = '') {
+  if (!metricField) return null;
+  // Exact match first
+  if (Object.prototype.hasOwnProperty.call(doc, metricField)) {
+    return extractNumericValue(doc[metricField]);
+  }
+  const lower = metricField.toLowerCase();
+  // Case-insensitive match
+  const matchKey = Object.keys(doc).find(k => k.toLowerCase() === lower);
+  if (matchKey) {
+    return extractNumericValue(doc[matchKey]);
+  }
+  // Normalized match (remove spaces/punctuation)
+  const normalizeKey = (str = '') => str.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const targetNorm = normalizeKey(metricField);
+  const normMatch = Object.keys(doc).find(k => normalizeKey(k) === targetNorm);
+  if (normMatch) {
+    return extractNumericValue(doc[normMatch]);
+  }
+  return null;
+}
+
+function summarizeCountyLog(countyLog = []) {
+  const summary = {};
+  countyLog.forEach(entry => {
+    const reason = entry.reason || 'kept';
+    summary[reason] = (summary[reason] || 0) + 1;
+  });
+  return summary;
 }
 
 const TRANSIT_COLLECTION_DISPLAY_MAP = {
@@ -126,14 +507,10 @@ function mapTransitCollectionDisplayName(collectionName) {
 
 const COMPARISON_DEBUG = process.env.COMPARISON_DEBUG === 'true';
 const comparisonLog = (...args) => {
-  if (COMPARISON_DEBUG) {
-    console.log(...args);
-  }
+  // Removed console logging
 };
 const comparisonWarn = (...args) => {
-  if (COMPARISON_DEBUG) {
-    console.warn(...args);
-  }
+  // Removed console logging
 };
 
 // Apply authentication middleware to all comparison routes
@@ -183,93 +560,116 @@ function mapTransitMetricName(originalName) {
   return transitMetricMap[originalName] || originalName;
 }
 
-// Helper function to map equity metric names for display
+const EQUITY_METRIC_MAPS = {
+  'Employment_Data': {
+    'Estimate!!Total:': 'Total Employment Population',
+    'Estimate!!Total:!!Male:': 'Total Male Employment Population',
+    'Estimate!!Total:!!Male:!!Enrolled in school:': 'Males Enrolled in School',
+    'Estimate!!Total:!!Male:!!Enrolled in school:!!Unemployed': 'Unemployed Males Enrolled in School',
+    'Estimate!!Total:!!Male:!!Enrolled in school:!!Employed': 'Employed Males Enrolled in School',
+    'Estimate!!Total:!!Male:!!Enrolled in school:!!Not in labor force': 'Males Enrolled in School Not in Labor Force',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:': 'Males Not Enrolled in School',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):': 'Male High School Graduates',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Employed': 'Employed Male High School Graduates',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Unemployed': 'Unemployed Male High School Graduates',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Not in labor force': 'Male High School Graduates Not in Labor Force',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:': 'Males Without High School Diploma',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:!!Employed': 'Employed Males Without High School Diploma',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:!!Unemployed': 'Unemployed Males Without High School Diploma',
+    'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:!!Not in labor force': 'Males Without High School Diploma Not in Labor Force',
+    'Estimate!!Total:!!Female:': 'Total Female Employment Population',
+    'Estimate!!Total:!!Female:!!Enrolled in school:': 'Females Enrolled in School',
+    'Estimate!!Total:!!Female:!!Enrolled in school:!!Employed': 'Employed Females Enrolled in School',
+    'Estimate!!Total:!!Female:!!Enrolled in school:!!Unemployed': 'Unemployed Females Enrolled in School',
+    'Estimate!!Total:!!Female:!!Enrolled in school:!!Not in labor force': 'Females Enrolled in School Not in Labor Force',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:': 'Females Not Enrolled in School',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):': 'Female High School Graduates',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Employed': 'Employed Female High School Graduates',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Unemployed': 'Unemployed Female High School Graduates',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Not in labor force': 'Female High School Graduates Not in Labor Force',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:!!Employed': 'Employed Females Without High School Diploma',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:': 'Females Without High School Diploma',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:!!Unemployed': 'Unemployed Females Without High School Diploma',
+    'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:!!Not in labor force': 'Females Without High School Diploma Not in Labor Force'
+  },
+  'Income_Data': {
+    'Total Population for Poverty Status': 'Total Population for Poverty Assessment',
+    'Population Below Poverty Level': 'Population Below Federal Poverty Line',
+    'Population Above Poverty Level': 'Population Above Federal Poverty Line',
+    'Population in Poverty (Under 18)': 'Children in Poverty (Under 18 Years)',
+    'Population in Poverty (18 and Over)': 'Adults in Poverty (18 Years and Over)',
+    'Median Household Income': 'Median Household Income',
+    'Gini Index of Income Inequality': 'Income Inequality Index (Gini Coefficient)'
+  },
+  'Race_Data': {
+    'Total Population': 'Total Population',
+    'Population of One Race': 'Single-Race Population',
+    'White Population': 'White Population',
+    'Black or African American Population': 'Black or African American Population',
+    'American Indian and Alaska Native Population': 'American Indian and Alaska Native Population',
+    'Asian Population': 'Asian Population',
+    'Native Hawaiian and Other Pacific Islander Population': 'Native Hawaiian and Pacific Islander Population',
+    'Some Other Race Alone Population': 'Other Race Population'
+  },
+  'Housing_Data': {
+    'Estimate!!Total:': 'Total Household Population',
+    'Estimate!!Total:!!Lives alone': 'Individuals Living Alone',
+    'Estimate!!Total:!!Householder living with spouse or spouse of householder': 'Households with Spouse',
+    'Estimate!!Total:!!Householder living with unmarried partner or unmarried partner of householder': 'Households with Unmarried Partner',
+    'Estimate!!Total:!!Child of householder': 'Children in Household',
+    'Estimate!!Total:!!Other relatives': 'Other Household Relatives',
+    'Estimate!!Total:!!Other nonrelatives': 'Non-Relatives in Household',
+    'Estimate!!Total:!!18 to 34 years:': 'Age 18-34 Years Household Population',
+    'Estimate!!Total:!!18 to 34 years:!!Lives alone': 'Single Occupants Age 18-34',
+    'Estimate!!Total:!!18 to 34 years:!!Householder living with spouse or spouse of householder': 'Married Householders Age 18-34',
+    'Estimate!!Total:!!18 to 34 years:!!Householder living with unmarried partner or unmarried partner of householder': 'Unmarried Householders Age 18-34',
+    'Estimate!!Total:!!18 to 34 years:!!Child of householder': 'Children in Households Age 18-34',
+    'Estimate!!Total:!!18 to 34 years:!!Other relatives': 'Other Relatives in Household Age 18-34',
+    'Estimate!!Total:!!18 to 34 years:!!Other nonrelatives': 'Non-Relatives in Household Age 18-34',
+    'Estimate!!Total:!!35 to 64 years:': 'Age 35-64 Years Household Population',
+    'Estimate!!Total:!!35 to 64 years:!!Lives alone': 'Single Occupants Age 35-64',
+    'Estimate!!Total:!!35 to 64 years:!!Householder living with spouse or spouse of householder': 'Married Householders Age 35-64',
+    'Estimate!!Total:!!35 to 64 years:!!Householder living with unmarried partner or unmarried partner of householder': 'Unmarried Householders Age 35-64',
+    'Estimate!!Total:!!35 to 64 years:!!Child of householder': 'Children in Households Age 35-64',
+    'Estimate!!Total:!!35 to 64 years:!!Other relatives': 'Other Relatives in Household Age 35-64',
+    'Estimate!!Total:!!35 to 64 years:!!Other nonrelatives': 'Non-Relatives in Household Age 35-64',
+    'Estimate!!Total:!!65 years and over:': 'Age 65+ Years Household Population',
+    'Estimate!!Total:!!65 years and over:!!Lives alone': 'Single Occupants Age 65+',
+    'Estimate!!Total:!!65 years and over:!!Householder living with spouse or spouse of householder': 'Married Householders Age 65+',
+    'Estimate!!Total:!!65 years and over:!!Householder living with unmarried partner or unmarried partner of householder': 'Unmarried Householders Age 65+',
+    'Estimate!!Total:!!65 years and over:!!Child of householder': 'Children in Households Age 65+',
+    'Estimate!!Total:!!65 years and over:!!Other relatives': 'Other Relatives in Household Age 65+',
+    'Estimate!!Total:!!65 years and over:!!Other nonrelatives': 'Non-Relatives in Household Age 65+'
+  }
+};
+
 function mapEquityMetricName(originalName, category) {
-  const equityMetricMaps = {
-    'Employment_Data': {
-      'Estimate!!Total:': 'Total Employment Population',
-      'Estimate!!Total:!!Male:': 'Total Male Employment Population',
-      'Estimate!!Total:!!Male:!!Enrolled in school:': 'Males Enrolled in School',
-      'Estimate!!Total:!!Male:!!Enrolled in school:!!Unemployed': 'Unemployed Males Enrolled in School',
-      'Estimate!!Total:!!Male:!!Enrolled in school:!!Employed': 'Employed Males Enrolled in School',
-      'Estimate!!Total:!!Male:!!Enrolled in school:!!Not in labor force': 'Males Enrolled in School Not in Labor Force',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:': 'Males Not Enrolled in School',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):': 'Male High School Graduates',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Employed': 'Employed Male High School Graduates',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Unemployed': 'Unemployed Male High School Graduates',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Not in labor force': 'Male High School Graduates Not in Labor Force',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:': 'Males Without High School Diploma',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:!!Employed': 'Employed Males Without High School Diploma',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:!!Unemployed': 'Unemployed Males Without High School Diploma',
-      'Estimate!!Total:!!Male:!!Not enrolled in school:!!Not high school graduate:!!Not in labor force': 'Males Without High School Diploma Not in Labor Force',
-      'Estimate!!Total:!!Female:': 'Total Female Employment Population',
-      'Estimate!!Total:!!Female:!!Enrolled in school:': 'Females Enrolled in School',
-      'Estimate!!Total:!!Female:!!Enrolled in school:!!Employed': 'Employed Females Enrolled in School',
-      'Estimate!!Total:!!Female:!!Enrolled in school:!!Unemployed': 'Unemployed Females Enrolled in School',
-      'Estimate!!Total:!!Female:!!Enrolled in school:!!Not in labor force': 'Females Enrolled in School Not in Labor Force',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:': 'Females Not Enrolled in School',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):': 'Female High School Graduates',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Employed': 'Employed Female High School Graduates',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Unemployed': 'Unemployed Female High School Graduates',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!High school graduate (includes equivalency):!!Not in labor force': 'Female High School Graduates Not in Labor Force',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:!!Employed': 'Employed Females Without High School Diploma',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:': 'Females Without High School Diploma',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:!!Unemployed': 'Unemployed Females Without High School Diploma',
-      'Estimate!!Total:!!Female:!!Not enrolled in school:!!Not high school graduate:!!Not in labor force': 'Females Without High School Diploma Not in Labor Force'
-    },
-    'Income_Data': {
-      'Total Population for Poverty Status': 'Total Population for Poverty Assessment',
-      'Population Below Poverty Level': 'Population Below Federal Poverty Line',
-      'Population Above Poverty Level': 'Population Above Federal Poverty Line',
-      'Population in Poverty (Under 18)': 'Children in Poverty (Under 18 Years)',
-      'Population in Poverty (18 and Over)': 'Adults in Poverty (18 Years and Over)',
-      'Median Household Income': 'Median Household Income',
-      'Gini Index of Income Inequality': 'Income Inequality Index (Gini Coefficient)'
-    },
-    'Race_Data': {
-      'Total Population': 'Total Population',
-      'Population of One Race': 'Single-Race Population',
-      'White Population': 'White Population',
-      'Black or African American Population': 'Black or African American Population',
-      'American Indian and Alaska Native Population': 'American Indian and Alaska Native Population',
-      'Asian Population': 'Asian Population',
-      'Native Hawaiian and Other Pacific Islander Population': 'Native Hawaiian and Pacific Islander Population',
-      'Some Other Race Alone Population': 'Other Race Population'
-    },
-    'Housing_Data': {
-      'Estimate!!Total:': 'Total Household Population',
-      'Estimate!!Total:!!Lives alone': 'Individuals Living Alone',
-      'Estimate!!Total:!!Householder living with spouse or spouse of householder': 'Households with Spouse',
-      'Estimate!!Total:!!Householder living with unmarried partner or unmarried partner of householder': 'Households with Unmarried Partner',
-      'Estimate!!Total:!!Child of householder': 'Children in Household',
-      'Estimate!!Total:!!Other relatives': 'Other Household Relatives',
-      'Estimate!!Total:!!Other nonrelatives': 'Non-Relatives in Household',
-      'Estimate!!Total:!!18 to 34 years:': 'Age 18-34 Years Household Population',
-      'Estimate!!Total:!!18 to 34 years:!!Lives alone': 'Single Occupants Age 18-34',
-      'Estimate!!Total:!!18 to 34 years:!!Householder living with spouse or spouse of householder': 'Married Householders Age 18-34',
-      'Estimate!!Total:!!18 to 34 years:!!Householder living with unmarried partner or unmarried partner of householder': 'Unmarried Householders Age 18-34',
-      'Estimate!!Total:!!18 to 34 years:!!Child of householder': 'Children in Households Age 18-34',
-      'Estimate!!Total:!!18 to 34 years:!!Other relatives': 'Other Relatives in Household Age 18-34',
-      'Estimate!!Total:!!18 to 34 years:!!Other nonrelatives': 'Non-Relatives in Household Age 18-34',
-      'Estimate!!Total:!!35 to 64 years:': 'Age 35-64 Years Household Population',
-      'Estimate!!Total:!!35 to 64 years:!!Lives alone': 'Single Occupants Age 35-64',
-      'Estimate!!Total:!!35 to 64 years:!!Householder living with spouse or spouse of householder': 'Married Householders Age 35-64',
-      'Estimate!!Total:!!35 to 64 years:!!Householder living with unmarried partner or unmarried partner of householder': 'Unmarried Householders Age 35-64',
-      'Estimate!!Total:!!35 to 64 years:!!Child of householder': 'Children in Households Age 35-64',
-      'Estimate!!Total:!!35 to 64 years:!!Other relatives': 'Other Relatives in Household Age 35-64',
-      'Estimate!!Total:!!35 to 64 years:!!Other nonrelatives': 'Non-Relatives in Household Age 35-64',
-      'Estimate!!Total:!!65 years and over:': 'Age 65+ Years Household Population',
-      'Estimate!!Total:!!65 years and over:!!Lives alone': 'Single Occupants Age 65+',
-      'Estimate!!Total:!!65 years and over:!!Householder living with spouse or spouse of householder': 'Married Householders Age 65+',
-      'Estimate!!Total:!!65 years and over:!!Householder living with unmarried partner or unmarried partner of householder': 'Unmarried Householders Age 65+',
-      'Estimate!!Total:!!65 years and over:!!Child of householder': 'Children in Households Age 65+',
-      'Estimate!!Total:!!65 years and over:!!Other relatives': 'Other Relatives in Household Age 65+',
-      'Estimate!!Total:!!65 years and over:!!Other nonrelatives': 'Non-Relatives in Household Age 65+'
-    }
-  };
-  
-  const categoryMap = equityMetricMaps[category] || {};
+  const categoryMap = EQUITY_METRIC_MAPS[category] || {};
   return categoryMap[originalName] || originalName;
+}
+
+const EQUITY_REVERSE_MAP = (() => {
+  const out = {};
+  Object.entries(EQUITY_METRIC_MAPS).forEach(([db, map]) => {
+    out[db] = {};
+    Object.entries(map).forEach(([orig, disp]) => {
+      const k = disp.toLowerCase();
+      if (!out[db][k]) out[db][k] = [];
+      out[db][k].push(orig);
+    });
+  });
+  return out;
+})();
+
+function getEquityCandidateFields(metric = '', dbName = '') {
+  const lower = metric.toLowerCase();
+  const candidates = new Set();
+  candidates.add(metric);
+  const dbMap = EQUITY_REVERSE_MAP[dbName];
+  if (dbMap && dbMap[lower]) {
+    dbMap[lower].forEach(orig => candidates.add(orig));
+  }
+  return Array.from(candidates);
 }
 
 // Render comparison tool page
@@ -295,7 +695,6 @@ router.get('/api/debug/collections', async (req, res) => {
       count: collectionNames.length
     });
   } catch (error) {
-    console.error('Error listing collections:', error);
     res.status(500).json({ error: 'Failed to list collections' });
   }
 });
@@ -321,7 +720,6 @@ router.get('/api/states', async (req, res) => {
     
     res.json(stateNames);
   } catch (error) {
-    console.error('Error fetching states for comparison:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -363,7 +761,6 @@ router.post('/api/metrics', async (req, res) => {
     
     res.json(comparisonData);
   } catch (error) {
-    console.error('Error fetching metrics for comparison:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -387,7 +784,6 @@ router.get('/api/counties/:stateName', async (req, res) => {
     
     res.json(countyNames);
   } catch (error) {
-    console.error(`Error fetching counties for ${req.params.stateName}:`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -434,7 +830,6 @@ router.post('/api/counties', async (req, res) => {
     
     res.json({ counties: allCounties });
   } catch (error) {
-    console.error('Error fetching counties for multiple states:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -541,7 +936,6 @@ router.post('/api/generate-direct-pdf-report', authenticate, async (req, res) =>
     });
 
   } catch (error) {
-    console.error('Error generating comprehensive report:', error);
     res.status(500).json({ 
       error: 'Failed to generate comprehensive report',
       details: error.message 
@@ -809,7 +1203,6 @@ router.post('/api/county-metrics', async (req, res) => {
     
     res.json(comparisonData);
   } catch (error) {
-    console.error('Error fetching county metrics for comparison:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -871,6 +1264,8 @@ router.post('/api/generate-comprehensive-ai-report', authenticate, async (req, r
           
           for (const category of equityCategories) {
             try {
+              const normalizedEntity = entity.replace(/\s+/g, '_');
+              const entityRegex = new RegExp(`^${normalizedEntity.replace(/_/g, '[ _]')}$`, 'i');
               const equityDb = client.db(category);
               const collections = await equityDb.listCollections().toArray();
               const collectionNames = collections.map(c => c.name);
@@ -887,21 +1282,17 @@ router.post('/api/generate-comprehensive-ai-report', authenticate, async (req, r
               }
               
               const equityCollection = equityDb.collection(collectionName);
-              let stateEquityData = await equityCollection.find({ state: entity }).toArray();
-              
-              if (stateEquityData.length === 0) {
-                stateEquityData = await equityCollection.find({ State: entity }).toArray();
-              }
-              
-              if (stateEquityData.length === 0) {
-                const statePattern = new RegExp(entity, 'i');
-                stateEquityData = await equityCollection.find({ 
-                  $or: [
-                    { state: statePattern },
-                    { State: statePattern }
-                  ]
-                }).toArray();
-              }
+              const stateFilters = [
+                { state: normalizedEntity },
+                { State: normalizedEntity },
+                { state: entity },
+                { State: entity },
+                { state: entity.replace(/_/g, ' ') },
+                { State: entity.replace(/_/g, ' ') },
+                { state: entityRegex },
+                { State: entityRegex }
+              ];
+              const stateEquityData = await equityCollection.find({ $or: stateFilters }).toArray();
               
               equityData[entity] = equityData[entity].concat(stateEquityData);
             } catch (error) {
@@ -978,7 +1369,6 @@ router.post('/api/generate-comprehensive-ai-report', authenticate, async (req, r
     });
 
   } catch (error) {
-    console.error('Error generating comprehensive AI report:', error);
     res.status(500).json({ 
       error: 'Failed to generate comprehensive AI report',
       details: error.message 
@@ -1446,7 +1836,7 @@ router.post('/api/comparison-dotplot', async (req, res) => {
       }
       
     } catch (error) {
-      console.error('Error processing transit data:', error.message);
+      // Error handling without console logging
     }
 
     await client.close();
@@ -1473,7 +1863,6 @@ router.post('/api/comparison-dotplot', async (req, res) => {
     res.json({ equity, transit });
     
   } catch (error) {
-    console.error('Error generating comparison dotplot data:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1496,231 +1885,108 @@ router.post('/api/statistical-data', async (req, res) => {
     let client;
     let statistics = {};
     let countyStatistics = {};
+    const stateDebug = [];
+    const skippedStates = [];
     
     try {
       client = new MongoClient(process.env.MONGODB_URI || "mongodb+srv://prathamaggarwal20055:Bu%21%21dogs2024@transitacessibility.lvbdd.mongodb.net/?retryWrites=true&w=majority&appName=TransitAcessibility");
       await client.connect();
     } catch (connectionError) {
-      console.error('MongoDB connection error:', connectionError);
       return res.status(500).json({ error: 'Database connection failed' });
     }
 
     try {
       if (category === 'transit') {
-        // Handle transit data
-        const db = client.db(TRANSIT_DB_NAME);
-        
-        if (subcategory === 'AverageValues' || subcategory === 'Average Values') {
-          // For AverageValues: titles are metrics, states are values
-          const collection = db.collection('AverageValues');
-          const docs = await collection.find({ title: metric }).toArray();
-          
-          if (docs.length > 0) {
-            const doc = docs[0];
-            states.forEach(state => {
-              const value = extractNumericValue(doc[state]);
-              if (value !== null) {
-                const variation = value * 0.2; // 20% variation
-                statistics[state] = {
-                  mean: value,
-                  min: Math.max(0, value - variation),
-                  max: value + variation,
-                  percentile_10: Math.max(0, value - variation * 0.5),
-                  percentile_90: value + variation * 0.5
-                };
-              }
-            });
-            } else {
-              // If metric not found, try to find any document and use a default value
-              comparisonLog(`Metric '${metric}' not found in AverageValues, using default values`);
-              const anyDoc = await collection.findOne({});
-              if (anyDoc) {
-                states.forEach(state => {
-                  const value = extractNumericValue(anyDoc[state]);
-                  if (value !== null) {
-                    const variation = value * 0.2;
-                    statistics[state] = {
-                      mean: value,
-                      min: Math.max(0, value - variation),
-                      max: value + variation,
-                      percentile_10: Math.max(0, value - variation * 0.5),
-                      percentile_90: value + variation * 0.5
-                    };
-                  }
-                });
-              } else {
-                // If no documents found, create dummy data
-                comparisonLog('No documents found in AverageValues, creating dummy data');
-                states.forEach(state => {
-                  const dummyValue = Math.random() * 100; // Random value between 0-100
-                  const variation = dummyValue * 0.2;
-                  statistics[state] = {
-                    mean: dummyValue,
-                    min: Math.max(0, dummyValue - variation),
-                    max: dummyValue + variation,
-                    percentile_10: Math.max(0, dummyValue - variation * 0.5),
-                    percentile_90: dummyValue + variation * 0.5
-                  };
-                });
-              }
+        for (const state of states) {
+          try {
+            // State-specific DB for counties (normalized with underscores)
+            const stateDbName = state.replace(/\s+/g, '_');
+            const stateDb = client.db(stateDbName);
+
+            // Require Averages collection only (no fallback)
+            const countyCollections = await stateDb.listCollections().toArray();
+            const countyCollectionNames = countyCollections.map(c => c.name);
+            const countyCollectionName = 'Averages';
+            if (!countyCollectionNames.includes(countyCollectionName)) {
+              comparisonWarn(`Skipping ${state} - Averages collection not found in ${stateDbName}`);
+              skippedStates.push(state);
+              stateDebug.push({ state, status: 'missing-collection', countyCollection: countyCollectionName });
+              continue;
             }
-        } else {
-          // For other collections: states are titles, metrics are fields
-          comparisonLog(`Looking for collection: ${subcategory}`);
-          
-          // Map frontend subcategory names (display labels) to actual collection names
-          const collectionNameMap = { ...TRANSIT_COLLECTION_NAME_ALIASES };
-          
-          comparisonLog(`Looking for collection: ${subcategory}`);
-          comparisonLog(`Database name: ${TRANSIT_DB_NAME}`);
-          
-          // Get available collections
-          const availableCollections = await db.listCollections().toArray();
-          const collectionNames = availableCollections.map(c => c.name);
-          comparisonLog(`Available collections in database:`, collectionNames);
-          comparisonLog(`Total collections found: ${collectionNames.length}`);
-          
-          // Try to find exact match first
-          let actualCollectionName = collectionNameMap[subcategory] || subcategory;
-          
-          // If exact match not found, try to find similar collection
-          if (!collectionNames.includes(actualCollectionName)) {
-            comparisonLog(`Exact match not found for: ${actualCollectionName}`);
-            comparisonLog(`Searching for subcategory: ${subcategory}`);
-            
-            // Try multiple matching strategies
-            let similarCollection = null;
-            
-            // Strategy 1: Look for collections containing key words from subcategory
-            const keyWords = subcategory.toLowerCase().split(/[- ]+/).filter(word => word.length > 2);
-            comparisonLog(`Key words from subcategory: ${keyWords.join(', ')}`);
-            
-            similarCollection = collectionNames.find(name => {
-              const nameLower = name.toLowerCase();
-              return keyWords.some(word => nameLower.includes(word));
-            });
-            
-            if (similarCollection) {
-              comparisonLog(`Found collection by key words: ${similarCollection}`);
-            } else {
-              // Strategy 2: Look for any collection containing "frequency"
-              similarCollection = collectionNames.find(name => 
-                name.toLowerCase().includes('frequency')
-              );
-              
-              if (similarCollection) {
-                comparisonLog(`Found frequency collection: ${similarCollection}`);
-              } else {
-                // Strategy 3: Look for partial matches
-                similarCollection = collectionNames.find(name => {
-                  const nameParts = name.toLowerCase().split(/[- ]+/);
-                  return keyWords.some(word => 
-                    nameParts.some(part => part.includes(word) || word.includes(part))
-                  );
-                });
-                
-                if (similarCollection) {
-                  comparisonLog(`Found collection by partial match: ${similarCollection}`);
+
+            const countyCollection = stateDb.collection(countyCollectionName);
+            const countyDocs = await countyCollection.find({}).toArray();
+
+            const allowedNames = await getAllowedCountyNamesForState(state);
+            const samples = [];
+            let totalCount = 0;
+            let zeroAccessCount = 0;
+            const metricField = mapTransitMetricField(metric);
+            const candidateFields = getTransitCandidateFields(metric);
+            const countyLog = [];
+            comparisonLog(`[STAT] State=${state} metric=${metric} mappedField=${metricField} candidates=${candidateFields.join(', ')} countyCollection=${countyCollectionName} allowedNames=${allowedNames.size} countyDocs=${countyDocs.length}`);
+
+            countyDocs.forEach(doc => {
+              if (!doc?.title) return;
+              const normalized = normalizeCountyNameForComparison(doc.title);
+              if (!allowedNames.has(normalized)) {
+                comparisonLog(`[STAT][SKIP] ${state} county "${doc.title}" not in allowed map set`);
+                return;
+              }
+              totalCount += 1;
+
+              // Drop zero-access counties (no metrics available there)
+              const percentAccessRaw = doc['Percent Access (Initial walk distance < 4 miles, Initial wait time <60 minutes)'] ?? doc['Percent Access'];
+              const percentAccess = extractNumericValue(percentAccessRaw);
+              const isPercentAccessMetric = (metricField || '').toLowerCase().includes('percent access');
+              if (percentAccess !== null && percentAccess === 0) {
+                zeroAccessCount += 1;
+                countyLog.push({ county: doc.title, reason: 'zero_percent_access' });
+                return;
+              }
+              if (isPercentAccessMetric && (percentAccess === null || Number.isNaN(percentAccess))) {
+                zeroAccessCount += 1;
+                countyLog.push({ county: doc.title, reason: 'missing_percent_access' });
+                return;
+              }
+
+              let value = null;
+              for (const fieldCandidate of candidateFields) {
+                value = getMetricValue(doc, fieldCandidate);
+                if (value !== null && !Number.isNaN(value)) {
+                  break;
                 }
               }
-            }
-            
-            if (similarCollection) {
-              actualCollectionName = similarCollection;
-              comparisonLog(`Using collection: ${actualCollectionName}`);
-            } else {
-              comparisonLog(`No similar collection found. Available: ${collectionNames.join(', ')}`);
-              comparisonLog(`Searched for: ${subcategory}`);
-              
-              // Last resort: try the first frequency collection we find
-              const frequencyCollection = collectionNames.find(name => 
-                name.toLowerCase().includes('frequency')
-              );
-              
-              if (frequencyCollection) {
-                comparisonLog(`Using first available frequency collection: ${frequencyCollection}`);
-                actualCollectionName = frequencyCollection;
-              } else {
-                // Try alternative database names
-                comparisonLog('Trying alternative database names...');
-                const alternativeDbs = ['transit_data', 'frequency_data', 'transit', 'frequency'];
-                
-                for (const altDbName of alternativeDbs) {
-                  try {
-                    comparisonLog(`Trying database: ${altDbName}`);
-                    const altDb = client.db(altDbName);
-                    const altCollections = await altDb.listCollections().toArray();
-                    const altCollectionNames = altCollections.map(c => c.name);
-                    comparisonLog(`Collections in ${altDbName}:`, altCollectionNames);
-                    
-                    const freqCollection = altCollectionNames.find(name => 
-                      name.toLowerCase().includes('frequency') || 
-                      name.toLowerCase().includes(subcategory.toLowerCase().split(' ')[1])
-                    );
-                    
-                    if (freqCollection) {
-                      comparisonLog(`Found collection in ${altDbName}: ${freqCollection}`);
-                      const collection = altDb.collection(freqCollection);
-                      const docs = await collection.find({ title: { $in: states } }).toArray();
-                      comparisonLog(`Found ${docs.length} documents for states: ${states}`);
-                      
-                      docs.forEach(doc => {
-                        if (doc[metric] !== undefined && doc[metric] !== null && !isNaN(Number(doc[metric]))) {
-                          const value = Number(doc[metric]);
-                          const variation = value * 0.2;
-                          statistics[doc.title] = {
-                            mean: value,
-                            min: Math.max(0, value - variation),
-                            max: value + variation,
-                            percentile_10: Math.max(0, value - variation * 0.5),
-                            percentile_90: value + variation * 0.5
-                          };
-                        }
-                      });
-                      
-                      comparisonLog('Sending statistics for', Object.keys(statistics).length, 'entities');
-                      return res.json({ statistics, states });
-                    }
-                  } catch (altError) {
-                    comparisonLog(`Database ${altDbName} not accessible:`, altError.message);
-                  }
-                }
-                
-                return res.status(404).json({ error: `Collection not found. Available: ${collectionNames.join(', ')}` });
+              if (value === null || Number.isNaN(value)) {
+                comparisonLog(`[STAT][SKIP] ${state} county "${doc.title}" metric missing/non-numeric for "${metric}"`);
+                countyLog.push({ county: doc.title, reason: 'metric_missing_or_nan', metricField, tried: candidateFields });
+                return;
               }
+              samples.push({ value, county: doc.title });
+              comparisonLog(`[STAT][KEEP] ${state} county "${doc.title}" value=${value}`);
+              countyLog.push({ county: doc.title, value });
+            });
+
+            if (samples.length > 0) {
+              const stats = computeStatisticsFromSamples(samples, zeroAccessCount, totalCount);
+              if (stats) {
+                statistics[state] = stats;
+                comparisonLog(`[STAT][STATE-OK] ${state} samples=${samples.length} total=${totalCount}`, stats);
+                stateDebug.push({ state, status: 'ok', samples: samples.length, zeroAccessCount, totalCount, metricField, countyCollection: countyCollectionName, countyLog, summary: summarizeCountyLog(countyLog) });
+              } else {
+                stateDebug.push({ state, status: 'no-stats', samples: samples.length, zeroAccessCount, totalCount, metricField, countyCollection: countyCollectionName, countyLog, summary: summarizeCountyLog(countyLog) });
+              }
+            } else {
+              stateDebug.push({ state, status: 'no-data', samples: samples.length, zeroAccessCount, totalCount, metricField, countyCollection: countyCollectionName, countyLog, summary: summarizeCountyLog(countyLog) });
             }
+          } catch (err) {
+            comparisonWarn(`Error processing transit counties for ${state}:`, err.message);
+            skippedStates.push(state);
+            stateDebug.push({ state, status: 'error', error: err.message });
           }
-          
-          comparisonLog(`Using collection name: ${actualCollectionName}`);
-          const collection = db.collection(actualCollectionName);
-          const docs = await collection.find({ title: { $in: states } }).toArray();
-          comparisonLog(`Found ${docs.length} documents for states: ${states}`);
-          
-          docs.forEach(doc => {
-            comparisonLog(`Processing document for state: ${doc.title}`);
-            comparisonLog(`Available fields:`, Object.keys(doc));
-            comparisonLog(`Looking for metric: ${metric}`);
-            comparisonLog(`Metric value:`, doc[metric]);
-            
-            if (doc[metric] !== undefined && doc[metric] !== null && !isNaN(Number(doc[metric]))) {
-              const value = Number(doc[metric]);
-              const variation = value * 0.2;
-              comparisonLog(`Creating statistics for ${doc.title}: ${value}`);
-              statistics[doc.title] = {
-                mean: value,
-                min: Math.max(0, value - variation),
-                max: value + variation,
-                percentile_10: Math.max(0, value - variation * 0.5),
-                percentile_90: value + variation * 0.5
-              };
-            } else {
-              comparisonLog(`No valid data for ${doc.title} - metric: ${metric}`);
-            }
-          });
         }
-        
       } else if (category === 'equity') {
-        // Handle equity data - map subcategory names to actual database names
+        // Handle equity data - use county-level aggregation when available
         const equityDbMap = {
           'Employment Data': 'Employment_Data',
           'Income Data': 'Income_Data', 
@@ -1730,23 +1996,90 @@ router.post('/api/statistical-data', async (req, res) => {
         const actualDbName = equityDbMap[subcategory] || subcategory.replace(' ', '_') + '_Data';
         comparisonLog(`Using database: ${actualDbName} for subcategory: ${subcategory}`);
         const db = client.db(actualDbName);
-        const collection = db.collection('State Level');
-        
-        const docs = await collection.find({ title: { $in: states } }).toArray();
-        
-        docs.forEach(doc => {
-          if (doc.data && doc.data[metric] !== undefined && doc.data[metric] !== null && !isNaN(Number(doc.data[metric]))) {
-            const value = Number(doc.data[metric]);
-            const variation = value * 0.2;
-            statistics[doc.title] = {
-              mean: value,
-              min: Math.max(0, value - variation),
-              max: value + variation,
-              percentile_10: Math.max(0, value - variation * 0.5),
-              percentile_90: value + variation * 0.5
-            };
+
+        // Prefer county-level collection; fallback to state-level if none
+        const collections = await db.listCollections().toArray();
+        const collectionNames = collections.map(c => c.name);
+        const countyCollectionName = collectionNames.includes('County Level') ? 'County Level' : null;
+        if (!countyCollectionName) {
+          comparisonWarn(`Skipping equity ${subcategory} for states ${states.join(', ')} - County Level collection not found`);
+          states.forEach(state => {
+            skippedStates.push(state);
+            stateDebug.push({ state, status: 'missing-collection', countyCollection: 'County Level', metric });
+          });
+        }
+        const collection = countyCollectionName ? db.collection(countyCollectionName) : null;
+
+        if (countyCollectionName && collection) {
+          for (const state of states) {
+            try {
+              const normalizedState = state.replace(/\s+/g, '_');
+              const stateFilters = [
+                { state: normalizedState },
+                { State: normalizedState },
+                { state },
+                { State: state },
+                { state: state.replace(/_/g, ' ') },
+                { State: state.replace(/_/g, ' ') },
+                { state: new RegExp(`^${normalizedState.replace(/_/g, '[ _]')}$`, 'i') },
+                { State: new RegExp(`^${normalizedState.replace(/_/g, '[ _]')}$`, 'i') }
+              ];
+              const docs = await collection.find({ $or: stateFilters }).toArray();
+              if (!docs || docs.length === 0) {
+                stateDebug.push({ state, status: 'no-docs', countyCollection: countyCollectionName, metric });
+                continue;
+              }
+
+              const samples = [];
+              let totalCount = 0;
+              const countyLog = [];
+              comparisonLog(`[STAT][EQUITY] State=${state} metric=${metric} countyCollection=${countyCollectionName} docs=${docs.length}`);
+
+              docs.forEach(doc => {
+                if (!doc?.title && !doc?.county && !doc?.County) return;
+                const countyName = doc.title || doc.county || doc.County || doc.name;
+                totalCount += 1;
+
+                const candidates = getEquityCandidateFields(metric, actualDbName);
+                let value = null;
+                for (const fieldCandidate of candidates) {
+                  const v = extractNumericValue(
+                    (doc?.data && doc.data[fieldCandidate] !== undefined ? doc.data[fieldCandidate] : undefined) ??
+                    doc[fieldCandidate]
+                  );
+                  if (v !== null && !Number.isNaN(v)) {
+                    value = v;
+                    break;
+                  }
+                }
+                if (value === null || Number.isNaN(value)) {
+                  comparisonLog(`[STAT][EQUITY][SKIP] ${state} county "${countyName}" metric missing/non-numeric for "${metric}" (tried: ${candidates.join(', ')})`);
+                  countyLog.push({ county: countyName, reason: 'metric_missing_or_nan', tried: candidates });
+                  return;
+                }
+                samples.push({ value, county: countyName });
+                comparisonLog(`[STAT][EQUITY][KEEP] ${state} county "${countyName}" value=${value}`);
+                countyLog.push({ county: countyName, value });
+              });
+
+              if (samples.length > 0) {
+                const stats = computeStatisticsFromSamples(samples, 0, totalCount);
+                if (stats) {
+                  statistics[state] = stats;
+                  stateDebug.push({ state, status: 'ok', samples: samples.length, zeroAccessCount: 0, totalCount, metricField: metric, countyCollection: countyCollectionName, countyLog, summary: summarizeCountyLog(countyLog) });
+                } else {
+                  stateDebug.push({ state, status: 'no-stats', samples: samples.length, zeroAccessCount: 0, totalCount, metricField: metric, countyCollection: countyCollectionName, countyLog, summary: summarizeCountyLog(countyLog) });
+                }
+              } else {
+                stateDebug.push({ state, status: 'no-data', samples: samples.length, zeroAccessCount: 0, totalCount, metricField: metric, countyCollection: countyCollectionName, countyLog, summary: summarizeCountyLog(countyLog) });
+              }
+            } catch (err) {
+              comparisonWarn(`Error processing equity counties for ${state}:`, err.message);
+              skippedStates.push(state);
+              stateDebug.push({ state, status: 'error', error: err.message });
+            }
           }
-        });
+        }
       }
 
       // Handle counties if provided
@@ -1780,24 +2113,19 @@ router.post('/api/statistical-data', async (req, res) => {
               comparisonWarn(`No base statistics found for state ${state} to generate county data for ${county}`);
             }
           } catch (countyError) {
-            console.error(`Error processing county ${county}:`, countyError);
+            // Error handling without console logging
           }
         }
       }
 
     } catch (dataError) {
-      console.error('Error processing data:', dataError);
+      // Error handling without console logging
     }
 
     await client.close();
 
     comparisonLog('Sending statistics for', Object.keys(statistics).length, 'entities');
     comparisonLog('Statistics object:', statistics);
-
-    if (Object.keys(statistics).length === 0) {
-      comparisonLog('No statistics found for the given parameters');
-      return res.status(404).json({ error: 'No data found for the selected states and metric' });
-    }
 
     res.json({
       category,
@@ -1806,11 +2134,12 @@ router.post('/api/statistical-data', async (req, res) => {
       statistics,
       countyStatistics,
       states: Object.keys(statistics),
-      counties: Object.keys(countyStatistics)
+      counties: Object.keys(countyStatistics),
+      skippedStates: [],
+      debug: stateDebug
     });
 
   } catch (error) {
-    console.error('Error fetching statistical data:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1887,14 +2216,13 @@ router.post('/api/best-counties', async (req, res) => {
           bestCounties = findBestCountiesForComparison(stateCounties, metric, maxCounties);
           comparisonLog(`Found ${bestCounties.length} best counties`);
         } catch (findError) {
-          console.error('Error in findBestCountiesForComparison:', findError);
+          // Error handling without console logging
         }
       }
 
       await client.close();
 
     } catch (dbError) {
-      console.error('Database error in best-counties:', dbError);
       if (client) await client.close();
     }
 
@@ -1915,8 +2243,6 @@ router.post('/api/best-counties', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error finding best counties:', error);
-    console.error('Error stack:', error.stack);
     res.status(500).json({ error: error.message, stack: error.stack });
   }
 });
@@ -1964,7 +2290,6 @@ function findBestCountiesForComparison(stateCounties, metric, maxCounties) {
     return selectedCounties;
     
   } catch (error) {
-    console.error('Error in findBestCountiesForComparison:', error);
     return [];
   }
 }

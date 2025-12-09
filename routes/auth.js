@@ -76,7 +76,6 @@ router.get('/check-availability', async (req, res) => {
       available: !exists
     });
   } catch (error) {
-    console.error('Availability check error:', error);
     res.status(500).json({ error: 'Unable to check availability right now' });
   }
 });
@@ -120,7 +119,6 @@ router.post('/login', async (req, res) => {
     // Redirect to home page
     res.redirect('/');
   } catch (error) {
-    console.error('Login error:', error);
     res.render('auth/login', { 
       title: 'Login', 
       error: 'An error occurred during login'
@@ -240,7 +238,6 @@ router.post('/signup', async (req, res) => {
     // Redirect to home page
     res.redirect('/');
   } catch (error) {
-    console.error('Signup error:', error);
     res.render('auth/signup', { 
       title: 'Sign Up', 
       error: 'An error occurred during signup: ' + error.message,
@@ -280,7 +277,6 @@ router.post('/refresh', async (req, res) => {
     
     res.json({ success: true });
   } catch (error) {
-    console.error('Token refresh error:', error);
     clearAuthCookies(res);
     res.status(500).json({ error: 'Failed to refresh token' });
   }

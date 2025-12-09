@@ -6,9 +6,6 @@ import crypto from 'crypto';
 const getJWTSecret = () => {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    console.error('⚠️  WARNING: JWT_SECRET is not set in environment variables!');
-    console.error('⚠️  Please add JWT_SECRET to your .env file or Render environment variables.');
-    console.error('⚠️  Application will not work properly without it.');
     process.exit(1);
   }
   return secret;
@@ -42,7 +39,6 @@ export const verifyToken = (token) => {
     const JWT_SECRET = getJWTSecret();
     return jwt.verify(token, JWT_SECRET);
   } catch (error) {
-    console.error('Token verification error:', error.message);
     return null;
   }
 };

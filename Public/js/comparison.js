@@ -13,16 +13,12 @@ let countyModalOpen = false;
 let currentChartData = null; // Store chart data globally for callbacks
 let chartHoverResetCleanup = null;
 
-const COMPARISON_DEBUG = false;
+const COMPARISON_DEBUG = true;
 const comparisonLog = (...args) => {
-  if (COMPARISON_DEBUG) {
-    console.log(...args);
-  }
+  // Removed console logging
 };
 const comparisonWarn = (...args) => {
-  if (COMPARISON_DEBUG) {
-    console.warn(...args);
-  }
+  // Removed console logging
 };
 
 const METRIC_GROUP_COLORS = {
@@ -50,10 +46,19 @@ const METRIC_GROUP_ORDER = [
 
 const DEFAULT_METRIC_COLOR = '#2c41ff';
 
+// Remove frequency collections from transit categories for dot plot selection
+function filterTransitCategories(transitCategories = []) {
+  return (transitCategories || []).filter(cat => {
+    const label = (cat.displayCategory || cat.category || '').toLowerCase();
+    return !label.includes('frequency');
+  });
+}
+
 function getMetricGroup(metricName = '') {
   if (!metricName) return 'Travel Times';
   const normalized = metricName.toLowerCase();
   if (normalized.includes('percent access')) return 'Access';
+  if (normalized.includes('vehicle')) return 'Vehicle Times';
   if (
     normalized.includes('travel time') ||
     normalized.includes('travel duration') ||
@@ -67,7 +72,6 @@ function getMetricGroup(metricName = '') {
   if (normalized.includes('transfer')) return 'Transfers';
   if (normalized.includes('initial')) return 'Initial Journey';
   if (normalized.includes('total')) return 'Total Journey';
-  if (normalized.includes('vehicle')) return 'Vehicle Times';
   if (normalized.includes('sample')) return 'Sample Data';
   return 'Other';
 }
@@ -91,6 +95,20 @@ function applyMetricSelectStyles() {
   const selectedOption = metricSelect.options[metricSelect.selectedIndex];
   const color = selectedOption?.dataset.color || DEFAULT_METRIC_COLOR;
   styleSelectWithColor(metricSelect, color);
+}
+
+function resetChartView() {
+  const canvas = document.getElementById('statisticalChart');
+  const placeholder = document.getElementById('chartPlaceholder');
+  if (statisticalChart) {
+    statisticalChart.destroy();
+    statisticalChart = null;
+  }
+  if (canvas) canvas.style.display = 'none';
+  if (placeholder) {
+    placeholder.style.display = 'flex';
+    placeholder.innerHTML = '<i class="fas fa-chart-line"></i><p>Please select the metrics first</p>';
+  }
 }
 
 function updateChartAccent(color) {
@@ -144,7 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Counties functionality removed - focusing on states only
   } catch (error) {
-    console.error('Error initializing comparison app:', error);
+    // Error handling without console logging
   }
 });
 
@@ -154,7 +172,7 @@ async function loadStates() {
     const response = await fetch('/comparison/api/states');
     availableStates = await response.json();
   } catch (error) {
-    console.error('Error loading states:', error);
+    // Error handling without console logging
   }
 }
 
@@ -168,6 +186,7 @@ function setupEventListeners() {
   if (mainCategorySelect) {
     mainCategorySelect.addEventListener('change', (e) => {
       const category = e.target.value;
+      resetChartView();
       populateSubcategories(category);
       
       // Show subcategory dropdown
@@ -189,6 +208,7 @@ function setupEventListeners() {
     subcategorySelect.addEventListener('change', (e) => {
       const subcategory = e.target.value;
       const mainCategory = mainCategorySelect.value;
+      resetChartView();
       populateMetrics(mainCategory, subcategory);
       
       // Show metric dropdown
@@ -280,50 +300,38 @@ function setupNewComparisonInterface() {
   // Set default selection (Transit Data) and show first dropdown
   if (mainCategorySelect) {
     mainCategorySelect.value = 'transit';
-    populateSubcategories('transit');
-    
-    // Show subcategory dropdown after main category is selected
-    setTimeout(() => {
-      if (subcategorySelect) {
-        subcategorySelect.disabled = false;
-        subcategorySelect.style.display = 'block';
-        
-        // Set default subcategory and populate metrics
-        subcategorySelect.value = 'frequencies';
-        populateMetrics('transit', 'frequencies');
-        
-        // Show metric dropdown after subcategory is selected
-        setTimeout(() => {
-          if (metricSelect) {
-            metricSelect.disabled = false;
-            metricSelect.style.display = 'block';
-            
-            // Set first metric and generate chart
-            setTimeout(() => {
-              const firstMetric = metricSelect.querySelector('option:not([value=""])');
-              if (firstMetric) {
-                metricSelect.value = firstMetric.value;
-                    applyMetricSelectStyles();
-                
-                // Only generate chart if we have states selected
-                if (selectedStates.length > 0) {
-                  generateStatisticalChart();
-                }
-              }
-            }, 100);
+    showCountyControls();
+    populateSubcategories('transit')
+      .then(() => {
+        if (metricSelect) {
+          const firstMetric = metricSelect.querySelector('option:not([value=""])');
+          if (firstMetric && !metricSelect.value) {
+            metricSelect.value = firstMetric.value;
           }
-        }, 100);
-      }
-    }, 100);
+          applyMetricSelectStyles();
+          if (selectedStates.length > 0 && metricSelect.value) {
+            generateStatisticalChart();
+          }
+        }
+      })
+      .catch(error => {
+        // Error handling without console logging
+      });
   }
 }
 
 // Populate subcategories based on main category  
 async function populateSubcategories(category) {
   const subcategorySelect = document.getElementById('subcategorySelect');
+  const metricSelect = document.getElementById('metricSelect');
   if (!subcategorySelect) return;
   
   subcategorySelect.innerHTML = '<option value="">Loading...</option>';
+  if (metricSelect) {
+    metricSelect.innerHTML = '<option value="">Select metric...</option>';
+    metricSelect.disabled = true;
+    metricSelect.style.display = 'none';
+  }
   
   try {
     // Fetch the comparison-dotplot data to get actual categories
@@ -341,16 +349,20 @@ async function populateSubcategories(category) {
     subcategorySelect.innerHTML = '<option value="">Select subcategory...</option>';
     
     if (category === 'equity' && data.equity) {
-      // Use the actual equity categories from the data
       data.equity.forEach(cat => {
         const option = document.createElement('option');
         option.value = cat.category;
         option.textContent = cat.category;
         subcategorySelect.appendChild(option);
       });
+      subcategorySelect.disabled = false;
+      subcategorySelect.style.display = 'block';
     } else if (category === 'transit' && data.transit) {
-      // Use the actual transit collection names from the data
-      data.transit.forEach(cat => {
+      const filteredTransit = filterTransitCategories(data.transit);
+      const transitCategories = filteredTransit.length > 0 ? filteredTransit : data.transit;
+      const hideSubcategory = transitCategories.length <= 1;
+      
+      transitCategories.forEach(cat => {
         const option = document.createElement('option');
         const displayName = cat.displayCategory || cat.category;
         option.value = cat.category;
@@ -358,6 +370,19 @@ async function populateSubcategories(category) {
         option.dataset.displayName = displayName;
         subcategorySelect.appendChild(option);
       });
+
+      const defaultTransitCategory = transitCategories[0];
+      if (defaultTransitCategory) {
+        subcategorySelect.value = defaultTransitCategory.category;
+        if (metricSelect) {
+          metricSelect.disabled = false;
+          metricSelect.style.display = 'block';
+        }
+        await populateMetrics('transit', defaultTransitCategory.category, data);
+      }
+
+      subcategorySelect.disabled = hideSubcategory;
+      subcategorySelect.style.display = hideSubcategory ? 'none' : 'block';
     }
     
     if (subcategorySelect.children.length === 1) {
@@ -365,13 +390,12 @@ async function populateSubcategories(category) {
     }
     
   } catch (error) {
-    console.error('Error loading subcategories:', error);
     subcategorySelect.innerHTML = '<option value="">Error loading categories</option>';
   }
 }
 
 // Populate metrics based on category and subcategory
-async function populateMetrics(category, subcategory) {
+async function populateMetrics(category, subcategory, prefetchedData = null) {
   const metricSelect = document.getElementById('metricSelect');
   if (!metricSelect) return;
   
@@ -379,17 +403,20 @@ async function populateMetrics(category, subcategory) {
   
   try {
     // Fetch metrics from the comparison-dotplot API
-    const response = await fetch('/comparison/api/comparison-dotplot', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        states: selectedStates
-      })
-    });
-    
-    const data = await response.json();
+    let data = prefetchedData;
+    if (!data) {
+      const response = await fetch('/comparison/api/comparison-dotplot', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          states: selectedStates
+        })
+      });
+      data = await response.json();
+    }
+
     metricSelect.innerHTML = '<option value="">Select metric...</option>';
     
     if (category === 'equity' && data.equity) {
@@ -397,7 +424,12 @@ async function populateMetrics(category, subcategory) {
       const equityCategory = data.equity.find(cat => cat.category === subcategory);
       
       if (equityCategory && equityCategory.metrics) {
-        equityCategory.metrics.forEach(metric => {
+        equityCategory.metrics
+          .filter(metric => {
+            const name = (metric.legend || metric.originalLegend || '').toLowerCase();
+            return name !== 'state';
+          })
+          .forEach(metric => {
           const option = document.createElement('option');
           // Use originalLegend for database queries, mapped legend for display
           option.value = metric.originalLegend || metric.legend;
@@ -409,12 +441,18 @@ async function populateMetrics(category, subcategory) {
         });
       }
     } else if (category === 'transit' && data.transit) {
-      // Find the matching transit category by exact name
-      const transitCategory = data.transit.find(cat => cat.category === subcategory);
-      
-      if (transitCategory && transitCategory.metrics) {
+      const filteredTransit = filterTransitCategories(data.transit);
+      const transitCategories = filteredTransit.length > 0 ? filteredTransit : data.transit;
+      const transitCategory = (transitCategories || []).find(cat => cat.category === subcategory);
+      const effectiveTransitCategory = transitCategory || (transitCategories ? transitCategories[0] : null);
+
+      if (effectiveTransitCategory && effectiveTransitCategory.metrics) {
+        const filteredMetrics = (effectiveTransitCategory.metrics || []).filter(metric => {
+          const name = (metric.legend || metric.originalLegend || '').toLowerCase();
+          return !name.includes('sample size');
+        });
         const groupedMetrics = {};
-        transitCategory.metrics.forEach(metric => {
+        filteredMetrics.forEach(metric => {
           const displayName = metric.legend || metric.originalLegend;
           const group = getMetricGroup(displayName);
           if (!groupedMetrics[group]) {
@@ -439,8 +477,11 @@ async function populateMetrics(category, subcategory) {
           });
           
           const optgroup = document.createElement('optgroup');
+          const optgroupColor = METRIC_GROUP_COLORS[group] || DEFAULT_METRIC_COLOR;
           optgroup.label = group;
-          optgroup.dataset.color = METRIC_GROUP_COLORS[group] || DEFAULT_METRIC_COLOR;
+          optgroup.dataset.color = optgroupColor;
+          optgroup.style.backgroundColor = `${optgroupColor}15`;
+          optgroup.style.color = '#000';
           
           metricsInGroup.forEach(metric => {
             const option = document.createElement('option');
@@ -449,7 +490,8 @@ async function populateMetrics(category, subcategory) {
             option.textContent = displayName;
             option.dataset.displayName = displayName;
             option.dataset.group = group;
-            option.dataset.color = METRIC_GROUP_COLORS[group] || DEFAULT_METRIC_COLOR;
+            option.dataset.color = optgroupColor;
+            option.style.color = '#000';
             optgroup.appendChild(option);
           });
           
@@ -458,15 +500,17 @@ async function populateMetrics(category, subcategory) {
       }
     }
     
+    metricSelect.disabled = false;
+    metricSelect.style.display = 'block';
+
     const availableOptions = metricSelect.querySelectorAll('option');
     if (availableOptions.length <= 1) {
       metricSelect.innerHTML = '<option value="">No metrics available</option>';
     } else {
-      applyMetricSelectStyles();
+      // do not auto-select; wait for user selection
     }
     
   } catch (error) {
-    console.error('Error loading metrics:', error);
     metricSelect.innerHTML = '<option value="">Error loading metrics</option>';
   }
 }
@@ -518,7 +562,7 @@ async function fetchStatisticalData(category, subcategory, metric) {
         subcategory,
         metric,
         states: selectedStates,
-        counties: selectedCounties.map(county => county.fullName)
+        counties: []
       })
     });
     
@@ -528,6 +572,7 @@ async function fetchStatisticalData(category, subcategory, metric) {
     
     const data = await response.json();
     comparisonLog('Statistical data received:', data);
+    // Do not alert for skipped states
     
     // Get the mapped metric name from the selected option
     const metricSelect = document.getElementById('metricSelect');
@@ -556,7 +601,6 @@ async function fetchStatisticalData(category, subcategory, metric) {
       comparisonLog('Creating chart with data:', data.statistics);
       createStatisticalChart(data);
     } else {
-      console.error('No statistical data received');
       comparisonLog('Response data:', data);
       // Show placeholder message
       const canvas = document.getElementById('statisticalChart');
@@ -570,7 +614,7 @@ async function fetchStatisticalData(category, subcategory, metric) {
       }
     }
   } catch (error) {
-    console.error('Error fetching statistical data:', error);
+    // Error handling without console logging
   }
 }
 
@@ -580,13 +624,18 @@ async function fetchStatisticalData(category, subcategory, metric) {
 function createStatisticalChart(data) {
   comparisonLog('=== CHART CREATION DEBUG ===');
   comparisonLog('Input data for chart creation:', data);
+  const formatShortNumber = (val) => {
+    const abs = Math.abs(val);
+    if (abs >= 1_000_000) return (val / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (abs >= 1_000) return (val / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return val.toFixed(2);
+  };
   
   const canvas = document.getElementById('statisticalChart');
   const placeholder = document.getElementById('chartPlaceholder');
   const accentColor = data.metricColor || DEFAULT_METRIC_COLOR;
   
   if (!canvas) {
-    console.error('Chart canvas not found');
     return;
   }
   
@@ -621,12 +670,10 @@ function createStatisticalChart(data) {
   
   // Validate chart data
   if (!chartData || !chartData.datasets || chartData.datasets.length === 0) {
-    console.error('Invalid chart data - no datasets found');
     return;
   }
   
   if (!chartData.yLabels || chartData.yLabels.length === 0) {
-    console.error('Invalid chart data - no Y-axis labels found');
     return;
   }
   
@@ -645,15 +692,15 @@ function createStatisticalChart(data) {
   // Calculate required height based on actual Y-axis labels
   const yLabelsCount = chartData.yLabels ? chartData.yLabels.length : 0;
   
-  // Calculate proper height: 60px per entity + generous padding for legends/titles
-  // This ensures all states show without being too cramped or enlarged
-  const entityHeight = 60; // Comfortable spacing per state/county
-  const topPadding = 150; // Space for title and legend at top
-  const bottomPadding = 100; // Space at bottom
+  // Calculate proper height: keep spacing tight but readable
+  const entityHeight = 50; // Comfortable spacing per state/county
+  const topPadding = 140; // Space for title and legend at top
+  const bottomPadding = 150; // Keep x-axis label visible without pushing chart too low
   
-  // Add extra space for x-axis labels after each state (except last one which uses chart's x-axis)
+  // Only add extra spacing between state groups when counties are shown
   const stateCount = selectedStates.length;
-  const xAxisSpacing = Math.max(0, (stateCount - 1) * 30); // Additional space for x-axis labels
+  const hasCountySpacing = selectedCounties && selectedCounties.length > 0;
+  const xAxisSpacing = hasCountySpacing ? Math.max(0, (stateCount - 1) * 30) : 0;
   
   const calculatedChartHeight = (yLabelsCount * entityHeight) + topPadding + bottomPadding + xAxisSpacing;
   
@@ -667,11 +714,12 @@ function createStatisticalChart(data) {
   const chartContainer = document.querySelector('.chart-container-full');
   
   if (chartContainer) {
-    // Container grows to fit all content - no scrollbar needed, all states visible
+    // Allow horizontal scroll if needed for wide ranges
     chartContainer.style.height = `${finalChartHeight}px`;
     chartContainer.style.minHeight = `${finalChartHeight}px`;
     chartContainer.style.maxHeight = 'none';
-    chartContainer.style.overflow = 'visible';
+    chartContainer.style.overflowX = 'auto';
+    chartContainer.style.overflowY = 'visible';
   }
   
   // Canvas matches container - everything fits perfectly
@@ -690,19 +738,20 @@ function createStatisticalChart(data) {
       // Draw range bar for each entity (state/county)
       if (currentChartData && currentChartData.yLabels) {
         currentChartData.yLabels.forEach((label, index) => {
-          if (!label || label === '') return; // Skip empty labels (spacers)
+          if (!label || label === '' || label.startsWith('__gap')) return; // Skip empty/gap labels
           
-          // Get all x values for this y position
+          // Get all x values for this Y index (we now use numeric Y values)
           const yPixel = yAxis.getPixelForValue(index);
           let minValue = Infinity;
           let maxValue = -Infinity;
           
           chart.data.datasets.forEach(dataset => {
-            const point = dataset.data.find(d => d.y === label);
-            if (point && point.x !== undefined) {
-              minValue = Math.min(minValue, point.x);
-              maxValue = Math.max(maxValue, point.x);
-            }
+            (dataset.data || []).forEach(point => {
+              if (point && point.y === index && point.x !== undefined) {
+                minValue = Math.min(minValue, point.x);
+                maxValue = Math.max(maxValue, point.x);
+              }
+            });
           });
           
           if (minValue !== Infinity && maxValue !== -Infinity) {
@@ -742,7 +791,9 @@ function createStatisticalChart(data) {
         });
         
         stateIndices.forEach(gapIndex => {
-          const yPixel = yAxis.getPixelForValue(gapIndex);
+          // Align to pixel grid to avoid fuzziness
+          const rawY = yAxis.getPixelForValue(gapIndex);
+          const yPixel = Math.round(rawY) + 0.5;
           
           ctx.save();
           // Draw x-axis line
@@ -765,7 +816,7 @@ function createStatisticalChart(data) {
           
           for (let i = 0; i < tickCount; i++) {
             const tickValue = xMin + (step * i);
-            const tickX = xAxis.getPixelForValue(tickValue);
+            const tickX = Math.round(xAxis.getPixelForValue(tickValue)) + 0.5;
             
             // Draw tick mark
             ctx.beginPath();
@@ -783,6 +834,23 @@ function createStatisticalChart(data) {
   };
   
   try {
+  // Determine x-axis type and min/max
+  const allValues = (chartData.datasets || []).flatMap(ds => (ds.data || []).map(d => d.x)).filter(v => typeof v === 'number' && !isNaN(v));
+  const minVal = allValues.length ? Math.min(...allValues) : 0;
+  const maxVal = allValues.length ? Math.max(...allValues) : 1;
+  let xAxisType = 'linear';
+  let suggestedMin = 0;
+  let suggestedMax = maxVal;
+  if (data.category === 'equity' && minVal > 0 && maxVal / Math.max(minVal, 1e-6) > 100) {
+    xAxisType = 'logarithmic';
+    suggestedMin = Math.max(minVal * 0.8, 0.0001);
+    suggestedMax = maxVal * 1.1;
+  } else {
+    const range = maxVal - minVal;
+    suggestedMin = 0; // clamp to zero; no negatives
+    suggestedMax = maxVal + range * 0.1;
+  }
+
   statisticalChart = new Chart(canvas, {
     type: 'scatter',
     data: {
@@ -792,6 +860,22 @@ function createStatisticalChart(data) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      devicePixelRatio: Math.max(window.devicePixelRatio || 1, 2), // Fix for blurry/pixelated text
+      onHover: (event, activeElements) => {
+        // Hover event handling
+      },
+      hover: {
+        // Allow hovering slightly around a point; Chart.js will pick
+        // the nearest point, which is now correctly aligned with the
+        // row thanks to numeric Y indices.
+        mode: 'nearest',
+        intersect: false,
+        axis: 'xy',
+        animationDuration: 0
+      },
+      animation: {
+        duration: 0
+      },
       plugins: {
         title: {
           display: true,
@@ -826,6 +910,7 @@ function createStatisticalChart(data) {
           }
         },
         tooltip: {
+          enabled: true,
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           titleColor: '#1a1a1a',
           bodyColor: '#4a4a4a',
@@ -835,6 +920,10 @@ function createStatisticalChart(data) {
           displayColors: true,
           boxWidth: 8,
           boxHeight: 8,
+          // Let Chart.js choose the nearest point to the cursor; with
+          // properly aligned Y values this stays on the correct row.
+          mode: 'nearest',
+          intersect: false,
           bodyFont: {
             size: 12,
             family: "'Inter', 'Arial', sans-serif"
@@ -853,14 +942,30 @@ function createStatisticalChart(data) {
             label: function(context) {
               const value = context.raw.x;
               const type = context.dataset.label;
-              return `${type}: ${value.toFixed(3)}`;
+              const meta = context.raw.meta || {};
+              const lines = [`${type}: ${value.toFixed(3)}`];
+              if (type === 'Minimum' && meta.minCounty) {
+                lines.push(`County: ${meta.minCounty}`);
+              }
+              if (type === 'Maximum' && meta.maxCounty) {
+                lines.push(`County: ${meta.maxCounty}`);
+              }
+              return lines;
+            },
+            footer: function(context) {
+              const raw = context[0]?.raw || {};
+              const meta = raw.meta || {};
+              if (meta.totalCount !== undefined && meta.zeroAccessCount !== undefined) {
+                return `Zero-access counties: ${meta.zeroAccessCount}/${meta.totalCount}`;
+              }
+              return '';
             }
           }
         },
       },
       scales: {
         x: {
-          type: 'linear',
+          type: xAxisType,
           position: 'bottom',
           title: {
             display: true,
@@ -877,7 +982,7 @@ function createStatisticalChart(data) {
           },
           ticks: {
             callback: function(value) {
-              return value.toFixed(2);
+              return formatShortNumber(value);
             },
             font: {
               size: 11,
@@ -899,47 +1004,47 @@ function createStatisticalChart(data) {
             width: 1
           },
           beginAtZero: false,
-          min: function(context) {
-            const values = context.chart.data.datasets.flatMap(dataset => dataset.data.map(point => point.x));
-            const min = Math.min(...values);
-            const range = Math.max(...values) - min;
-            return min - (range * 0.05);
-          },
-          max: function(context) {
-            const values = context.chart.data.datasets.flatMap(dataset => dataset.data.map(point => point.x));
-            const max = Math.max(...values);
-            const range = max - Math.min(...values);
-            return max + (range * 0.05);
-          }
+          suggestedMin,
+          suggestedMax
         },
         y: {
-          type: 'category',
+          // Linear scale with one row per integer index (0, 1, 2, ...).
+          // We keep a half-unit padding above and below so rows don't
+          // sit directly on the chart edges.
+          type: 'linear',
           position: 'left',
+          reverse: true,
           title: {
             display: false
           },
-          labels: chartData.yLabels,
-          offset: true,
           display: true,
-          afterBuildTicks: function(scale) {
-            comparisonLog('=== afterBuildTicks called ===');
-            comparisonLog('Current chart data available:', currentChartData !== null);
-            if (currentChartData && currentChartData.yLabels) {
-              comparisonLog('Building Y-axis ticks with', currentChartData.yLabels.length, 'labels');
-              scale.ticks = currentChartData.yLabels.map((label, index) => ({
-                value: index,
-                label: label
-              }));
-              comparisonLog('Set', scale.ticks.length, 'ticks');
-            } else {
-              console.error('No chart data available for Y-axis ticks');
-            }
-          },
+          min: -0.5,
+          max: (chartData.yLabels ? chartData.yLabels.length - 0.5 : 0.5),
           ticks: {
+            stepSize: 1,
             padding: 10,
+            autoSkip: false,
+            labelOffset: 20,
             font: function(context) {
-              const index = context.index;
-              const entity = currentChartData && currentChartData.allEntities ? currentChartData.allEntities[index] : null;
+              if (!currentChartData || !currentChartData.allEntities) {
+                return {
+                  size: 11,
+                  weight: 'normal',
+                  family: "'Inter', 'Arial', sans-serif"
+                };
+              }
+              
+              // Safety check: ensure tick and value exist
+              if (!context.tick || typeof context.tick.value === 'undefined') {
+                 return {
+                  size: 11,
+                  weight: 'normal',
+                  family: "'Inter', 'Arial', sans-serif"
+                };
+              }
+
+              const index = Math.round(context.tick.value);
+              const entity = currentChartData.allEntities[index];
               
               if (entity && entity.type === 'county') {
                 return {
@@ -962,8 +1067,17 @@ function createStatisticalChart(data) {
               };
             },
             color: function(context) {
-              const index = context.index;
-              const entity = currentChartData && currentChartData.allEntities ? currentChartData.allEntities[index] : null;
+              if (!currentChartData || !currentChartData.allEntities) {
+                return '#4a4a4a';
+              }
+
+              // Safety check: ensure tick and value exist
+              if (!context.tick || typeof context.tick.value === 'undefined') {
+                return '#4a4a4a';
+              }
+
+              const index = Math.round(context.tick.value);
+              const entity = currentChartData.allEntities[index];
               
               if (entity && entity.type === 'county') {
                 return '#666';
@@ -979,12 +1093,20 @@ function createStatisticalChart(data) {
                 return '';
               }
               
-              const label = currentChartData.yLabels[index];
-              const entity = currentChartData.allEntities[index];
-              
-              if (!label || label === '') {
+              const labelIndex = Math.round(value);
+
+              if (labelIndex < 0 || labelIndex >= currentChartData.yLabels.length) {
                 return '';
               }
+              
+              const label = currentChartData.yLabels[labelIndex];
+              
+              // Hide gap labels
+              if (!label || label === '' || label.startsWith('__gap')) {
+                return '';
+              }
+              
+              const entity = currentChartData.allEntities[labelIndex];
               
               if (entity && entity.type === 'county') {
                 const county = selectedCounties.find(c => c.fullName === label);
@@ -997,11 +1119,13 @@ function createStatisticalChart(data) {
             }
           },
           grid: {
+            // Hide the default horizontal grid lines; we draw our own
+            // grey range bars that align exactly with the labels.
             color: '#e5e5e5',
             lineWidth: 1,
-            drawOnChartArea: true,
+            drawOnChartArea: false,
             drawTicks: false,
-            offset: false
+            tickLength: 0
           },
           border: {
             display: true,
@@ -1014,7 +1138,9 @@ function createStatisticalChart(data) {
         padding: {
           top: 20,
           right: 40,
-          bottom: 20,
+          // Extra bottom padding so the last state has clear space
+          // above the x-axis and doesn't feel cramped.
+          bottom: 70,
           left: 20
         }
       },
@@ -1022,17 +1148,23 @@ function createStatisticalChart(data) {
         point: {
           radius: 4.5,
           hoverRadius: 6,
+          // Generous hit radius so hover works reliably even if the
+          // user isn't pixel-perfect.
+          hitRadius: 20,
           borderWidth: 2,
           borderColor: '#fff',
-          hitRadius: 6
         }
       },
       interaction: {
+        // Global interaction: pick the nearest point in X/Y space,
+        // without requiring exact intersection.
         intersect: false,
-        mode: 'nearest'
+        mode: 'nearest',
+        axis: 'xy'
       }
     }
   });
+  renderChartInfoButton(statisticalChart, data.statistics || {}, data.category);
   
   comparisonLog('Chart created successfully');
   comparisonLog('Chart instance:', statisticalChart);
@@ -1064,7 +1196,6 @@ function createStatisticalChart(data) {
   comparisonLog('=== END CHART Y-AXIS DEBUG ===');
   
   } catch (error) {
-    console.error('Error creating chart:', error);
     if (statisticalChart) {
       statisticalChart.destroy();
       statisticalChart = null;
@@ -1085,6 +1216,102 @@ function createStatisticalChart(data) {
     applyCustomYAxisStyling();
     // No scroll indicator needed - all states are visible with dynamic height
   }, 200);
+}
+
+function renderStateInfoPanel() {
+  // deprecated
+}
+
+// Render inline (i) icons next to y-axis labels
+function renderChartInfoButton(chart, statistics, category) {
+  const container = document.querySelector('.chart-container-full');
+  if (!container) return;
+  // Remove existing button
+  container.querySelectorAll('.chart-info-button').forEach(btn => btn.remove());
+  if (category !== 'transit') return;
+  const btn = document.createElement('button');
+  btn.className = 'chart-info-button';
+  btn.textContent = 'ℹ';
+  Object.assign(btn.style, {
+    position: 'absolute',
+    top: '8px',
+    left: '8px',
+    zIndex: 10,
+    width: '22px',
+    height: '22px',
+    borderRadius: '50%',
+    border: '1px solid #ccc',
+      background: '#f5f5f5',
+    cursor: 'pointer',
+    fontSize: '12px',
+    lineHeight: '20px',
+    padding: 0
+  });
+
+  const openModal = () => {
+    const entries = Object.keys(statistics || {}).map(state => {
+      const s = statistics[state] || {};
+      const zero = s.zeroAccessCount ?? 0;
+      const total = s.totalCount ?? 0;
+      return `<div class="chart-info-row"><strong>${state}</strong>: ${zero}/${total} zero-access counties</div>`;
+    });
+    const content = entries.length ? entries.join('') : '<div>No statistics available.</div>';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'chart-info-overlay';
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      background: 'rgba(0,0,0,0.45)',
+      zIndex: 9999,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    });
+
+    const modal = document.createElement('div');
+    Object.assign(modal.style, {
+      background: '#fff',
+      borderRadius: '8px',
+      padding: '16px',
+      minWidth: '260px',
+      maxWidth: '360px',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+      fontSize: '14px',
+      lineHeight: '1.5',
+      position: 'relative'
+    });
+    modal.innerHTML = `
+      <div style="font-weight:600; margin-bottom:8px;">Zero Access Summary</div>
+      <div class="chart-info-body">${content}</div>
+      <button class="chart-info-close" style="position:absolute; top:8px; right:8px; border:none; background:none; font-size:16px; cursor:pointer;">×</button>
+    `;
+
+    modal.querySelector('.chart-info-close').addEventListener('click', () => {
+      overlay.remove();
+    });
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+  };
+
+  btn.addEventListener('click', openModal);
+  container.style.position = container.style.position === 'static' ? 'relative' : container.style.position;
+  container.appendChild(btn);
+}
+
+// Deprecated inline icons (no-op)
+function renderStateInfoIcons() {
+  try {
+  } catch (err) {
+    // Error handling without console logging
+  }
 }
 
 function resetStatisticalChartHover() {
@@ -1183,9 +1410,12 @@ function prepareNewStatisticalChartData(data) {
     });
   }
   
-  // Add initial gap at the start
-  yLabels.push(''); // Gap at start
-  allEntities.push({ name: '', type: 'start-gap' });
+  // Add initial gap only when counties are present (keeps spacing tighter for state-only view)
+  const hasCounties = selectedCounties && selectedCounties.length > 0;
+  if (hasCounties) {
+    yLabels.push('__gap_start'); // Unique gap label
+    allEntities.push({ name: '', type: 'start-gap' });
+  }
   
   // Add states with their counties with proper spacing
   selectedStates.forEach((state, stateIndex) => {
@@ -1194,32 +1424,24 @@ function prepareNewStatisticalChartData(data) {
     const stateEntity = { name: state, type: 'state', hasCounties: false };
     allEntities.push(stateEntity);
     
-    // Add counties for this state
-    if (countiesByState[state] && countiesByState[state].length > 0) {
-      // Mark state as having counties
-      stateEntity.hasCounties = true;
-      
-      countiesByState[state].forEach((county, countyIndex) => {
-        yLabels.push(county.fullName);
-        allEntities.push({ 
-          name: county.fullName, 
-          type: 'county', 
-          state: county.state,
-          countyName: county.name 
-        });
-      });
-    }
-    
-    // Add gap after this state group (except for last state) ONLY if state has counties
-    if (stateIndex < selectedStates.length - 1 && stateEntity.hasCounties) {
-      yLabels.push(''); // Gap between state groups
-      allEntities.push({ name: '', type: 'state-gap' });
-    }
+    // Counties are temporarily disabled in the UI; no county rows added.
   });
   
-  // Add final gap at the end
-  yLabels.push(''); // Gap at end
-  allEntities.push({ name: '', type: 'end-gap' });
+  // Add final gap only when counties are present
+  if (hasCounties) {
+    yLabels.push('__gap_end'); // Unique gap label
+    allEntities.push({ name: '', type: 'end-gap' });
+  }
+
+  // Map each label to its numeric index. We'll use the numeric index
+  // as the actual Y value for all points so that hover, custom grid
+  // drawing, and label rendering are perfectly aligned.
+  const yIndexByLabel = {};
+  yLabels.forEach((label, index) => {
+    if (label && label !== '' && !label.startsWith('__gap')) {
+      yIndexByLabel[label] = index;
+    }
+  });
   
   comparisonLog('=== Y-AXIS LABELS DEBUG ===');
   comparisonLog('Selected states:', selectedStates);
@@ -1250,12 +1472,19 @@ function prepareNewStatisticalChartData(data) {
         comparisonLog(`Processing state: ${state}`);
         comparisonLog(`State data:`, data.statistics[state]);
         if (data.statistics[state] && data.statistics[state][statType.key] !== undefined) {
+          const yIndex = yIndexByLabel[state];
+          if (typeof yIndex !== 'number') {
+            comparisonWarn('No Y index found for state label:', state);
+            return;
+          }
           const pointData = {
             x: data.statistics[state][statType.key],
-            y: state,
+            // Use numeric index for Y so everything stays in sync
+            y: yIndex,
             entity: state,
             type: statType.label,
-            entityType: 'state'
+            entityType: 'state',
+            meta: data.statistics[state]
           };
           comparisonLog(`Adding point for ${state}:`, pointData);
           typeData.push(pointData);
@@ -1271,9 +1500,15 @@ function prepareNewStatisticalChartData(data) {
           comparisonLog(`Processing county: ${countyKey}`);
           comparisonLog(`County data:`, data.countyStatistics[countyKey]);
           if (data.countyStatistics[countyKey] && data.countyStatistics[countyKey][statType.key] !== undefined) {
+            const yIndex = yIndexByLabel[countyKey];
+            if (typeof yIndex !== 'number') {
+              // If we don't have a row for this county, skip plotting it
+              comparisonWarn('No Y index found for county label:', countyKey);
+              return;
+            }
             const pointData = {
               x: data.countyStatistics[countyKey][statType.key],
-              y: countyKey,
+              y: yIndex,
               entity: countyKey,
               type: statType.label,
               entityType: 'county'
@@ -1334,11 +1569,11 @@ function showCountyControls() {
   const addCountyBtn = document.getElementById('addCountyBtn');
   
   if (countyControls) {
-    countyControls.style.display = 'block';
+    countyControls.style.display = 'none';
   }
   
   if (addCountyBtn) {
-    addCountyBtn.disabled = false;
+    addCountyBtn.disabled = true;
   }
   
   // Don't auto-load counties - let user add them manually if needed
@@ -1419,7 +1654,7 @@ async function loadDefaultCounties() {
       generateStatisticalChart();
     }
   } catch (error) {
-    console.error('Error loading default counties:', error);
+    // Error handling without console logging
   }
 }
 
@@ -1457,7 +1692,6 @@ async function loadAvailableCounties() {
     
     renderCountyList();
   } catch (error) {
-    console.error('Error loading counties:', error);
     availableCounties = [];
     renderCountyList();
   }
@@ -1480,15 +1714,25 @@ function renderCountyList() {
   
   // Render counties grouped by state
   Object.keys(countiesByState).forEach(state => {
+    const stateGroup = document.createElement('div');
+    stateGroup.className = 'county-state-group collapsed';
+
     const stateHeader = document.createElement('div');
     stateHeader.className = 'county-state-header';
-    stateHeader.innerHTML = `<strong>${state}</strong> (${countiesByState[state].length} counties)`;
+    stateHeader.innerHTML = `
+      <button type="button" class="toggle-btn" aria-label="Toggle ${state} counties">+</button>
+      <strong>${state}</strong> (${countiesByState[state].length} counties)
+    `;
     stateHeader.style.padding = '12px 16px';
     stateHeader.style.backgroundColor = '#f8f9fa';
     stateHeader.style.fontWeight = 'bold';
     stateHeader.style.borderBottom = '1px solid #e0e0e0';
-    countyList.appendChild(stateHeader);
-    
+    stateGroup.appendChild(stateHeader);
+
+    const countiesContainer = document.createElement('div');
+    countiesContainer.className = 'county-state-body';
+    countiesContainer.style.display = 'none';
+
     countiesByState[state].forEach(county => {
       const countyItem = document.createElement('div');
       countyItem.className = 'county-item';
@@ -1512,7 +1756,21 @@ function renderCountyList() {
       `;
       
       countyItem.addEventListener('click', () => toggleCountySelection(county));
-      countyList.appendChild(countyItem);
+      countiesContainer.appendChild(countyItem);
+    });
+
+    stateGroup.appendChild(countiesContainer);
+    countyList.appendChild(stateGroup);
+
+    stateHeader.addEventListener('click', () => {
+      const isCollapsed = stateGroup.classList.contains('collapsed');
+      stateGroup.classList.toggle('collapsed', !isCollapsed);
+      stateGroup.classList.toggle('expanded', isCollapsed);
+      countiesContainer.style.display = isCollapsed ? 'block' : 'none';
+      const toggleBtn = stateHeader.querySelector('.toggle-btn');
+      if (toggleBtn) {
+        toggleBtn.textContent = isCollapsed ? '−' : '+';
+      }
     });
   });
   
@@ -1618,7 +1876,6 @@ function removeCounty(countyName, stateName) {
 function adjustChartSize() {
   const chartContainer = document.querySelector('.chart-container-full');
   if (!chartContainer) {
-    console.error('Chart container not found!');
     return;
   }
   
@@ -1626,13 +1883,14 @@ function adjustChartSize() {
   const yLabelsCount = currentChartData && currentChartData.yLabels ? currentChartData.yLabels.length : 0;
   
   // Same calculation as in createStatisticalChart
-  const entityHeight = 60; // Comfortable spacing per state/county
-  const topPadding = 150; // Space for title and legend at top
-  const bottomPadding = 100; // Space at bottom
+  const entityHeight = 50; // Comfortable spacing per state/county
+  const topPadding = 140; // Space for title and legend at top
+  const bottomPadding = 150; // Space at bottom for x-axis label
   
-  // Add extra space for x-axis labels after each state (except last one)
+  // Only add extra spacing when counties are shown (state gaps)
   const stateCount = selectedStates.length;
-  const xAxisSpacing = Math.max(0, (stateCount - 1) * 30);
+  const hasCountySpacing = selectedCounties && selectedCounties.length > 0;
+  const xAxisSpacing = hasCountySpacing ? Math.max(0, (stateCount - 1) * 30) : 0;
   
   const calculatedChartHeight = (yLabelsCount * entityHeight) + topPadding + bottomPadding + xAxisSpacing;
   const finalChartHeight = Math.max(500, calculatedChartHeight);
@@ -1676,7 +1934,6 @@ function applyCustomYAxisStyling() {
   comparisonLog('=== APPLYING CUSTOM Y-AXIS STYLING ===');
   
   if (!statisticalChart) {
-    console.error('No statistical chart found for styling');
     return;
   }
   
@@ -1686,7 +1943,6 @@ function applyCustomYAxisStyling() {
   setTimeout(() => {
     const chartContainer = document.querySelector('.chart-container-full');
     if (!chartContainer) {
-      console.error('Chart container not found for styling');
       return;
     }
     

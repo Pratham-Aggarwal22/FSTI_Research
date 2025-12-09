@@ -141,7 +141,8 @@
       <div class="main-content">
         <div class="view-tabs">
           <button id="mapViewTab" class="view-tab active">
-            <i class="fas fa-map-marked-alt"></i> Map View
+            <i class="fas fa-map-marked-alt"></i>
+            <span id="mapViewTabLabel">USA Map</span>
           </button>
           <% if (locals.isAuthenticated) { %>
             <button id="compareStatesButton" class="view-tab">
@@ -174,19 +175,21 @@
         
         <div id="equityComparisonContent" class="equity-comparison-container">
           <div class="equity-state-header">
+            <div class="equity-nav-group">
+              <button id="backToMapFromEquity" class="back-btn">
+                <i class="fas fa-arrow-left"></i>
+                <span id="equityBackLabel">Back to State Map</span>
+              </button>
+              <div class="equity-view-toggle">
+                <button type="button" class="equity-view-btn active" data-view="scatter">
+                  <i class="fas fa-braille"></i> Scatter Plot
+                </button>
+                <button type="button" class="equity-view-btn" data-view="cluster">
+                  <i class="fas fa-project-diagram"></i> Cluster Analysis
+                </button>
+              </div>
+            </div>
             <h2 id="equityStateTitle">Equity Analysis</h2>
-            <button id="backToMapFromEquity" class="back-btn">
-              <i class="fas fa-arrow-left"></i> Back to Map
-            </button>
-          </div>
-          
-          <div class="equity-view-toggle">
-            <button type="button" class="equity-view-btn active" data-view="scatter">
-              <i class="fas fa-braille"></i> Scatter Plot
-            </button>
-            <button type="button" class="equity-view-btn" data-view="cluster">
-              <i class="fas fa-project-diagram"></i> Cluster Analysis
-            </button>
           </div>
           
           <div id="equityScatterView" class="equity-view-section">
@@ -258,19 +261,12 @@
           <div id="equityClusterView" class="equity-view-section" style="display: none;">
             <div class="equity-cluster-layout">
               <div class="equity-cluster-main">
-                <div class="equity-cluster-hint">
-                  <i class="fas fa-info-circle"></i>
-                  <p>Use the controls to refresh the clustered map or switch back to Scatter Plot anytime.</p>
-                  <div class="equity-cluster-actions">
-                    <button type="button" id="equityClusterBackBtn" class="btn-secondary btn-sm">
-                      <i class="fas fa-arrow-left"></i> Back to Scatter Plot
-                    </button>
-                  </div>
-                </div>
+          <div class="equity-cluster-legend-inline">
+            <div id="equityClusterLegendSlot" class="equity-cluster-legend-slot"></div>
+          </div>
                 <div class="equity-cluster-map-host" id="equityClusterMapHost">
                   <div class="equity-cluster-map-frame">
                     <div id="equityClusterMapSlot" class="equity-cluster-map-slot"></div>
-                    <div id="equityClusterLegendSlot" class="equity-cluster-legend-slot"></div>
                   </div>
                 </div>
               </div>
@@ -297,9 +293,6 @@
   <!-- Templates for rendering data panels -->
   <template id="stateDataTemplate">
     <div class="template-header">
-      <button id="backButton" class="back-btn">
-        <i class="fas fa-arrow-left"></i> Back to Map
-      </button>
       <h2 id="stateName" class="data-title"></h2>
     </div>
     
@@ -326,9 +319,6 @@
   <template id="countyDataTemplate">
     <div class="county-fixed-header">
       <div class="template-header">
-        <button id="backToStateButton" class="back-btn">
-          <i class="fas fa-arrow-left"></i> Back to State
-        </button>
         <h2 id="countyName" class="data-title"></h2>
       </div>
       

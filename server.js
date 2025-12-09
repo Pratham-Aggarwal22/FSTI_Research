@@ -12,8 +12,7 @@ const envResult = dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Debug: Check if .env was loaded
 if (envResult.error) {
-  console.warn('⚠️  .env file not found or error loading it:', envResult.error.message);
-  console.warn('⚠️  Make sure .env file exists in the project root directory');
+  // Error handling without console logging
 }
 
 import express from 'express';
@@ -29,10 +28,11 @@ import authRoutes from './routes/auth.js';
 import comparisonRoutes from './routes/comparison.js';
 
 // Import middleware
-import { isGuestRoute, authenticate } from './middleware/auth.js';
+import { isGuestRoute } from './middleware/auth.js';
 
 // Import chatbot service
 import ChatbotService from './services/chatbot/index.js';
+import ChatLog from './models/ChatLog.js';
 
 // Import JWT utilities
 import { verifyToken } from './utils/jwt.js';
@@ -92,7 +92,7 @@ mongoose.connect(process.env.MONGODB_URI || uri, {
 }).then(() => {
   // Connected to MongoDB for authentication
 }).catch(err => {
-  console.error('❌ MongoDB authentication error:', err);
+  // Error handling without console logging
 });
 
 async function connectToMongoDB() {
@@ -100,7 +100,6 @@ async function connectToMongoDB() {
     await client.connect();
     return client.db(dbName);
   } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
     process.exit(1);
   }
 }
@@ -180,7 +179,6 @@ app.get('/api/averageValues', async (req, res) => {
     const formattedData = formatNumberInObject(data);
     res.json(formattedData);
   } catch (error) {
-    console.error('Error fetching average values:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -246,7 +244,6 @@ app.get('/api/frequencyDistributions/:stateName', async (req, res) => {
     }
     res.json(result);
   } catch (error) {
-    console.error(`Error fetching frequency distributions for ${req.params.stateName}:`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -529,7 +526,9 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+startServer().catch(() => {
+  // Error handling without console logging
+});
 
 process.on('SIGINT', async () => {
   await client.close();
@@ -560,8 +559,8 @@ async function getChatbotService() {
   return chatbotServiceInstance;
 }
 
-// Chatbot endpoint (requires authentication)
-app.post('/api/chatbot', authenticate, async (req, res) => {
+// Chatbot endpoint (authentication required)
+app.post('/api/chatbot', async (req, res) => {
   const { message, context } = req.body || {};
 
   try {
@@ -572,12 +571,48 @@ app.post('/api/chatbot', authenticate, async (req, res) => {
       });
     }
 
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        narrative: 'Login required to use the chatbot.'
+      });
+    }
+
+    let chatLog = await ChatLog.findOne({ 
+        userId: req.user._id, 
+        closed: false 
+    });
+
+    if (!chatLog) {
+        chatLog = new ChatLog({
+            userId: req.user._id,
+            username: req.user.username,
+            messages: []
+        });
+    }
+
+    // Save user message
+    chatLog.messages.push({
+        sender: 'user',
+        content: message
+    });
+
     const chatbot = await getChatbotService();
     const response = await chatbot.handleChat({
       user: req.user,
       message,
       context
     });
+
+    // Save bot message
+    if (response.success && response.narrative) {
+        chatLog.messages.push({
+            sender: 'bot',
+            content: response.narrative
+        });
+    }
+
+    await chatLog.save();
 
     res.json(response);
   } catch (error) {
@@ -586,5 +621,28 @@ app.post('/api/chatbot', authenticate, async (req, res) => {
       narrative: 'Sorry, I encountered an error. Please try again.',
       error: error.message
     });
+  }
+});
+
+// Chatbot close endpoint
+app.post('/api/chatbot/close', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: "Login required" });
+    }
+    
+    await ChatLog.updateMany(
+      { userId: req.user._id, closed: false },
+      { 
+        $set: { 
+          closed: true, 
+          endTime: new Date() 
+        } 
+      }
+    );
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -3,50 +3,18 @@
 class FloatingChatbot {
   constructor() {
     this.isOpen = false;
-    this.isAuthenticated = false;
+    this.isAuthenticated = true;
     this.messages = [];
     this.init();
   }
 
   init() {
-    // Check if user is authenticated
-    this.checkAuthentication();
-    
     // Create chatbot UI
     this.createChatbotUI();
     
     // Setup event listeners
     this.setupEventListeners();
-    
-    // Show welcome message if authenticated
-    if (this.isAuthenticated) {
-      this.showWelcomeMessage();
-    }
-  }
-
-  checkAuthentication() {
-    // Check if user is authenticated from server-provided state or cookie
-    // First check if there's a data attribute on the body
-    const bodyAuth = document.body.getAttribute('data-authenticated');
-    if (bodyAuth === 'true') {
-      this.isAuthenticated = true;
-      return;
-    }
-    
-    // Fallback: check cookie
-    this.isAuthenticated = document.cookie.includes('access_token');
-    
-    // Also check for the cookie with proper parsing
-    if (!this.isAuthenticated) {
-      const cookies = document.cookie.split(';');
-      for (let cookie of cookies) {
-        const [name, value] = cookie.trim().split('=');
-        if (name === 'access_token' && value) {
-          this.isAuthenticated = true;
-          break;
-        }
-      }
-    }
+    this.showWelcomeMessage();
   }
 
   createChatbotUI() {
@@ -61,12 +29,7 @@ class FloatingChatbot {
     const window = document.createElement('div');
     window.className = 'floating-chatbot-window';
     window.id = 'floatingChatbotWindow';
-    
-    if (this.isAuthenticated) {
-      window.innerHTML = this.getAuthenticatedChatbotHTML();
-    } else {
-      window.innerHTML = this.getUnauthenticatedChatbotHTML();
-    }
+    window.innerHTML = this.getAuthenticatedChatbotHTML();
     
     document.body.appendChild(window);
   }
@@ -84,26 +47,14 @@ class FloatingChatbot {
           </div>
         </div>
         <div class="floating-chatbot-actions">
-          <button class="floating-chatbot-action-btn" id="minimizeChatbot" title="Minimize">
-            <i class="fas fa-minus"></i>
+          <button class="floating-chatbot-action-btn" id="closeChatbot" title="Close">
+            <i class="fas fa-times"></i>
           </button>
         </div>
       </div>
       
       <div class="floating-chatbot-messages" id="floatingChatbotMessages">
         <!-- Messages will be added here -->
-      </div>
-      
-      <div class="floating-quick-suggestions" id="quickSuggestions">
-        <button class="floating-quick-suggestion-btn" data-query="Tell me about California transit">
-          California transit
-        </button>
-        <button class="floating-quick-suggestion-btn" data-query="Compare New York and Texas">
-          Compare states
-        </button>
-        <button class="floating-quick-suggestion-btn" data-query="Show me equity data for Los Angeles County">
-          County equity
-        </button>
       </div>
       
       <div class="floating-chatbot-input-container">
@@ -120,95 +71,53 @@ class FloatingChatbot {
     `;
   }
 
-  getUnauthenticatedChatbotHTML() {
-    return `
-      <div class="floating-chatbot-header">
-        <div class="floating-chatbot-header-content">
-          <div class="floating-chatbot-avatar">
-            <i class="fas fa-robot"></i>
-          </div>
-          <div class="floating-chatbot-title">
-            <h3>TransitHub AI</h3>
-            <p>Login to chat with AI</p>
-          </div>
-        </div>
-        <div class="floating-chatbot-actions">
-          <button class="floating-chatbot-action-btn" id="minimizeChatbot" title="Close">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-      </div>
-      
-      <div class="floating-chatbot-login-prompt">
-        <i class="fas fa-lock"></i>
-        <h3>Login Required</h3>
-        <p>Please log in to use the TransitHub AI Assistant and get insights about transit accessibility and equity data.</p>
-        <a href="/auth/login" class="floating-chatbot-login-btn">
-          <i class="fas fa-sign-in-alt"></i>
-          Login to Continue
-        </a>
-      </div>
-    `;
-  }
-
   setupEventListeners() {
     // Toggle chatbot window
     const trigger = document.getElementById('floatingChatbotTrigger');
     trigger.addEventListener('click', () => this.toggleChatbot());
 
     // Minimize/close button
-    const minimizeBtn = document.getElementById('minimizeChatbot');
-    if (minimizeBtn) {
-      minimizeBtn.addEventListener('click', () => this.toggleChatbot());
+    const closeBtn = document.getElementById('closeChatbot');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => this.closeChatbot());
     }
 
-    if (this.isAuthenticated) {
-      // Send message on Enter or button click
-      const input = document.getElementById('floatingChatbotInput');
-      const sendBtn = document.getElementById('floatingChatbotSend');
+    // Send message on Enter or button click
+    const input = document.getElementById('floatingChatbotInput');
+    const sendBtn = document.getElementById('floatingChatbotSend');
 
-      input.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          this.sendMessage();
-        }
-      });
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.sendMessage();
+      }
+    });
 
-      sendBtn.addEventListener('click', () => this.sendMessage());
+    sendBtn.addEventListener('click', () => this.sendMessage());
+  }
 
-      // Quick suggestions
-      const suggestions = document.querySelectorAll('.floating-quick-suggestion-btn');
-      suggestions.forEach(btn => {
-        btn.addEventListener('click', () => {
-          const query = btn.getAttribute('data-query');
-          document.getElementById('floatingChatbotInput').value = query;
-          this.sendMessage();
-        });
-      });
+  async closeChatbot() {
+    if (this.isOpen) {
+        this.toggleChatbot();
+    }
+    
+    // Call close endpoint
+    try {
+        await fetch('/api/chatbot/close', { method: 'POST' });
+    } catch (e) {
+        // Error handling without console logging
+    }
+
+    // Clear messages
+    this.messages = [];
+    const messagesContainer = document.getElementById('floatingChatbotMessages');
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+        this.showWelcomeMessage(); 
     }
   }
 
   toggleChatbot() {
-    // Re-check authentication when opening
-    if (!this.isOpen) {
-      this.checkAuthentication();
-      
-      // If authentication state changed, recreate the UI
-      const chatbotWindow = document.getElementById('floatingChatbotWindow');
-      const wasAuthenticated = chatbotWindow && chatbotWindow.querySelector('.floating-chatbot-input-container');
-      
-      if (this.isAuthenticated && !wasAuthenticated) {
-        // User just logged in, recreate the UI
-        chatbotWindow.innerHTML = this.getAuthenticatedChatbotHTML();
-        this.setupEventListeners();
-        this.showWelcomeMessage();
-      } else if (!this.isAuthenticated && wasAuthenticated) {
-        // User logged out, show login prompt
-        chatbotWindow.innerHTML = this.getUnauthenticatedChatbotHTML();
-        this.setupEventListeners();
-      }
-    }
-    
     this.isOpen = !this.isOpen;
     const chatbotWindow = document.getElementById('floatingChatbotWindow');
     const trigger = document.getElementById('floatingChatbotTrigger');
@@ -218,15 +127,12 @@ class FloatingChatbot {
       trigger.classList.add('active');
       trigger.innerHTML = '<i class="fas fa-times"></i>';
       
-      // Focus input if authenticated
-      if (this.isAuthenticated) {
-        setTimeout(() => {
-          const input = document.getElementById('floatingChatbotInput');
-          if (input) {
-            input.focus();
-          }
-        }, 300);
-      }
+      setTimeout(() => {
+        const input = document.getElementById('floatingChatbotInput');
+        if (input) {
+          input.focus();
+        }
+      }, 300);
     } else {
       chatbotWindow.classList.remove('open');
       trigger.classList.remove('active');
@@ -237,9 +143,17 @@ class FloatingChatbot {
   showWelcomeMessage() {
     const messagesContainer = document.getElementById('floatingChatbotMessages');
     const welcomeHTML = `
-      <div class="floating-welcome-message">
+      <div class="floating-welcome-message" id="floatingWelcomeMessage">
         <h4><i class="fas fa-sparkles"></i> Welcome to TransitHub AI!</h4>
-        <p>I can help you explore transit accessibility and equity data. Ask me about specific states, counties, or compare different regions!</p>
+        <p>I can help you explore transit accessibility and equity data. Feel free to ask about specific states, counties, or compare different regions!</p>
+        
+        <div class="floating-welcome-attention">
+          <div class="attention-header">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Attention</span>
+          </div>
+          <p>This chatbot is currently in training and may produce inaccurate information (hallucinations). Please verify answers with the website data. Additionally, conversation history is not saved—please provide full context for each new question.</p>
+        </div>
       </div>
     `;
     messagesContainer.innerHTML = welcomeHTML;
@@ -252,6 +166,12 @@ class FloatingChatbot {
 
     if (!message) return;
 
+    // Remove welcome message if it exists
+    const welcomeMessage = document.getElementById('floatingWelcomeMessage');
+    if (welcomeMessage) {
+        welcomeMessage.remove();
+    }
+
     // Add user message
     this.addMessage(message, 'user');
     
@@ -261,12 +181,6 @@ class FloatingChatbot {
 
     // Show typing indicator
     this.showTypingIndicator();
-
-    // Hide quick suggestions after first message
-    const suggestions = document.getElementById('quickSuggestions');
-    if (suggestions) {
-      suggestions.style.display = 'none';
-    }
 
     try {
       // Send to backend
@@ -285,11 +199,7 @@ class FloatingChatbot {
       this.hideTypingIndicator();
 
       const botContent = result.narrative || result.message || (result.success ? 'I was unable to generate a response.' : 'Sorry, I encountered an error.');
-      const botMessageEl = this.addMessage(botContent, 'bot', { isError: !result.success });
-
-      if (result.showDetails && botMessageEl) {
-        this.attachDetails(botMessageEl, result.showDetails);
-      }
+      this.addMessage(botContent, 'bot', { isError: !result.success });
 
     } catch (error) {
       this.hideTypingIndicator();
@@ -390,10 +300,12 @@ class FloatingChatbot {
         <i class="fas fa-robot"></i>
       </div>
       <div class="floating-chat-message-content">
-        <div class="floating-typing-indicator">
-          <div class="floating-typing-dot"></div>
-          <div class="floating-typing-dot"></div>
-          <div class="floating-typing-dot"></div>
+        <div class="transit-thinking-container">
+          <div class="transit-line"></div>
+          <div class="transit-bus">
+            <i class="fas fa-bus"></i>
+          </div>
+          <span class="transit-thinking-text">Thinking...</span>
         </div>
       </div>
     `;
@@ -418,43 +330,17 @@ class FloatingChatbot {
       selectedMetric: typeof selectedMetric !== 'undefined' ? selectedMetric : null
     };
   }
-
-  attachDetails(messageDiv, details) {
-    if (!messageDiv || !details) return;
-
-    try {
-      const detailsContainer = document.createElement('div');
-      detailsContainer.className = 'floating-chatbot-details';
-
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'floating-chatbot-details-toggle';
-      toggleBtn.type = 'button';
-      toggleBtn.textContent = 'Show details';
-
-      const detailsBody = document.createElement('pre');
-      detailsBody.className = 'floating-chatbot-details-body';
-      detailsBody.textContent = JSON.stringify(details, null, 2);
-      detailsBody.style.display = 'none';
-
-      toggleBtn.addEventListener('click', () => {
-        const isHidden = detailsBody.style.display === 'none';
-        detailsBody.style.display = isHidden ? 'block' : 'none';
-        toggleBtn.textContent = isHidden ? 'Hide details' : 'Show details';
-      });
-
-      detailsContainer.appendChild(toggleBtn);
-      detailsContainer.appendChild(detailsBody);
-      messageDiv.appendChild(detailsContainer);
-    } catch (error) {
-      // Failed to attach details
-    }
-  }
 }
 
 // Initialize chatbot when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   // Wait a bit for the page to fully load
   setTimeout(() => {
+    // Check if logged in
+    const isAuthenticated = document.body.getAttribute('data-authenticated') === 'true';
+    if (!isAuthenticated) {
+        return;
+    }
     window.floatingChatbot = new FloatingChatbot();
     
     // Add pulse animation to trigger button after 3 seconds
