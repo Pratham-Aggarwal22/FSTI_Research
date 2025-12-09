@@ -366,22 +366,22 @@ const CLUSTER_REFERENCE_POINTS = {
 
 const CLUSTER_TYPE_DETAILS = {
   critical: {
-    label: 'High Need + Poor Service',
+    label: 'Higher Need + Worst Service',
     color: '#D94352',
     description: 'High equity vulnerability with limited transit performance'
   },
   synergy: {
-    label: 'High Need + Good Service',
+    label: 'Higher Need + Better Service',
     color: '#F4C361',
     description: 'High equity need supported by strong transit performance'
   },
   service_gap: {
-    label: 'Low Need + Poor Service',
+    label: 'Lower Need + Worst Service',
     color: '#4F80FF',
     description: 'Lower equity need but underperforming transit service'
   },
   high_access: {
-    label: 'Low Need + Good Service',
+    label: 'Lower Need + Better Service',
     color: '#35A574',
     description: 'Lower equity need with high-performing transit access'
   }
